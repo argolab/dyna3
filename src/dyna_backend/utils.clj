@@ -20,8 +20,11 @@
 
 ;; doall forces the loop to not be lazy, which creates the functions
 (doall (for [i (range 1 7)
-      func (make-function-depth i)]
-  (eval (make-cr-function func))))
+             func (make-function-depth i)]
+         (eval (make-cr-function func))))
+
+
+(defn ??? [] (throw (RuntimeException. "Not Implemented")))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

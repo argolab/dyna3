@@ -9,6 +9,10 @@
   (get-children [this])
   )
 
+;; the annotation on a variable can be one of
+;;; :var, :rexpr, :var-list, :rexpr-list
+;;; other annotations are ignored for the time being
+
 (defmacro def-base-rexpr [name args]
   (let [vargroup (partition 2 args)
         rname (str name "-rexpr")]
@@ -16,8 +20,16 @@
        (deftype ~(symbol rname) ~(vec (map cdar vargroup))
        Rexpr
        ~'(primitive-rexpr [this] this) ;; this is a primitive expression so we are going to just always return ourselves
-       (~'get-variables ~'[this] (list ~@(map cdar (filter #(= :var (car %1)) vargroup))))
-       (~'get-children ~'[this] (list ~@(map cdar (filter #(= :rexpr (car %1)) vargroup))))
+       (~'get-variables ~'[this]
+        (concat
+         (list ~@(map cdar (filter #(= :var (car %1)) vargroup)))
+         ~@(map cdar (filter #(= :var-list (car %1))) vargroup)
+         ))
+       (~'get-children ~'[this]
+        (concat
+         (list ~@(map cdar (filter #(= :rexpr (car %1)) vargroup)))
+         ~@(map cdar (filter (#= :rexpr-list (car %1)) vargroup))
+         ))
        )
        (defn ~(symbol (str "make-" name)) ~(vec (map cdar vargroup))
          (~(symbol (str rname ".")) ~@(map cdar vargroup)))
@@ -31,31 +43,72 @@
 
 (def-base-rexpr multiplicity [:mult m])
 
-(deftype *-rexpr [args]
-  Rexpr
-  (primitive-rexpr [this] this)
-  (get-variables [this] ())
-  (get-children [this] args))
+(def-base-rexpr * [:rexpr-list args])
 
-(defn make-*
-  ([] (make-multiplicity 1))
-  ([x] x)
-  ([x y & args] (*-rexpr. (concat (list x y) args))))
+;; (deftype *-rexpr [args]
+;;   Rexpr
+;;   (primitive-rexpr [this] this)
+;;   (get-variables [this] ())
+;;   (get-children [this] args))
+
+;; (defn make-*
+;;   ([] (make-multiplicity 1))
+;;   ([x] x)
+;;   ([x y & args] (*-rexpr. (concat (list x y) args))))
 
 (def make-conjunct make-*)
 
-(deftype +-rexpr [args]
-  Rexpr
-  (primitive-rexpr [this] this)
-  (get-variables [this] ())
-  (get-children [this] args))
+(def-base-rexpr + [:rexpr-list args])
 
-(defn make-+
-  ([] (make-multiplicity 0))
-  ([x] x)
-  ([x y & args] (+-rexpr. (concat (list x y) args))))
+;; (deftype +-rexpr [args]
+;;   Rexpr
+;;   (primitive-rexpr [this] this)
+;;   (get-variables [this] ())
+;;   (get-children [this] args))
+
+;; (defn make-+
+;;   ([] (make-multiplicity 0))
+;;   ([x] x)
+;;   ([x y & args] (+-rexpr. (concat (list x y) args))))
 
 (def make-disjunct make-+)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; things like variables and constants should instead be some other type rather than an R-expr
+;; this could be something
+
+(defprotocol RexprValue
+  (get-value [this context])
+  (set-value! [this context value])
+  (is-bound? [this context])
+  )
+
+(deftype variable-rexpr [varname]
+    RexprValue
+    ;; using (.get-value ...) is calling a method on the class
+    (get-value [this context] (.get-value context this))
+    (set-value! [this context value] ())
+    (is-bound? [this context] (.is-bound? context this))
+  )
+
+;; there should be some version of bound/unbound variables which are designed to access slots in the expression
+
+(deftype cosntant-variable-rexpr [value]
+  RexprValue
+  (get-value [this context] value)
+  (set-value! [this context value] (throw (RuntimeException. "attempting to set the value of a constant")))
+  (is-bound? [this context] true)
+  )
+
+;; should the structured types have their own thing for how their are represented
+;; though these will want to have some e
+(deftype structured-rexpr [name arguments]
+  RexprValue
+  (get-value [this context] (???))
+  (set-value! [this context value] (???))
+  (is-bound? [this context] (???)))
+
+
 
 (deftype variable-rexpr [varname]
   Rexpr
@@ -68,7 +121,7 @@
 
 (defn is-variable? [x] (instance? variable-rexpr x))
 
-(deftype constant-value-rexpr [value]
+(deftype constant-value-rexpr [:value value]
   Rexpr
   (primitive-rexpr [this] this)
   (get-variables [this] (list this))
@@ -78,6 +131,8 @@
   (constant-value-rexpr. val))
 
 (defn is-constant? [x] (instance? constant-value-rexpr x))
+
+;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def-base-rexpr unify [:var a
                        :var b])
@@ -93,6 +148,25 @@
 (def-base-rexpr if [:rexpr cond
                     :rexpr true-branch
                     :rexpr false-branch])
+
+
+;; an optimized version of aggregation which does projection and the aggregation in the same operator
+;; the aggregator outer should only have a list of aggregator-op-inner as its arguments
+(def-base-rexpr aggregator-op-outer [:str operator
+                                     :var result
+                                     :rexpr bodies])
+
+(def-base-rexpr aggregator-op-inner [:var incoming
+                                     :var-list projected
+                                     :rexpr body])
+
+;; multiple levels of matching variables should also be a thing that was
+;; integrated into the aggregator before, or the disjunction included that it
+;; was matching the expression
+
+(def-base-rexpr +-op [:var-list disjunction-variables
+                      :rexpr base-expr
+                      :rexpr-list bodies])
 
 
 (load "rewrites")
