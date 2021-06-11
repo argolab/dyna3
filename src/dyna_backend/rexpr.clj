@@ -7,15 +7,19 @@
   ;;(replace-expressions [this expressions-map]) ;; replace a given nested expression
   (get-variables [this])
   (get-children [this])
+  (as-list [this])
   )
 
 ;; the annotation on a variable can be one of
 ;;; :var, :rexpr, :var-list, :rexpr-list
 ;;; other annotations are ignored for the time being
 
-(defmacro def-base-rexpr [name args]
+(def rexpr-containers (atom #{}))
+
+(defmacro def-base-rexpr [name args & optional]
   (let [vargroup (partition 2 args)
-        rname (str name "-rexpr")]
+        rname (str name "-rexpr")
+        opt (if (not (nil? optional)) (vec optional) [])]
     `(do
        (deftype ~(symbol rname) ~(vec (map cdar vargroup))
        Rexpr
@@ -23,16 +27,29 @@
        (~'get-variables ~'[this]
         (concat
          (list ~@(map cdar (filter #(= :var (car %1)) vargroup)))
-         ~@(map cdar (filter #(= :var-list (car %1))) vargroup)
+         ~@(map cdar (filter #(= :var-list (car %1)) vargroup))
          ))
        (~'get-children ~'[this]
         (concat
          (list ~@(map cdar (filter #(= :rexpr (car %1)) vargroup)))
-         ~@(map cdar (filter (#= :rexpr-list (car %1)) vargroup))
+         ~@(map cdar (filter #(= :rexpr-list (car %1)) vargroup))
          ))
+       (~'as-list ~'[this]
+        (list 'test ;(quote ~(symbol name))
+              ;; ~@(for [v vargroup]
+              ;;     (case (car v)
+              ;;       ;; :rexpr `(as-list ~(cdar v))
+              ;;       ;; :rexpr-list `(map as-list ~(cdar v))
+              ;;       "test"
+              ;;       ;(cdar v)
+              ;;       ))))
+              ))
        )
        (defn ~(symbol (str "make-" name)) ~(vec (map cdar vargroup))
          (~(symbol (str rname ".")) ~@(map cdar vargroup)))
+       (defmethod print-method ~(symbol rname) ~'[this ^java.io.Writer w]
+         (aprint.core/aprint (as-list ~'this) ~'w))
+       ;(swap! rexpr-containers conj ~(symbol name))
        )))
 
 (defn make-structure [name args]
@@ -43,7 +60,7 @@
 
 (def-base-rexpr multiplicity [:mult m])
 
-(def-base-rexpr * [:rexpr-list args])
+(def-base-rexpr conjunct [:rexpr-list args])
 
 ;; (deftype *-rexpr [args]
 ;;   Rexpr
@@ -56,9 +73,10 @@
 ;;   ([x] x)
 ;;   ([x y & args] (*-rexpr. (concat (list x y) args))))
 
-(def make-conjunct make-*)
 
-(def-base-rexpr + [:rexpr-list args])
+(def make-* make-conjunct)
+
+(def-base-rexpr disjunct [:rexpr-list args])
 
 ;; (deftype +-rexpr [args]
 ;;   Rexpr
@@ -71,7 +89,7 @@
 ;;   ([x] x)
 ;;   ([x y & args] (+-rexpr. (concat (list x y) args))))
 
-(def make-disjunct make-+)
+(def make-+ make-disjunct)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; things like variables and constants should instead be some other type rather than an R-expr
@@ -121,7 +139,7 @@
 
 (defn is-variable? [x] (instance? variable-rexpr x))
 
-(deftype constant-value-rexpr [:value value]
+(deftype constant-value-rexpr [value]
   Rexpr
   (primitive-rexpr [this] this)
   (get-variables [this] (list this))
@@ -169,5 +187,6 @@
                       :rexpr-list bodies])
 
 
+;(load "context")
 (load "rewrites")
 (load "rexpr_builtins")

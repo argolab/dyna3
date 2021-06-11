@@ -5,8 +5,8 @@
 (defn- make-cr-function-body [args]
   (if (= args "") 'x
       (case (subs args 0 1)
-        "a" `(first ~(make-cr-function-body (subs args 1)))
-        "d" `(rest ~(make-cr-function-body (subs args 1))))))
+        "a" `(clojure.core/first ~(make-cr-function-body (subs args 1)))
+        "d" `(clojure.core/rest ~(make-cr-function-body (subs args 1))))))
 
 (defn- make-cr-function [args]
   `(defn ~(symbol (str "c" args "r")) ~'[x]
@@ -65,11 +65,24 @@
           :else r)))
 
 (defn add-function-argument [functions argument body]
-  (cond (list? body) (let [ags (map (partial add-function-argument functions argument) body)]
+  (cond (list? body) (let [ags (map (partial add-function-argument functions argument) (cdr body))]
                        (if (.contains functions (car body))
-                         (concat (car body) argument ags)
-                         (concat (car body) ags)))
+                         (concat (list (car body) argument) ags)
+                         (cons (car body) ags)))
         ;; though this map might return different type
         (or (vector? body) (set? body)) (map-same-type (partial add-function-argument functions argument) body)
         (map? body) (into {} (map (fn [[name b]] [name (add-function-argument functions argument b)]) body))
+        :else body))
+
+
+
+;; this function runs every call through resolve which thing it should be
+;; though this does not improve the efficiency of the runtime at all as this still goes through with resolving lots of fields anytime it
+;; attempts to call a function
+(defn resolve-functions [body env]
+  (cond (list? body)
+        (concat (list (or (resolve env (car body)) (car body)))
+                (map #(resolve-functions %1 env) (cdr body)))
+        (vector? body) (vector (map #(resolve-functions %1 env) body))
+        ;; there shouldn't be anything else that needs to get mapped here
         :else body))
