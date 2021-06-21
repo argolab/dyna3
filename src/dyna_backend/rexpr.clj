@@ -46,7 +46,9 @@
               ))
        )
        (defn ~(symbol (str "make-" name)) ~(vec (map cdar vargroup))
-         (~(symbol (str rname ".")) ~@(map cdar vargroup)))
+         (let [ret (~(symbol (str rname ".")) ~@(map cdar vargroup))]
+           (simplify-construct ret)
+           ))
        (defmethod print-method ~(symbol rname) ~'[this ^java.io.Writer w]
          (aprint.core/aprint (as-list ~'this) ~'w))
        ;(swap! rexpr-containers conj ~(symbol name))

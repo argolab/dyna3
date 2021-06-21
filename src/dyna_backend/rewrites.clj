@@ -78,24 +78,25 @@
     ))
 
 ;; this should mask out the variable and introduce a new context variable which is for the nested context
-(defmacro rewrite-context [& args]
-  `(let ~'[&context (make-nested-context &context)]
+(defmacro rewrite-context [rexpr & args]
+  `(let [~'&context (~'make-nested-context ~'&context ~rexpr)]
      ~@args))
-
-
-
 
 (defn is-variable? [&context variable]
   (instance? variable-rexpr))
 
 (defn is-variable-set? [&context variable]
-  false)
-
-(defn get-variable-value [&context variable]
-  nil)
+  (or (instance? constant-value-rexpr variable)
+      (.is-bound? &context variable)))
 
 (defn is-constant? [&context variable]
   (instance? constant-value-rexpr variable))
+
+(defn get-variable-value [&context variable]
+  (if (instance? constant-value-rexpr variable)
+    (.value variable)
+    (.get-value &context variable)))
+
 
 ;; (defn simplify
 ;;   ([rexpr] (let [context (make-empty-context rexpr)]
@@ -108,8 +109,28 @@
 ;;    (???))))
 
 (defn simplify
-  ([rexpr]  (simplify (make-empty-context rexpr) rexpr))
-  ([context rexpr] (???)))
+  [rexpr]
+
+  rexpr)
+  ;; ([rexpr]  (let [ctx (make-empty-context rexpr)]
+  ;;             (bind-context ctx
+  ;;                           (simplify ctx rexpr))))
+  ;; ([context rexpr]
+
+  ;;  ;; the rewrite that it will want to match for a given expression
+
+  ;;  ;; there should be different modes which are some of the expressions which might
+  ;;  (???)))
+
+
+;; simplification which takes place a construction time
+(defn simplify-construct [rexpr]
+  rexpr)
+
+(defn simplify-top [rexpr]
+  (let [ctx (make-empty-context rexpr)]
+    (bind-context ctx
+                  (simplify rexpr))))
 
 ;; there should be some matcher which is going to identify which expression.
 ;; this would have some which expressions are the expressions
@@ -137,9 +158,12 @@
 
 ;; something that has a name first followed by a number of different unified expressions
 (def-rewrite-matcher :structured [rexpr]
+
   (and (not (is-variable? rexpr))
        (not (instance? Rexpr rexpr))
        (or (list? rexpr) (vector? rexpr))))
+;; this could have that there is some meta-data that is contained in the context
+;; then this will have to look at those values
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -203,7 +227,7 @@
 
 (def-rewrite
   :match (if (:rexpr A) (:rexpr B) (:rexpr C)) ;; with the (:match pattern being something that allows it to select the correct matcher for a given expression
-  (let [rr (rewrite-context
+  (let [rr (rewrite-context A
             (simplify A))]
     ;; this is going to need to have some rewrite context which masks out the current value
     nil

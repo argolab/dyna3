@@ -3,15 +3,20 @@ LEIN := $(shell which lein 2>/dev/null > /dev/null && echo lein || { if [ ! -f .
 SOURCE=$(wildcard src/*/*.clj)
 TARGET=target/dyna_backend-0.1.0-SNAPSHOT-standalone.jar
 
-.PHONY: clean all repl
+.PHONY: clean all repl test
 
 all: $(TARGET)
-
-$(TARGET): $(SOURCE)
-	$(LEIN) uberjar
 
 clean:
 	rm -rf target/
 
 repl: clean
 	$(LEIN) repl
+
+test:
+	$(LEIN) test
+
+
+
+$(TARGET): $(SOURCE)
+	$(LEIN) uberjar

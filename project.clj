@@ -8,5 +8,5 @@
                  [aprint "0.1.3"]
                  [clj-python/libpython-clj "2.00-beta-22"]]
   :repl-options {:init-ns dyna-backend.core}
-  :aot :all
+;  :aot :all
   )
