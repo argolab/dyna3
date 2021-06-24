@@ -1,13 +1,21 @@
 (ns dyna-backend.rexpr
-    (:require [dyna-backend.utils :refer :all]))
+  (:require [dyna-backend.utils :refer :all])
+  (:require [dyna-backend.context :refer [*context*]]))
 
+
+(declare simplify)
+(declare simplify-construct)
+
+(defn simplify-construct [r] r)
 
 (defprotocol Rexpr
   (primitive-rexpr [this]) ;; return a primitive r-expr for the expression
   ;;(replace-expressions [this expressions-map]) ;; replace a given nested expression
   (get-variables [this])
   (get-children [this])
-  (as-list [this])
+  (get-argument [this n])
+  (get-arguments [this])
+  (as-list [this]) ; use for printing out the structure
   )
 
 ;; the annotation on a variable can be one of
@@ -34,24 +42,22 @@
          (list ~@(map cdar (filter #(= :rexpr (car %1)) vargroup)))
          ~@(map cdar (filter #(= :rexpr-list (car %1)) vargroup))
          ))
+       (~'get-argument ~'[this n] (nth ~(vec (map cdar vargroup)) ~'n))
+       (~'get-arguments ~'[this] ~(vec (map cdar vargroup)))
+
        (~'as-list ~'[this]
-        (list 'test ;(quote ~(symbol name))
-              ;; ~@(for [v vargroup]
-              ;;     (case (car v)
-              ;;       ;; :rexpr `(as-list ~(cdar v))
-              ;;       ;; :rexpr-list `(map as-list ~(cdar v))
-              ;;       "test"
-              ;;       ;(cdar v)
-              ;;       ))))
-              ))
+               (list (quote ~(symbol name))
+                     ~@(for [v vargroup]
+                         (case (car v)
+                           :rexpr `(as-list ~(cdar v))
+                           :rexpr-list `(map as-list ~(cdar v))
+                           (cdar v)
+                           ))))
        )
        (defn ~(symbol (str "make-" name)) ~(vec (map cdar vargroup))
-         (let [ret (~(symbol (str rname ".")) ~@(map cdar vargroup))]
-           (simplify-construct ret)
-           ))
+         (simplify-construct (~(symbol (str rname ".")) ~@(map cdar vargroup))))
        (defmethod print-method ~(symbol rname) ~'[this ^java.io.Writer w]
          (aprint.core/aprint (as-list ~'this) ~'w))
-       ;(swap! rexpr-containers conj ~(symbol name))
        )))
 
 (defn make-structure [name args]
@@ -98,35 +104,35 @@
 ;; this could be something
 
 (defprotocol RexprValue
-  (get-value [this context])
-  (set-value! [this context value])
-  (is-bound? [this context])
+  (get-value [this ])
+  (set-value! [this value])
+  (is-bound? [this ])
   )
 
 (deftype variable-rexpr [varname]
     RexprValue
     ;; using (.get-value ...) is calling a method on the class
-    (get-value [this context] (.get-value context this))
-    (set-value! [this context value] ())
-    (is-bound? [this context] (.is-bound? context this))
+    (get-value [this] (.get-value *context* this))
+    (set-value! [this  value] ())
+    (is-bound? [this] (.is-bound?  this))
   )
 
 ;; there should be some version of bound/unbound variables which are designed to access slots in the expression
 
 (deftype cosntant-variable-rexpr [value]
   RexprValue
-  (get-value [this context] value)
-  (set-value! [this context value] (throw (RuntimeException. "attempting to set the value of a constant")))
-  (is-bound? [this context] true)
+  (get-value [this] value)
+  (set-value! [this  value] (throw (RuntimeException. "attempting to set the value of a constant")))
+  (is-bound? [this] true)
   )
 
 ;; should the structured types have their own thing for how their are represented
 ;; though these will want to have some e
 (deftype structured-rexpr [name arguments]
   RexprValue
-  (get-value [this context] (???))
-  (set-value! [this context value] (???))
-  (is-bound? [this context] (???)))
+  (get-value [this ] (???))
+  (set-value! [this  value] (???))
+  (is-bound? [this ] (???)))
 
 
 

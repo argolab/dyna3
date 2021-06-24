@@ -12,6 +12,8 @@
   (all-rexprs [this])
   )
 
+;; this is the current context which is dynamically rebound depending on what is currently running
+;; this means that we are not passing this value around, which simplifies the calling api a bit
 (def ^:dynamic *context*)
 
 (deftype context
@@ -47,4 +49,4 @@
 
 (defmacro bind-context [val & args]
   `(binding [*context* val]
-     @args))
+     ~@args))
