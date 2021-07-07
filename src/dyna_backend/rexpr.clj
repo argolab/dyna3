@@ -1,6 +1,7 @@
 (ns dyna-backend.rexpr
   (:require [dyna-backend.utils :refer :all])
-  (:require [dyna-backend.context :refer [*context*]]))
+  (:require [dyna-backend.context :refer [*context*]])
+  (:require [dyna-backend.UnificationFailure :refer :all]))
 
 
 (declare simplify)
@@ -54,7 +55,13 @@
                            (cdar v)
                            ))))
        )
-       (defn ~(symbol (str "make-" name)) ~(vec (map cdar vargroup))
+       (defn ~(symbol (str "make-" name))
+         {:rexpr-constructor (quote ~name)
+          :rexpr-constructor-type ~(symbol rname)}
+         ~(vec (map cdar vargroup))
+         (assert (and
+                  ~@(map (fn [x] `(~(resolve (symbol (str "check-argument-" (symbol (car x))))) ~(cdar x)))
+                        vargroup)))
          (simplify-construct (~(symbol (str rname ".")) ~@(map cdar vargroup))))
        (defmethod print-method ~(symbol rname) ~'[this ^java.io.Writer w]
          (aprint.core/aprint (as-list ~'this) ~'w))
@@ -64,6 +71,78 @@
   `(~name ~@args))
 
 (def ^:const null-term (make-structure '$null []))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; things like variables and constants should instead be some other type rather than an R-expr
+;; this could be something
+
+(defprotocol RexprValue
+  (get-value [this])
+  (set-value! [this value])
+  (is-bound? [this ])
+  )
+
+(deftype variable-rexpr [varname]
+    RexprValue
+    ;; using (.get-value ...) is calling a method on the class
+    (get-value [this] (.get-value *context* this))
+    (set-value! [this  value] (.set-value! *context* this value))
+    (is-bound? [this] (.is-bound? *context* this))
+  )
+
+;; there should be some version of bound/unbound variables which are designed to access slots in the expression
+
+(deftype constant-value-rexpr [value]
+  RexprValue
+  (get-value [this] value)
+  (set-value! [this  v]
+    (if (not= v value)
+      (throw (RuntimeException. "attempting to set the value of a constant"))))
+  (is-bound? [this] true)
+  )
+
+;; should the structured types have their own thing for how their are represented
+;; though these will want to have some e
+(deftype structured-rexpr [name arguments]
+  RexprValue
+  (get-value [this]
+    ;; this is going to have to construct the structure for this
+    ;; which means that it has to get all of the values, and then flatten it to a structure
+    (make-structure name (map (fn [x] (.get-value *context* x)) arguments))
+    )
+  (set-value! [this v]
+    (if (or (not= (car v) name) (not= (+ 1 (count arguments)) (count v)))
+      nil;(throw (Unification
+    ))
+  (is-bound? [this]
+    (every? (fn [x] (.is-bound? *context* x)) arguments)))
+
+
+;; (deftype constant-value-rexpr [value]
+;;   RexprValue
+;;   (get-value [this] value)
+;;   (set-value
+
+;;   (primitive-rexpr [this] this)
+;;   (get-variables [this] (list this))
+;;   (get-children [this] ()))
+
+
+(defn is-constant? [x] (instance? constant-value-rexpr x))
+(defn is-variable? [variable]
+  (instance? variable-rexpr variable))
+
+(defn is-rexpr? [rexpr]
+  (and (instance? Rexpr rexpr)
+       (not (or (is-variable? rexpr) (is-constant? rexpr)))))
+
+(defn check-argument-mult [x] (int? x))
+(defn check-argument-rexpr [x] (is-rexpr? x))
+(defn check-argument-rexpr-list [x] (every? is-rexpr? x))
+(defn check-argument-var [x] (or (is-variable? x) (is-constant? x)))
+(defn check-argument-var-list [x] (every? is-variable? x))
+(defn check-argument-str [x] (string? x))
 
 
 (def-base-rexpr multiplicity [:mult m])
@@ -99,64 +178,26 @@
 
 (def make-+ make-disjunct)
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; things like variables and constants should instead be some other type rather than an R-expr
-;; this could be something
-
-(defprotocol RexprValue
-  (get-value [this ])
-  (set-value! [this value])
-  (is-bound? [this ])
-  )
-
-(deftype variable-rexpr [varname]
-    RexprValue
-    ;; using (.get-value ...) is calling a method on the class
-    (get-value [this] (.get-value *context* this))
-    (set-value! [this  value] ())
-    (is-bound? [this] (.is-bound?  this))
-  )
-
-;; there should be some version of bound/unbound variables which are designed to access slots in the expression
-
-(deftype cosntant-variable-rexpr [value]
-  RexprValue
-  (get-value [this] value)
-  (set-value! [this  value] (throw (RuntimeException. "attempting to set the value of a constant")))
-  (is-bound? [this] true)
-  )
-
-;; should the structured types have their own thing for how their are represented
-;; though these will want to have some e
-(deftype structured-rexpr [name arguments]
-  RexprValue
-  (get-value [this ] (???))
-  (set-value! [this  value] (???))
-  (is-bound? [this ] (???)))
 
 
-
-(deftype variable-rexpr [varname]
-  Rexpr
-  (primitive-rexpr [this] this)
-  (get-variables [this] (list this))
-  (get-children [this] ()))
+;; (deftype variable-rexpr [varname]
+;;   Rexpr
+;;   (primitive-rexpr [this] this)
+;;   (get-variables [this] (list this))
+;;   (get-children [this] ()))
 
 (defn make-variable [varname]
   (variable-rexpr. varname))
 
-(defn is-variable? [x] (instance? variable-rexpr x))
-
-(deftype constant-value-rexpr [value]
-  Rexpr
-  (primitive-rexpr [this] this)
-  (get-variables [this] (list this))
-  (get-children [this] ()))
+(defmethod print-method variable-rexpr [this ^java.io.Writer w]
+  (.write w (str "(variable " (.value this) ")")))
 
 (defn make-constant [val]
   (constant-value-rexpr. val))
 
-(defn is-constant? [x] (instance? constant-value-rexpr x))
+(defmethod print-method constant-value-rexpr [this ^java.io.Writer w]
+  (.write w (str "(constant " (.value this) ")")))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;
 

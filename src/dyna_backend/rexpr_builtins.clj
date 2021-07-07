@@ -19,7 +19,7 @@
       (reduce union (map get-variables-in-expression (cdr expression)))
       #{ })))
 
-(defn- construct-rewrite-for-expression [name nargs body]
+(defn construct-rewrite-for-expression [name nargs body]
   (let [all-vars (map #(symbol (str "v" %)) (range nargs))
         all-ground (= (car body) :allground)
         required-ground (if all-ground
@@ -34,30 +34,31 @@
         ;;                       ()
         ;;                       (list (car body)))
 
-  `(def-rewrite
+    `(def-rewrite
        :match (~name ~@(for [var all-vars]
                          (if (.contains required-ground var)
-                           `(:ground ~var)
-                           ~(:free ~var))))
-       :grounding ~all-vars
+                           `(:ground ~(symbol (str "g" var)))
+                           `(:free ~var))))
+
+       ;;:grounding ~all-vars
        :run-at :standard
-       :resulting ()  ; might be nice to know what the resulting form of this rewrite should be
+       ;;:resulting ()  ; might be nice to know what the resulting form of this rewrite should be
 
-     ~(if all-ground
-        `(if ~(cdar body)
-           (multiplicity 1)
-           (multiplicity 0))
-        `(make-unify ~(car body) ~(cdar body)))
-     )
-  )
-
-
-  nil)
+     (let ~(vec (apply concat
+                       (for [v required-ground]
+                         `[~v (.get-value ~(symbol (str "g" v)))])))
+       ~(if all-ground
+          `(if ~(cdar body)
+             (make-multiplicity 1)
+             (make-multiplicity 0))
+          `(make-unify ~(car body) ~(cdar body)))
+       ))
+    ))
 
 
 
 (defmacro def-builtin-rexpr [name nargs & rewrites]
-  (print "hello this is here\n")
+  ;(print "hello this is here\n")
   (doall (for [rr rewrites]
            (construct-rewrite-for-expression name nargs rr)))
 
@@ -79,10 +80,15 @@
 
   ;; there should only ever be 1 variable which is free, this means that this expression is rewritten for an expression
   ;; this would have some of the expression
+
+
   (v2 (+ v0 v1))  ;; assign some value to a variable using the existing variables
   (v1 (- v2 v0))
   (v0 (- v2 v1))
   )
+
+
+
 
 (def-builtin-rexpr times 3
   (:allground (= v2 (* v0 v1)))

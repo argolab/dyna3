@@ -19,7 +19,7 @@
         (str l s))))
 
 ;; doall forces the loop to not be lazy, which creates the functions
-(doall (for [i (range 1 7)
+(doall (for [i (range 1 10)
              func (make-function-depth i)]
          (eval (make-cr-function func))))
 

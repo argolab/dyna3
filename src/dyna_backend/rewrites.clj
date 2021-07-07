@@ -63,7 +63,7 @@
   (let [n-args (- (count matcher) 1)
         ;args (for [_ (range n-args)] (gensym))
         named-args (for [v (cdr matcher)]
-                     (if (list? v)
+                     (if (seq? v) ;; if this is something like (:ground v0) then we just want the v0 part
                        (cdar v)
                        v))
         ]
@@ -72,14 +72,12 @@
          (if (and ~@(map (fn [arg mat]
                            `(~(get @rexpr-matchers mat mat)
                              ~arg)) named-args (for [m (cdr matcher)]
-                                                 (if (list? m) (car m) m))))
+                                                 (if (seq? m) (car m) m))))
+           ; call the implementation of the rewrite function
            (do ~body)
-           ~'rexpr ; if there is no matched rewrite, then this can return either the rexpr back again, or nil?
-           )
-         )
-       )
-    )
-  )
+           ; return that there is nothing
+           nil)
+         ))))
 
 
 (defmacro def-rewrite [& args]
@@ -91,31 +89,15 @@
         rewriter-function (make-rewriter-function matcher rewrite)
         ]
 
-
     ;; this is going to have to identify which expressions are going to do the matching, then it will find which expressions
 
+    ;; todo: this needs to handle the other kinds of times when we want to do the rewrites
     (if (= (:run-at kw-args :standard) :standard)
       `(save-defined-rewrite
         ~(symbol (str functor-name "-rexpr"))
         ~rewriter-function
         ))
-
-    ;; `(save-defined-rewrite
-    ;;   ~(symbol (str functor-name "-rexpr"))  ;; this should be the type
-    ;;   (fn ~'[x] nil)
-    ;;   (fn ~'[x] 123)
-    ;;   )
-
-
     ))
-
-;; this should mask out the variable and introduce a new context variable which is for the nested context
-;; (defmacro rewrite-context [rexpr & args]
-;;   `(let [~'&context (~'make-nested-context ~'&context ~rexpr)]
-;;      ~@args))
-
-(defn is-variable? [variable]
-  (instance? variable-rexpr))
 
 (defn is-variable-set? [variable]
   (or (instance? constant-value-rexpr variable)
@@ -130,16 +112,6 @@
     (.get-value *context* variable)))
 
 
-;; (defn simplify
-;;   ([rexpr] (let [context (make-empty-context rexpr)]
-;;              (simplify context rexpr))
-;;    ([context rexpr]
-;;    ;; this needs to find some rewrite and apply it to the rexpr
-
-
-;;    (print "taking multiple arguments")
-;;    (???))))
-
 (defn simplify
   [rexpr]
   ;; this should just match the given type and identify if there are rewrites defined for this
@@ -148,10 +120,11 @@
         rrs (.get @rexpr-rewrites typ)]
     (if (nil? rrs)
       rexpr ;; there is nothing here so we are just going to return the r-expr unmodified
-      (or (first (filter (complement nil?))
+      (or (first (filter (complement nil?)
                  (for [rw rrs]
                    (let [res (rw rexpr)]
-                     (if (not= res rexpr) res)))) rexpr))))
+                     (if (not= rexpr res) res)))))
+          rexpr))))
 
 ;; simplification which takes place a construction time
 ;; (defn simplify-construct [rexpr]
@@ -177,9 +150,6 @@
 (def-rewrite-matcher :free [var-name]
   (and (is-variable? var-name) (not (is-variable-set? var-name)) var-name))
 
-(defn is-rexpr? [rexpr]
-  (and (instance? Rexpr rexpr)
-       (not (or (is-variable? rexpr) (is-constant? rexpr)))))
 
 (def-rewrite-matcher :rexpr [rexpr] (is-rexpr? rexpr))
 
