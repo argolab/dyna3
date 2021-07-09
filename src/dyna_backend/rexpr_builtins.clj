@@ -51,7 +51,7 @@
           `(if ~(cdar body)
              (make-multiplicity 1)
              (make-multiplicity 0))
-          `(make-unify ~(car body) ~(cdar body)))
+          `(make-unify ~(car body) (make-constant ~(cdar body))))
        ))
     ))
 

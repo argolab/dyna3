@@ -25,14 +25,14 @@
   RContext
   (get-rexpr [this] root-rexpr)
   (get-value [this variable]
-    (if (.contains value-map variable)
-      (.get value-map variable)
+    (if (contains? value-map variable)
+      (get value-map variable)
       (and (not (nil? parent)) (.get-value parent variable))))
   (is-bound? [this variable]
-    (or (.contains value-map variable)
+    (or (contains? value-map variable)
         (and (not (nil? parent)) (is-bound? parent variable))))
   (set-value! [this variable value]
-    (set! value-map (assoc variable value)))
+    (set! value-map (assoc value-map variable value)))
   (add-rexpr! [this rexpr]
     (set! rexprs (conj rexprs rexpr)))
   (all-rexprs [this]
@@ -47,6 +47,12 @@
 (defn make-nested-context [&context rexpr]
   (context. &context rexpr #{rexpr} {}))
 
+(defn make-nested-context-introduce-variable [&context rexpr variable]
+  ;; this needs to somehow manage that there is a new context, which means that when
+  ;; this context is destroyed, it should save the result of the expression
+  (assert false)
+  (context. &context rexpr #{rexpr} {}))
+
 (defmacro bind-context [val & args]
-  `(binding [*context* val]
+  `(binding [*context* ~val]
      ~@args))

@@ -19,31 +19,32 @@
 ;;     })
 
 (def rexpr-matchers (atom {}))
+(def rexpr-matchers-meta (atom {}))
 
 (def rexpr-rewrites (atom {}))
+(def rexpr-rewrites-construct (atom {}))
 
 ;; we are going to have to have different collections depending on when the rewrite is run at
 
-(def rewrite-run-at
-  { :construction {}
-    :standard {}
-    :complete {}  })
+;; (def rewrite-run-at
+;;   { :construction {}
+;;     :standard {}
+;;     :complete {}  })
 
 (defmacro def-rewrite-matcher [name var body]
-  `(swap! rexpr-matchers assoc (quote ~name)
-          ;(with-meta
-          (fn ~var ~body)
-          ;; for some reason, with the macro expansion, the meta-data causes it to fail
-  ;;           {:matcher-name (quote ~name)
-  ;;            :matcher-args (quote ~var)
-  ;;            :matcher-body (quote ~body)})
-  ;; )
-))
-
+  `(do (swap! rexpr-matchers assoc (quote ~name)
+              (fn ~var ~body))
+       ;; when putting the meta information directly onto the function
+       ;; then it seems that it creates a new object, so it is not able to pass the pointer
+       ;; to the function as the first argument
+       (swap! rexpr-matchers-meta assoc (quote ~name)
+              {:matcher-name (quote ~name)
+               :matcher-args (quote ~var)
+               :matcher-body (quote ~body)})))
 
 (defn save-defined-rewrite
-  [functor-name rewriter]
-  (swap-vals! rexpr-rewrites
+  [collection functor-name rewriter]
+  (swap-vals! collection
               (fn [old] (assoc old functor-name
                                (conj (get old functor-name #{}) rewriter))))
   )
@@ -92,16 +93,17 @@
     ;; this is going to have to identify which expressions are going to do the matching, then it will find which expressions
 
     ;; todo: this needs to handle the other kinds of times when we want to do the rewrites
-    (if (= (:run-at kw-args :standard) :standard)
-      `(save-defined-rewrite
-        ~(symbol (str functor-name "-rexpr"))
-        ~rewriter-function
-        ))
-    ))
+    `(save-defined-rewrite
+      ~(case (:run-at kw-args :standard)
+         :standard 'rexpr-rewrites
+         :construction 'rexpr-rewrites-construct)
+      ~(symbol (str functor-name "-rexpr"))
+      ~rewriter-function
+      )))
 
 (defn is-variable-set? [variable]
   (or (instance? constant-value-rexpr variable)
-      (.is-bound? *context* variable)))
+      (is-bound? *context* variable)))
 
 (defn is-constant? [variable]
   (instance? constant-value-rexpr variable))
@@ -109,7 +111,7 @@
 (defn get-variable-value [variable]
   (if (instance? constant-value-rexpr variable)
     (.value variable)
-    (.get-value *context* variable)))
+    (get-value *context* variable)))
 
 
 (defn simplify
@@ -125,6 +127,18 @@
                    (let [res (rw rexpr)]
                      (if (not= rexpr res) res)))))
           rexpr))))
+
+(defn simplify-construct [rexpr]
+  (let [typ (type rexpr)
+        rrs (.get @rexpr-rewrites-construct typ)]
+    (if (nil? rrs)
+      rexpr
+      (or (first (filter (complement nil?)
+                         (for [rw rrs]
+                           (let [res (rw rexpr)]
+                             (if (not= rexpr res) res)))))
+          rexpr))))
+
 
 ;; simplification which takes place a construction time
 ;; (defn simplify-construct [rexpr]
@@ -159,12 +173,14 @@
 
 ;; something that has a name first followed by a number of different unified expressions
 (def-rewrite-matcher :structured [rexpr]
-
   (and (not (is-variable? rexpr))
        (not (instance? Rexpr rexpr))
        (or (list? rexpr) (vector? rexpr))))
 ;; this could have that there is some meta-data that is contained in the context
 ;; then this will have to look at those values
+
+(def-rewrite-matcher :variable [var]
+  (is-variable? var))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -191,9 +207,18 @@
   :run-at :construction
   (make-unify B A))
 
+; this should run at both, so there should be a :run-at :both option that can be selected
 (def-rewrite
   :match (unify (:free A) (:ground B))
-  :run-at :both ; this will want to run at construction and when it encounters the value
+  :run-at :construction ; this will want to run at construction and when it encounters the value
+  (do
+    ; record that a value has been assigned with the context
+    (set-value! *context* A B)
+    nil))
+
+(def-rewrite
+  :match (unify (:free A) (:ground B))
+  :run-at :standard
   (do
     ; record that a value has been assigned with the context
     (set-value! *context* A B)
@@ -218,7 +243,7 @@
 (def-rewrite
   ; in the case that there is only 1 argument, this
   :match (conjunct ((fn [x] (= (count x) 1)) children))
-  :run-at :construnction
+  :run-at :construction
   (car children))
 
 (def-rewrite
@@ -228,6 +253,7 @@
 
 (def-rewrite
   :match (disjunct (:rexpr-list children))
+  :run-at :standard
   (make-disjunct (for [child children]
                    (simplify child))))
 
@@ -261,3 +287,33 @@
 ;; (def-rewrite
 ;;   :match (add (:ground A) (:ground B) (:non-ground C))
 ;;   (make-unify C `(+ ~A ~B)))
+
+
+;; (comment
+
+;; (def-rewrite
+;;   :match (proj (:var A) (:rexpr R))
+;;   :run-at :standard
+;;   ;; this needs to make sure that the variable is shaddowed in the context.
+;;   ;; which means that this is going to have
+;;   (bind-context
+;;    (make-nested-context-introduce-variable *context* rexpr A)
+;;    (let [nR (simplify R)]
+;;      (if (is-ground A)
+;;        ;; then the projected variable is now ground, so we should remove the
+;;        ;; projection expression though there might be multiple places where the
+;;        ;; variable appears so we want to be able to handle that the variable
+;;        ;; should still be maintained in such a way that we track the value
+
+
+;;   (let [ncontext (make-nested-context-introduce-variable *context* rexpr A)]
+;;     (bind-context
+;;         result (bind-context ncontext
+;;                              (simplify R))]
+;;     (if
+
+;;   (make-proj A (simplify B)))
+
+;;     )))))
+
+;; )

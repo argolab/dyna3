@@ -1,13 +1,14 @@
 (ns dyna-backend.rexpr
   (:require [dyna-backend.utils :refer :all])
   (:require [dyna-backend.context :refer [*context*]])
-  (:require [dyna-backend.UnificationFailure :refer :all]))
+  (:require [dyna-backend.UnificationFailure :refer :all])
+  (:require [clojure.set :refer [union difference]]))
 
 
 (declare simplify)
 (declare simplify-construct)
 
-(defn simplify-construct [r] r)
+;(defn simplify-construct [r] r)
 
 (defprotocol Rexpr
   (primitive-rexpr [this]) ;; return a primitive r-expr for the expression
@@ -17,7 +18,9 @@
   (get-argument [this n])
   (get-arguments [this])
   (as-list [this]) ; use for printing out the structure
-  )
+
+  (exposed-variables [this]) ; return variables values that are exposed externally (so hide aggregators and proj)
+)
 
 ;; the annotation on a variable can be one of
 ;;; :var, :rexpr, :var-list, :rexpr-list
@@ -47,13 +50,31 @@
        (~'get-arguments ~'[this] ~(vec (map cdar vargroup)))
 
        (~'as-list ~'[this]
-               (list (quote ~(symbol name))
-                     ~@(for [v vargroup]
-                         (case (car v)
-                           :rexpr `(as-list ~(cdar v))
-                           :rexpr-list `(map as-list ~(cdar v))
-                           (cdar v)
-                           ))))
+        (list (quote ~(symbol name))
+              ~@(for [v vargroup]
+                  (case (car v)
+                    :rexpr `(as-list ~(cdar v))
+                    :rexpr-list `(map as-list ~(cdar v))
+                    (cdar v)
+                    ))))
+       (~'exposed-variables ~'[this]
+        (difference (union #{~@(keep
+                                #(if (= :var (car %)) (cdar %))
+                                vargroup)}
+                           ~@(keep
+                              #(if (= :rexpr (car %))
+                                 `(exposed-variables ~(cdar %)))
+                              vargroup)
+                           ;; ~@(keep
+                           ;;    #(if (= :rexpr-list (car %))
+                           ;;       `(apply union (for [v ~(cdar %)]
+                           ;;                       (exposed-variables v))))
+                           ;;    vargroup)
+                           )
+                    #{~@(keep
+                         #(if (= :hidden-var (car %)) (cdar %))
+                         vargroup)}
+                    ))
        )
        (defn ~(symbol (str "make-" name))
          {:rexpr-constructor (quote ~name)
@@ -119,16 +140,6 @@
     (every? (fn [x] (.is-bound? *context* x)) arguments)))
 
 
-;; (deftype constant-value-rexpr [value]
-;;   RexprValue
-;;   (get-value [this] value)
-;;   (set-value
-
-;;   (primitive-rexpr [this] this)
-;;   (get-variables [this] (list this))
-;;   (get-children [this] ()))
-
-
 (defn is-constant? [x] (instance? constant-value-rexpr x))
 (defn is-variable? [variable]
   (instance? variable-rexpr variable))
@@ -142,6 +153,7 @@
 (defn check-argument-rexpr-list [x] (every? is-rexpr? x))
 (defn check-argument-var [x] (or (is-variable? x) (is-constant? x)))
 (defn check-argument-var-list [x] (every? is-variable? x))
+(defn check-argument-hidden-var [x] (check-argument-var x))
 (defn check-argument-str [x] (string? x))
 
 
@@ -149,48 +161,17 @@
 
 (def-base-rexpr conjunct [:rexpr-list args])
 
-;; (deftype *-rexpr [args]
-;;   Rexpr
-;;   (primitive-rexpr [this] this)
-;;   (get-variables [this] ())
-;;   (get-children [this] args))
-
-;; (defn make-*
-;;   ([] (make-multiplicity 1))
-;;   ([x] x)
-;;   ([x y & args] (*-rexpr. (concat (list x y) args))))
-
-
 (def make-* make-conjunct)
 
 (def-base-rexpr disjunct [:rexpr-list args])
 
-;; (deftype +-rexpr [args]
-;;   Rexpr
-;;   (primitive-rexpr [this] this)
-;;   (get-variables [this] ())
-;;   (get-children [this] args))
-
-;; (defn make-+
-;;   ([] (make-multiplicity 0))
-;;   ([x] x)
-;;   ([x y & args] (+-rexpr. (concat (list x y) args))))
-
 (def make-+ make-disjunct)
-
-
-
-;; (deftype variable-rexpr [varname]
-;;   Rexpr
-;;   (primitive-rexpr [this] this)
-;;   (get-variables [this] (list this))
-;;   (get-children [this] ()))
 
 (defn make-variable [varname]
   (variable-rexpr. varname))
 
 (defmethod print-method variable-rexpr [this ^java.io.Writer w]
-  (.write w (str "(variable " (.value this) ")")))
+  (.write w (str "(variable " (.varname this) ")")))
 
 (defn make-constant [val]
   (constant-value-rexpr. val))
@@ -198,18 +179,20 @@
 (defmethod print-method constant-value-rexpr [this ^java.io.Writer w]
   (.write w (str "(constant " (.value this) ")")))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def-base-rexpr unify [:var a
                        :var b])
 
-(def-base-rexpr proj [:var v
+(def-base-rexpr proj [:hidden-var v
                       :rexpr body])
 
 (def-base-rexpr aggregator [:str operator
                             :var result
-                            :var incoming
+                            :hidden-var incoming
                             :rexpr body])
 
 (def-base-rexpr if [:rexpr cond
