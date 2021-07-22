@@ -130,6 +130,27 @@
   (:allground (= v2 (<= v0 v1)))
   (v2 (<= v0 v1))
   )
+
+(def-base-rexpr greaterthan [:var v0 :var v1 :var v2])
+(def-rewrite
+  :match (greaterthan (:any v0) (:any v1) (:any v2))
+  :run-at :construction
+  (make-lessthan v1 v0 v2))
+
+(def-base-rexpr greaterthan-eq [:var v0 :var v1 :var v2])
+(def-rewrite
+  :match (greaterthan-eq (:any v0) (:any v1) (:any v2))
+  :run-at :construction
+  (make-lessthan-eq v1 v0 v2))
+;
+(def-builtin-rexpr equals 3
+                   (:allground (= v2 (= v0 v1)))
+                   (v2 (= v0 v1)))
+
+(def-builtin-rexpr not-equals 3
+                   (:allground (= v2 (not= v0 v1)))
+                   (v2 (not= v0 v1)))
+
 (def-builtin-rexpr land 3
   (:allground (= (boolean v2) (boolean (and v0 v1))))
   (v2 (boolean (and v0 v1)))
@@ -138,3 +159,42 @@
   (:allground (= (boolean v2) (boolean (or v0 v1))))
   (v2 (boolean (or v0 v1)))
   )
+
+(def-builtin-rexpr sin 2
+                   (:allground (= v1 (java.lang.Math/sin v0)))
+                   (v1 (java.lang.Math/sin v0))
+                   (v0 (java.lang.Math/asin v1))
+                   )
+
+(def-builtin-rexpr cos 2
+                   (:allground (= v1 (java.lang.Math/cos v0)))
+                   (v1 (java.lang.Math/cos v0))
+                   (v0 (java.lang.Math/acos v1)))
+
+(def-builtin-rexpr tan 2
+                   (:allground (= v1 (java.lang.Math/tan v0)))
+                   (v1 (java.lang.Math/tan v0))
+                   (v0 (java.lang.Math/atan v1)))
+
+;; java does not appear to have the inverse asinh included????
+;; will have to include some other math library for this I suppose.... sigh
+(def-builtin-rexpr sinh 2
+                   (:allground (= v1 (java.lang.Math/sinh v0)))
+                   (v1 (java.lang.Math/sinh v0)))
+
+(def-builtin-rexpr cosh 2
+                   (:allground (= v1 (java.lang.Math/cosh v0)))
+                   (v1 (java.lang.Math/cosh v0)))
+
+(def-builtin-rexpr tanh 2
+                   (:allground (= v1 (java.lang.Math/tanh v0)))
+                   (v1 (java.lang.Math/tanh v0)))
+
+;(def-builtin-rexpr abs 2
+;                   :allground (= v1 (if (>= v0 0) v0 (- v0)))
+;                   (v1 (if (>= v0 0) v0 (- v0))))
+
+
+
+;; this needs to have some way of defining the sequence things
+

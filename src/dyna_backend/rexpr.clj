@@ -90,6 +90,7 @@
          (toString ~'[this] (str (as-list ~'this)))
          )
 
+
        (defn ~(symbol (str "make-" name))
          {:rexpr-constructor (quote ~name)
           :rexpr-constructor-type ~(symbol rname)}
