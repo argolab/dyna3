@@ -10,8 +10,9 @@
 
 (deftest basic-rexpr
   (let [rexpr (make-add (make-constant 2) (make-constant 3) (make-constant 5))
-        r2 (simplify rexpr)]
-    (is (= r2 (make-multiplicity 1)))
+        r2 (simplify rexpr)
+        r3 (make-multiplicity 1)]
+    (is (= r2 r3))
     ))
 
 

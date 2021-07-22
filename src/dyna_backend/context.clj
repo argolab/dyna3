@@ -32,6 +32,7 @@
     (or (contains? value-map variable)
         (and (not (nil? parent)) (is-bound? parent variable))))
   (set-value! [this variable value]
+    ;; this will need to check if the variable is already set and then check the value
     (set! value-map (assoc value-map variable value)))
   (add-rexpr! [this rexpr]
     (set! rexprs (conj rexprs rexpr)))

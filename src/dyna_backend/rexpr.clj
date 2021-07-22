@@ -33,49 +33,63 @@
         rname (str name "-rexpr")
         opt (if (not (nil? optional)) (vec optional) [])]
     `(do
-       (deftype ~(symbol rname) ~(vec (map cdar vargroup))
-       Rexpr
-       ~'(primitive-rexpr [this] this) ;; this is a primitive expression so we are going to just always return ourselves
-       (~'get-variables ~'[this]
-        (concat
-         (list ~@(map cdar (filter #(= :var (car %1)) vargroup)))
-         ~@(map cdar (filter #(= :var-list (car %1)) vargroup))
-         ))
-       (~'get-children ~'[this]
-        (concat
-         (list ~@(map cdar (filter #(= :rexpr (car %1)) vargroup)))
-         ~@(map cdar (filter #(= :rexpr-list (car %1)) vargroup))
-         ))
-       (~'get-argument ~'[this n] (nth ~(vec (map cdar vargroup)) ~'n))
-       (~'get-arguments ~'[this] ~(vec (map cdar vargroup)))
+       (deftype ~(symbol rname) ~(vec (cons 'cached-hash-code (map cdar vargroup)))
+         Rexpr
+         ~'(primitive-rexpr [this] this)                    ;; this is a primitive expression so we are going to just always return ourselves
+         (~'get-variables ~'[this]
+           (concat
+             (list ~@(map cdar (filter #(= :var (car %1)) vargroup)))
+             ~@(map cdar (filter #(= :var-list (car %1)) vargroup))
+             ))
+         (~'get-children ~'[this]
+           (concat
+             (list ~@(map cdar (filter #(= :rexpr (car %1)) vargroup)))
+             ~@(map cdar (filter #(= :rexpr-list (car %1)) vargroup))
+             ))
+         (~'get-argument ~'[this n] (nth ~(vec (map cdar vargroup)) ~'n))
+         (~'get-arguments ~'[this] ~(vec (map cdar vargroup)))
 
-       (~'as-list ~'[this]
-        (list (quote ~(symbol name))
-              ~@(for [v vargroup]
-                  (case (car v)
-                    :rexpr `(as-list ~(cdar v))
-                    :rexpr-list `(map as-list ~(cdar v))
-                    (cdar v)
-                    ))))
-       (~'exposed-variables ~'[this]
-        (difference (union #{~@(keep
-                                #(if (= :var (car %)) (cdar %))
-                                vargroup)}
-                           ~@(keep
-                              #(if (= :rexpr (car %))
-                                 `(exposed-variables ~(cdar %)))
-                              vargroup)
-                           ;; ~@(keep
-                           ;;    #(if (= :rexpr-list (car %))
-                           ;;       `(apply union (for [v ~(cdar %)]
-                           ;;                       (exposed-variables v))))
-                           ;;    vargroup)
-                           )
-                    #{~@(keep
-                         #(if (= :hidden-var (car %)) (cdar %))
-                         vargroup)}
+         (~'as-list ~'[this]
+           (list (quote ~(symbol name))
+                 ~@(for [v vargroup]
+                     (case (car v)
+                       :rexpr `(as-list ~(cdar v))
+                       :rexpr-list `(map as-list ~(cdar v))
+                       (cdar v)
+                       ))))
+         (~'exposed-variables ~'[this]
+           (difference (union #{~@(keep
+                                    #(if (= :var (car %)) (cdar %))
+                                    vargroup)}
+                              ~@(keep
+                                  #(if (= :rexpr (car %))
+                                     `(exposed-variables ~(cdar %)))
+                                  vargroup)
+                              ;; ~@(keep
+                              ;;    #(if (= :rexpr-list (car %))
+                              ;;       `(apply union (for [v ~(cdar %)]
+                              ;;                       (exposed-variables v))))
+                              ;;    vargroup)
+                              )
+                       #{~@(keep
+                             #(if (= :hidden-var (car %)) (cdar %))
+                             vargroup)}
+                       ))
+         Object
+         (equals ~'[this other]
+           (or (identical? ~'this ~'other)
+               (and (instance? ~(symbol rname) ~'other)
+                    (= (hash ~'this) (hash ~'other))
+                    ~@(for [[var idx] (zipmap vargroup (range))]
+                        `(= ~(cdar var) (get-argument ~'other ~idx))
+                        )
                     ))
-       )
+
+           )
+         (hashCode [this] ~'cached-hash-code)
+         (toString ~'[this] (str (as-list ~'this)))
+         )
+
        (defn ~(symbol (str "make-" name))
          {:rexpr-constructor (quote ~name)
           :rexpr-constructor-type ~(symbol rname)}
@@ -83,7 +97,11 @@
          (assert (and
                   ~@(map (fn [x] `(~(resolve (symbol (str "check-argument-" (symbol (car x))))) ~(cdar x)))
                         vargroup)))
-         (simplify-construct (~(symbol (str rname ".")) ~@(map cdar vargroup))))
+         (simplify-construct (~(symbol (str rname "."))
+                               (+ ~(hash rname) ~@(for [[var idx] (zipmap vargroup (range))]
+                                                    `(* (hash ~(cdar var)) ~(+ 3 idx))
+                                                    ))
+                               ~@(map cdar vargroup))))
        (defmethod print-method ~(symbol rname) ~'[this ^java.io.Writer w]
          (aprint.core/aprint (as-list ~'this) ~'w))
        )))

@@ -182,6 +182,9 @@
 (def-rewrite-matcher :variable [var]
   (is-variable? var))
 
+(def-rewrite-matcher :any [v]
+                     (or (is-variable? v) (is-constant? v)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def-rewrite

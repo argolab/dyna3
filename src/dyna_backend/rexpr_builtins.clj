@@ -118,7 +118,8 @@
 
 (def-base-rexpr log [:var v0 :var v1])  ;; have some log which just gets inverted into exp.  though this is not something that would represent a given expression
 (def-rewrite
-  :match (log (:var-or-const v0) (:var-or-const v1))
+  :match (log (:any v0) (:any v1))
+  :run-at :construction
   (make-exp v1 v0))
 
 (def-builtin-rexpr lessthan 3
