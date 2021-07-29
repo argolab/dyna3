@@ -1,35 +1,32 @@
-(ns dyna-backend.interface)
-
-(gen-class
-  :name "org.dyna.backend_interop"
-  :prefix "interop-"
-  :state "instance"
-  :init "init"
-  :main false
-
-  :methods [[make [String "[Lclojure.lang.Obj;"] clojure.lang.Obj]
-
-            ]
+(ns dyna-backend.interface
+  (:require [dyna-backend.core])
+  (:require [dyna-backend.rexpr :refer :all])
   )
 
+(gen-class
+  :name "dyna_backend.DynaInterface"
+  :prefix "-"
+  :methods [[make_rexpr [String "[Ljava.lang.Object;"] Object]
+            [make_variable [String] Object]
+            [make_constant [Object] Object]
+            [simplify [Object] Object]])
 
-;; (defn interop-make-variable [this varname]
-;;   `(variable ~varname))
+;; this is such a hack using resolve to avoid the ahead of time operation for resolving these symbols
+;; would be better to maybe define local variables which reference these functions, and then just call those
+(defn -make_rexpr [this ^String name args]
+  (apply construct-rexpr name args))
 
-;; (defn interop-make-unify [this a b]
-;;   `(unify ~a ~b))
+(defn -make_variable [this ^String name]
+  (make-variable name))
 
-;; (defn interop-make-structure [this name structure]
-;;   (concat `(~name) structure))
+(defn -make_constant [this ^String value]
+  (make-constant value))
 
-(defn interop-init []
-  ())
 
-(defn interop-make [this name body]
-  (concat `(~name) body))
+;; there needs to be simplification methods as well as methods for dealing with the context
+;; though we might just make it such that the context is an implementation detail that
+;; gets embedded into the rexpr such that simplify that is exposed to the python program does not have
+;; the ability to access this information
 
-(defn interop-make-variable [this name]
-  `(variable ~name))
-
-(defn interop-make-unify [this a b]
-  `(= ~a ~b))
+(defn -simplify [this rexpr]
+  (simplify rexpr))

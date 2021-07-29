@@ -1,6 +1,6 @@
 (ns dyna-backend.rexpr
   (:require [dyna-backend.rexpr :refer :all])
-  (:require [dyna-backend.context :refer :all])
+  (:require [dyna-backend.context :as context])
   (:require [clojure.zip :refer [seq-zip]])
   (:require [aprint.core :refer [aprint]])
   (:require [dyna-backend.utils :refer :all])
@@ -103,15 +103,16 @@
 
 (defn is-variable-set? [variable]
   (or (instance? constant-value-rexpr variable)
-      (is-bound? *context* variable)))
+      (context/need-context
+              (context/is-bound? context/*context* variable))))
 
 (defn is-constant? [variable]
   (instance? constant-value-rexpr variable))
 
 (defn get-variable-value [variable]
   (if (instance? constant-value-rexpr variable)
-    (.value variable)
-    (get-value *context* variable)))
+    (.value ^constant-value-rexpr variable)
+    (context/get-value context/*context* variable)))
 
 
 (defn simplify
@@ -145,9 +146,17 @@
 ;;   rexpr)
 
 (defn simplify-top [rexpr]
-  (let [ctx (make-empty-context rexpr)]
-    (bind-context ctx
+  (let [ctx (context/make-empty-context rexpr)]
+    (context/bind-context ctx
                   (simplify rexpr))))
+
+(defn simplify-fully [rexpr]
+  (let [prev (atom nil)
+        cr (atom rexpr)]
+    (while (not= cr prev)
+      (swap! prev @cr)
+      (swap! cr (simplify @cr)))
+    @cr))
 
 ;; there should be some matcher which is going to identify which expression.
 ;; this would have some which expressions are the expressions
@@ -216,15 +225,21 @@
   :run-at :construction ; this will want to run at construction and when it encounters the value
   (do
     ; record that a value has been assigned with the context
-    (set-value! *context* A B)
-    nil))
+    (if (context/has-context)
+        (do (context/set-value! context/*context* A B)
+            (make-multiplicity 1))
+        nil
+      )
+    ;(context/need-context (context/set-value! context/*context* A B))
+    ;nil
+    ))
 
 (def-rewrite
   :match (unify (:free A) (:ground B))
   :run-at :standard
   (do
     ; record that a value has been assigned with the context
-    (set-value! *context* A B)
+    (context/set-value! context/*context* A B)
     nil))
 
 
@@ -233,6 +248,13 @@
   :match (conjunct (:rexpr-list children))  ;; the conjuncts and the disjuncts are going to have to have some expression wihch
   (make-conjunct (for [child children]
                    (simplify child))))
+;
+;(def-rewrite
+;  :match (conjunct (:rexpr-list children))
+;  :run-at :construction
+;  (if (exists? (fn [x] (or (instance? conjunct-rexpr x) (instance? multiplicity-rexpr x))) children)
+;      ;; then this should flatten the children out such that
+;    ))
 
 ;; (def-rewrite
 ;;   :match (conjunct (:rexpr-list children))

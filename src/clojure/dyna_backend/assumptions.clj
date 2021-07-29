@@ -33,4 +33,6 @@
           (.write w (str "(assumption " (is-valid? this) ")")))
 
 (defn make-assumption []
-  (assumption. (atom #{}) (atom true)))
+  (assumption. (atom #{})                                   ; downstream dependents
+               (atom true)                                  ; is still valid, maybe could be atomic boolean?
+               ))

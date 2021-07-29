@@ -57,16 +57,15 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn map-same-type [func val] ; I feel like this should be defined somewhere in the library???
-  (let [r (map func val)]
-    (cond (vector? val) (vector r)
-          (map? val) (into {} r)
-          (set? val) (into #{} r)
-          (string? val) (apply str r)
-          :else r)))
+  (cond (vector? val) (vector (map func val))
+        (map? val) (into {} (map func val))
+        (set? val) (into #{} (map func val))
+        :else (func val)
+        ))
 
 (defn add-function-argument [functions argument body]
   (cond (list? body) (let [ags (map (partial add-function-argument functions argument) (cdr body))]
-                       (if (.contains functions (car body))
+                       (if (contains? functions (car body))
                          (concat (list (car body) argument) ags)
                          (cons (car body) ags)))
         ;; though this map might return different type

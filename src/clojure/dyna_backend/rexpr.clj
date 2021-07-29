@@ -1,8 +1,12 @@
 (ns dyna-backend.rexpr
   (:require [dyna-backend.utils :refer :all])
-  (:require [dyna-backend.context :refer [*context*]])
-  (:require [dyna-backend.UnificationFailure :refer :all])
-  (:require [clojure.set :refer [union difference]]))
+  (:require [dyna-backend.context :as context
+             ;:rename '{get-value context-get-value,
+             ;          is-bound? context-is-bound?
+             ;          set-value! context-set-value!}
+             ])
+  (:require [clojure.set :refer [union difference]])
+  (:import (dyna_backend UnificationFailure)))
 
 
 (declare simplify)
@@ -27,6 +31,10 @@
 ;;; other annotations are ignored for the time being
 
 (def rexpr-containers (atom #{}))
+(def rexpr-constructors (atom {}))
+
+(defn construct-rexpr [name & args]
+  (apply (get @rexpr-constructors name) args))
 
 (defmacro def-base-rexpr [name args & optional]
   (let [vargroup (partition 2 args)
@@ -103,6 +111,7 @@
                                                     `(* (hash ~(cdar var)) ~(+ 3 idx))
                                                     ))
                                ~@(map cdar vargroup))))
+       (swap! rexpr-constructors assoc ~(str name) ~(symbol (str "make-" name)))
        (defmethod print-method ~(symbol rname) ~'[this ^java.io.Writer w]
          (aprint.core/aprint (as-list ~'this) ~'w))
        )))
@@ -123,40 +132,43 @@
   (is-bound? [this ])
   )
 
-(deftype variable-rexpr [varname]
-    RexprValue
-    ;; using (.get-value ...) is calling a method on the class
-    (get-value [this] (.get-value *context* this))
-    (set-value! [this  value] (.set-value! *context* this value))
-    (is-bound? [this] (.is-bound? *context* this))
+(defrecord variable-rexpr [varname]
+  RexprValue
+  (get-value [this] (context/get-value context/*context* this))
+  (set-value! [this  value] (context/set-value! context/*context* this value))
+  (is-bound? [this]  (context/need-context (context/is-bound? context/*context* this)))
+  Object
+  (toString [this] (str "(variable " varname ")"))
   )
 
 ;; there should be some version of bound/unbound variables which are designed to access slots in the expression
 
-(deftype constant-value-rexpr [value]
+(defrecord constant-value-rexpr [value]
   RexprValue
   (get-value [this] value)
   (set-value! [this  v]
     (if (not= v value)
-      (throw (RuntimeException. "attempting to set the value of a constant"))))
+      (throw (UnificationFailure. "can not assign value to constant"))))
   (is-bound? [this] true)
+  Object
+  (toString [this] (str "(constant " value ")"))
   )
 
 ;; should the structured types have their own thing for how their are represented
 ;; though these will want to have some e
-(deftype structured-rexpr [name arguments]
+(defrecord structured-rexpr [name arguments]
   RexprValue
   (get-value [this]
     ;; this is going to have to construct the structure for this
     ;; which means that it has to get all of the values, and then flatten it to a structure
-    (make-structure name (map (fn [x] (.get-value *context* x)) arguments))
+    (make-structure name (map (fn [x] (context/get-value context/*context* x)) arguments))
     )
   (set-value! [this v]
     (if (or (not= (car v) name) (not= (+ 1 (count arguments)) (count v)))
       nil;(throw (Unification
     ))
   (is-bound? [this]
-    (every? (fn [x] (.is-bound? *context* x)) arguments)))
+    (context/need-context (every? (fn [x] (context/is-bound? context/*context* x)) arguments))))
 
 
 (defn is-constant? [x] (instance? constant-value-rexpr x))

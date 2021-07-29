@@ -5,3 +5,4 @@ target/
 *.iml
 .nrepl-port
 .lein-failures
+.attach_pid*
