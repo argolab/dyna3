@@ -19,6 +19,7 @@
 ;;     })
 
 (def rexpr-matchers (atom {}))
+(def rexpr-matchers-mappers (atom {}))
 (def rexpr-matchers-meta (atom {}))
 
 (def rexpr-rewrites (atom {}))
@@ -31,16 +32,24 @@
 ;;     :standard {}
 ;;     :complete {}  })
 
-(defmacro def-rewrite-matcher [name var body]
-  `(do (swap! rexpr-matchers assoc (quote ~name)
-              (fn ~var ~body))
-       ;; when putting the meta information directly onto the function
-       ;; then it seems that it creates a new object, so it is not able to pass the pointer
-       ;; to the function as the first argument
-       (swap! rexpr-matchers-meta assoc (quote ~name)
-              {:matcher-name (quote ~name)
-               :matcher-args (quote ~var)
-               :matcher-body (quote ~body)})))
+(defmacro def-rewrite-matcher
+  ([name var body mapper-func]
+   `(do (swap! rexpr-matchers assoc (quote ~name)
+               (fn ~var ~body))
+        (swap! rexpr-matchers-mappers (quote ~name)
+               (fn ~var ~mapper-func))
+        ;;; when putting the meta information directly onto the function
+        ;; then it seems that it creates a new object, so it is not able to pass the pointer
+        ;; to the function as the first argument
+        (swap! rexpr-matchers-meta assoc (quote ~name)
+               {:matcher-name   (quote ~name)
+                :matcher-args   (quote ~var)
+                :matcher-body   (quote ~body)
+                :matcher-mapper (quote ~mapper-func)}))
+   )
+  ([name var body]
+   `(def-rewrite-matcher ~name ~var ~body identity))
+  )
 
 (defn save-defined-rewrite
   [collection functor-name rewriter]
@@ -194,6 +203,9 @@
 (def-rewrite-matcher :any [v]
                      (or (is-variable? v) (is-constant? v)))
 
+;; just match anything
+(def-rewrite-matcher :unchecked [x] true)
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def-rewrite
@@ -266,7 +278,7 @@
 ;;     :else original-rexpr))
 
 (def-rewrite
-  ; in the case that there is only 1 argument, this
+  ; in the case that there is only 1 argument, this will just run that single argument
   :match (conjunct ((fn [x] (= (count x) 1)) children))
   :run-at :construction
   (car children))
@@ -290,6 +302,17 @@
     0 (make-multiplicity 0)
     1 (car children)
     :else rexpr))
+
+
+
+;
+;(def-rewrite
+;  :match (proj (:variable A) (:rexpr R))
+;  (if (context/has-context)
+;    (context/bind-context (context/make-nested-context))
+;    )
+;  (do
+;    (context/make-nested-context-introduce-variable)))
 
 
 ;; this should either return nil which means that there is no match

@@ -34,15 +34,15 @@
       (get value-map variable)
       (if (not (nil? parent)) (get-value parent variable))))
   (is-bound? [this variable]
-    (or (contains? value-map variable)
+    (or (not (nil? (get value-map variable)))
         (and (not (nil? parent)) (is-bound? parent variable))))
   (set-value! [this variable value]
-    ;; this will need to check if the variable is already set and then check the value
     (let [current-value (get-value this variable)]
       (if (not (nil? current-value))
         (if (not= current-value value)
-          (throw (UnificationFailure. "value does not match")))
-        (set! value-map (assoc value-map variable value)))))
+          (throw (UnificationFailure. "Value does not match")))
+        (if (or (contains? value-map value) (nil? parent))
+          (set-value! parent variable value)))))
   (add-rexpr! [this rexpr]
     (set! rexprs (conj rexprs rexpr)))
   (all-rexprs [this]
@@ -67,14 +67,14 @@
 (defn make-empty-context [rexpr]
   (context. nil rexpr #{rexpr} {}))
 
-(defn make-nested-context [&context rexpr]
-  (context. &context rexpr #{rexpr} {}))
+(defn make-nested-context [rexpr]
+  (context. *context* rexpr #{rexpr} {}))
 
-(defn make-nested-context-introduce-variable [&context rexpr variable]
+(defn make-nested-context-introduce-variable [rexpr variable]
   ;; this needs to somehow manage that there is a new context, which means that when
   ;; this context is destroyed, it should save the result of the expression
   (assert false)
-  (context. &context rexpr #{rexpr} {}))
+  (context. *context* rexpr #{rexpr} {}))
 
 (defmethod print-method context [this ^java.io.Writer w]
   (.write w (.toString this)))
@@ -92,4 +92,4 @@
 
 
 ;; there could be some nested variables which are array list based
-;; those variables would not have the 
+;; those variables would not have the

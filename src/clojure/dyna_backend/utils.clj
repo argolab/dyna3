@@ -60,8 +60,8 @@
   (cond (vector? val) (vector (map func val))
         (map? val) (into {} (map func val))
         (set? val) (into #{} (map func val))
-        :else (func val)
-        ))
+        :else val))
+
 
 (defn add-function-argument [functions argument body]
   (cond (list? body) (let [ags (map (partial add-function-argument functions argument) (cdr body))]
@@ -85,3 +85,16 @@
         (vector? body) (vector (map #(resolve-functions %1 env) body))
         ;; there shouldn't be anything else that needs to get mapped here
         :else body))
+
+
+;; if there is some function that can cache the result of some computation, then we can have a field that is nil
+;; by default, and then run the function to store the result of the computation.
+;; I suppose that this should allow for the function to be such that it
+(defmacro cache-field [field & func]
+  (let [sr (gensym)]
+    `(if (nil? ~field)
+       (let [~sr (do ~@func)]
+         (set! ~field ~sr)
+         ~sr)
+       ~field)))
+

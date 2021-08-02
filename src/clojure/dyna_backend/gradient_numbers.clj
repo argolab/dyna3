@@ -7,19 +7,19 @@
 
 (defn add-to-gradient [num queue grad]
   (if (instance? TracedNumber num)
-    (do (.addToGradient num grad)
-        (.enqueue num queue))))
+    (do (.addToGradient ^TracedNumber num grad)
+        (.enqueue ^TracedNumber num queue))))
 
 (defn- get-value [num]
   (if (instance? TracedNumber num)
-    (.value num)
+    (.value ^TracedNumber num)
     num))
 
 (defn- get-height
   ([] 0)
   ([num]
    (if (instance? TracedNumber num)
-     (+ 1 (.height num))
+     (+ 1 (.height ^TracedNumber num))
      0))
   ([a & other]
    (max (get-height a) (get-height other))))
@@ -49,23 +49,28 @@
     `(get-value ~val)
     (map-same-type (partial add-get-values params) val)))
 
+
 (defmacro defn-gradient-op [op params forward backwards]
   (let [all-args (set params)
         forward-mapped (add-get-values all-args forward)
-        backward-mapped (add-get-values all-args backwards)
-        ] `(defn ~op ~params
-                     (if (or ~@(for [p params] `(instance? TracedNumber ~p)))
-                       (TracedNumber. ~forward-mapped
-                                      (get-height ~@params)
-                                      (fn [^TracedNumber gradv queue]
-                                        (let [grad (.getGradient gradv)]
-                                          ~backward-mapped)
-                                        )
-                                      )
-                       forward
-                       )
-                    ))
+        ;backward-mapped (add-get-values all-args backwards)
+        ]
+    `(defn ~op ~params
+       (if (or ~@(for [p params] `(instance? TracedNumber ~p)))
+         (TracedNumber. ~forward-mapped
+                        (get-height ~@params)
+                        (fn ~'[^TracedNumber gradv queue]
+                          (let [~'grad (.getGradient ~'gradv)]
+                            ~backwards)))
+
+         ~forward)))
   )
+
+
+
+
+
+
 
 (defn-gradient-op grad-add [a b]
                   (+ a b)
@@ -88,25 +93,35 @@
                       (add-to-gradient b queue (- grad))))
 
 (defn-gradient-op grad-sin [x]
-                  (sin x)
-                  (add-to-gradient x queue (cos grad)))
+                  (Math/sin x)
+                  (add-to-gradient x queue (Math/cos grad)))
 
 (defn-gradient-op grad-cos [x]
-                  (cos x)
-                  (add-to-gradient x queue (- (sin grad))))
+                  (Math/cos x)
+                  (add-to-gradient x queue (- (Math/sin grad))))
 
 (defn-gradient-op grad-tan [x]
-                  (tan x)
-                  (add-to-gradient x queue (let [z (cos grad)] (/ 1 (* z z)))))
+                  (Math/tan x)
+                  (add-to-gradient x queue (let [z (Math/cos grad)] (/ 1 (* z z)))))
 
 (defn-gradient-op grad-exp [x]
-                  (exp x)
-                  (add-to-gradient x queue (* grad (exp (get-value x)))))
+                  (Math/exp x)
+                  (add-to-gradient x queue (* grad (Math/exp (get-value x)))))
 
 
+(defn-gradient-op grad-abs [x]
+                  (if (< x 0) (- x) x)
+                  (add-to-gradient x queue (* grad (if (< x 0) -1 1))))
+
+(defn-gradient-op grad-pow [x e]
+                  (Math/pow x e)
+                  (do (add-to-gradient x queue (* grad e (Math/pow x (- e 1))))
+                      (add-to-gradient e queue 99999999)))
+
+;; operations which do not directly influence the numerical values, do not need gradients, as those will
+;; change the shape of the graph.  So this would have that there are some of which
 
 (defn set-loss-compute-grad [num]
   (if (instance? TracedNumber num)
-    (TracedNumber/runBackprop num)
-    )
-  )
+    (TracedNumber/runBackprop num)))
+

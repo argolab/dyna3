@@ -29,8 +29,8 @@
   (notify-invalidated! [this] (invalidate! this))
   )
 
-(defmulti print-method assumption [this ^java.io.Writer w]
-          (.write w (str "(assumption " (is-valid? this) ")")))
+;(defmulti print-method assumption [this ^java.io.Writer w]
+;          (.write w (str "(assumption " (is-valid? this) ")")))
 
 (defn make-assumption []
   (assumption. (atom #{})                                   ; downstream dependents

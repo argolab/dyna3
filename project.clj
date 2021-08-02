@@ -11,5 +11,6 @@
   :aot [dyna-backend.interface]
   :source-paths ["src/clojure"]
   :java-source-paths ["src/java"]
-  :test-paths ["test"])
+  :test-paths ["test"]
+  :profiles {:uberjar {:aot :all}})
 
