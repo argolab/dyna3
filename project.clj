@@ -8,9 +8,9 @@
                  ;[clj-python/libpython-clj "2.00-beta-22"]
                  [com.clojure-goes-fast/clj-java-decompiler "0.3.0"]]
   :repl-options {:init-ns dyna-backend.core}
-  :aot [dyna-backend.interface]
+  ;:aot [dyna-backend.interface]
+  :aot :all
   :source-paths ["src/clojure"]
   :java-source-paths ["src/java"]
   :test-paths ["test"]
   :profiles {:uberjar {:aot :all}})
-

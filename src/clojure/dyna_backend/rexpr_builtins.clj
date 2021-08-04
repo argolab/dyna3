@@ -1,14 +1,14 @@
 ;; this file contains base cases R-expressions.  For example the add operator which
 ;; requires using some builtin method to perform the addition between two numbers
 
-(ns dyna-backend.rexpr
+(ns dyna-backend.rexpr-builtins
   (:require [dyna-backend.utils :refer :all])
   (:require [dyna-backend.rexpr :refer :all])
   ;(:require [dyna-backend.rewrites :refer [def-rewrite]])
   (:require [clojure.set :refer [union]])
   )
 
-(in-ns 'dyna-backend.rexpr)
+;(in-ns 'dyna-backend.rexpr)
 
 (defn  get-variables-in-expression [expression]
   (if (symbol? expression)
@@ -46,7 +46,7 @@
 
      (let ~(vec (apply concat
                        (for [v required-ground]
-                         `[~v (.get-value ~(symbol (str "g" v)))])))
+                         `[~v (get-value ~(symbol (str "g" v)))])))
        ~(if all-ground
           `(if ~(cdar body)
              (make-multiplicity 1)
@@ -59,9 +59,8 @@
 
 (defmacro def-builtin-rexpr [name nargs & rewrites]
   ;(print "hello this is here\n")
-  (doall (for [rr rewrites]
-           (construct-rewrite-for-expression name nargs rr)))
-
+  ;; (doall (for [rr rewrites]
+  ;;          (construct-rewrite-for-expression name nargs rr)))
   `(do
      (def-base-rexpr ~name ~(vec (flatten (for [i (range 0 nargs)]
                                             [:var (symbol (str "v" i))]))))
@@ -197,4 +196,3 @@
 
 
 ;; this needs to have some way of defining the sequence things
-

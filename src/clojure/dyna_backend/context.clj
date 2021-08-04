@@ -42,6 +42,7 @@
         (if (not= current-value value)
           (throw (UnificationFailure. "Value does not match")))
         (if (or (contains? value-map value) (nil? parent))
+          (set! value-map (assoc value-map variable value))
           (set-value! parent variable value)))))
   (add-rexpr! [this rexpr]
     (set! rexprs (conj rexprs rexpr)))

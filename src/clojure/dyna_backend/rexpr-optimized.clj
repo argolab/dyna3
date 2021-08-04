@@ -6,8 +6,8 @@
 ;; implemeneted.  Something which allows for an expression to be solved using
 ;; loops over the domains of variables rather than having to perform lots of
 ;; rewrites in the process
-
-(ns dyna-backend.rexpr
-  (:require [dyna-backend.utils :refer :all]))
-
-(in-ns 'dyna-backend.rexpr)
+;
+;(ns dyna-backend.rexpr
+;  (:require [dyna-backend.utils :refer :all]))
+;
+;(in-ns 'dyna-backend.rexpr)
