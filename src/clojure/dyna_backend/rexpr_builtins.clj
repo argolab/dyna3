@@ -159,6 +159,12 @@
   (v2 (boolean (or v0 v1)))
   )
 
+
+(def-builtin-rexpr not 2
+  (:allground (= (v1 (not v0))))
+  (v1 (not v0)))
+
+
 (def-builtin-rexpr sin 2
                    (:allground (= v1 (java.lang.Math/sin v0)))
                    (v1 (java.lang.Math/sin v0))
@@ -189,10 +195,44 @@
                    (:allground (= v1 (java.lang.Math/tanh v0)))
                    (v1 (java.lang.Math/tanh v0)))
 
-;(def-builtin-rexpr abs 2
-;                   :allground (= v1 (if (>= v0 0) v0 (- v0)))
-;                   (v1 (if (>= v0 0) v0 (- v0))))
+
+
+
+;; (def-builtin-rexpr abs 2
+;;                   :allground (= v1 (if (>= v0 0) v0 (- v0)))
+;;                   (v1 (if (>= v0 0) v0 (- v0))))
 
 
 
 ;; this needs to have some way of defining the sequence things
+
+
+(def-base-rexpr range [:var Low
+                       :var High
+                       :var Step
+                       :var Out])
+
+(def-rewrite
+  :match (range (:ground Low) (:ground High) (:ground Step) (:any Out))
+  :run-at :standard
+  (let [LowV (get-value Low)
+        HighV (get-value High)
+        StepV (get-value Step)]
+    (if (>= LowV HighV) (make-multiplicity 0)
+        (make-disjunct [(make-no-simp-unify Out (make-constant LowV)) ; this make-unify will have to avoid running the constructors, otherwise it will assign the value directly.  So no-simp should allow for this to avoid those at construction rewrites
+                        (make-range (make-constant (+ LowV StepV))
+                                    High
+                                    Step
+                                    Out)])))
+  )
+
+;; there is no way to define a range with 3 arguments, as it would use the same name here
+;; that would have to be represented with whatever is some named mapped from a symbol to what is being created
+
+
+(defn generate-random [x]
+  (.hashCode ^Object x))
+
+(def-builtin-rexpr random 2
+  (:allground (= v1 (generate-random v0)))
+  (v1 (generate-random v0)))

@@ -18,5 +18,8 @@ test:
 
 
 
+# if we are building the uberjar, then run the clean first as some of the macroexpands might have changed
+# and we don't want to have mixed the old and new versions of this
 $(TARGET): $(SOURCE)
+	rm -rf target/
 	$(LEIN) uberjar

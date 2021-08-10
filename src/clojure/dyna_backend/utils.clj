@@ -98,3 +98,13 @@
          (set! ~field ~sr)
          ~sr)
        ~field)))
+
+
+(defn overrideable-function
+  "Allows for a function in a macro to be overriden via the optional arguments"
+  [opts name body]
+  (let [ret (atom body)]
+    (doseq [o opts]
+      (if (= (car o) name)
+        (reset! ret o)))
+    @ret))

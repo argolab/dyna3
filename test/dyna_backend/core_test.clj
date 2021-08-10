@@ -33,8 +33,9 @@
         ctx (context/make-empty-context rexpr)
         r2 (context/bind-context ctx (simplify-fully rexpr))
         r3 (make-multiplicity 1)]
-    (is (= r2 r3))))
-    ;(is (= (context/get-value ctx (make-variable 'v1)) (make-constant 5)))))
+    (is (= r2 r3))
+    (is (= (context/get-value ctx (make-variable 'v1)) 5))
+    (is (= (context/get-value ctx (make-variable 'v2)) 7))))
 
 
 

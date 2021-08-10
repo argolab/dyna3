@@ -46,11 +46,12 @@
        (deftype ~(symbol rname) ~(vec (concat (quote [cached-hash-code ^:unsynchronized-mutable cached-exposed-variables])
                                               (map cdar vargroup)))
          Rexpr
-         ~'(primitive-rexpr [this] this)                    ;; this is a primitive expression so we are going to just always return ourselves
+         ~'(primitive-rexpr [this] this) ;; this is a primitive expression so we are going to just always return ourselves
          (~'get-variables ~'[this]
-          (concat
-           (list ~@(map cdar (filter #(= :var (car %1)) vargroup)))
-           ~@(map cdar (filter #(= :var-list (car %1)) vargroup))))
+          (filter is-variable?
+                  (union #{~@(map cdar (filter #(= :var (car %1)) vargroup))}
+                         ~@(map cdar (filter #(= :var-list `(set ~(car %1))) vargroup))
+                         )))
 
          (~'get-children ~'[this]
           (concat
@@ -70,16 +71,19 @@
 
          (~'exposed-variables ~'[this]
           (cache-field ~'cached-exposed-variables
-                       (difference (union #{~@(keep
-                                               #(if (= :var (car %)) (cdar %))
-                                               vargroup)}
-                                          ~@(keep
-                                             #(if (= :rexpr (car %))
-                                                `(exposed-variables ~(cdar %)))
-                                             vargroup))
-                                   #{~@(keep
-                                        #(if (= :hidden-var (car %)) (cdar %))
-                                        vargroup)})))
+                       (set
+                        (filter is-variable?
+                                (difference (union (get-variables ~'this)
+                                                   ~@(keep
+                                                      #(if (= :rexpr (car %))
+                                                         `(exposed-variables ~(cdar %)))
+                                                      vargroup)
+                                                   ~@(keep
+                                                      #(if (= :rexpr-list (car %))
+                                                         `(apply union (map exposed-variables ~(cdar %)))) vargroup))
+                                            #{~@(keep
+                                                 #(if (= :hidden-var (car %)) (cdar %))
+                                                 vargroup)})))))
          Object
          (equals ~'[this other]
            (or (identical? ~'this ~'other)
@@ -90,6 +94,21 @@
 
          (hashCode [this] ~'cached-hash-code)
          (toString ~'[this] (str (as-list ~'this))))
+
+       (defn ~(symbol (str "make-no-simp-" name))
+         {:rexpr-constructor (quote ~name)
+          :rexpr-constructor-type ~(symbol rname)}
+         ~(vec (map cdar vargroup))
+         ~@(map (fn [x] `(if (not (~(resolve (symbol (str "check-argument-" (symbol (car x))))) ~(cdar x)))
+                           (do (debug-repl ~(str "check argument " (car x)))
+                               (assert false)))) vargroup)
+         (~(symbol (str rname "."))
+          (+ ~(hash rname) ~@(for [[var idx] (zipmap vargroup (range))]
+                               `(* (hash ~(cdar var)) ~(+ 3 idx))))
+
+          nil       ; the cached unique variables
+          ~@(map cdar vargroup))
+         )
 
        (defn ~(symbol (str "make-" name))
          {:rexpr-constructor (quote ~name)
@@ -103,15 +122,20 @@
                               (+ ~(hash rname) ~@(for [[var idx] (zipmap vargroup (range))]
                                                    `(* (hash ~(cdar var)) ~(+ 3 idx))))
 
-                              nil                          ; the cached unique variables
+                              nil       ; the cached unique variables
                               ~@(map cdar vargroup))))
        (swap! rexpr-constructors assoc ~(str name) ~(symbol (str "make-" name)))
+       (defn ~(symbol (str "is-" name "?")) ~'[rexpr]
+         (instance? ~(symbol rname) ~'rexpr))
        (defmethod print-method ~(symbol rname) ~'[this ^java.io.Writer w]
          (aprint (as-list ~'this) ~'w)))))
 
+(defrecord structured-term-value [name arguments])
+
 
 (defn make-structure [name args]
-  `(~name ~@args))
+  (assert (seqable? args))
+  (structured-term-value. name args))
 
 (def ^:const null-term (make-structure '$null []))
 
@@ -129,23 +153,35 @@
 (defrecord variable-rexpr [varname]
   RexprValue
   (get-value [this] (context/get-value context/*context* this))
-  (set-value! [this  value] (context/set-value! context/*context* this value))
+  (set-value! [this value]
+    (context/set-value! context/*context* this value))
   (is-bound? [this]  (context/need-context (context/is-bound? context/*context* this)))
   Object
   (toString [this] (str "(variable " varname ")")))
 
+(defn make-variable [varname]
+  (variable-rexpr. varname))
+
+(defmethod print-method variable-rexpr [^variable-rexpr this ^java.io.Writer w]
+  (.write w (str "(variable " (.varname this) ")")))
 
 ;; there should be some version of bound/unbound variables which are designed to access slots in the expression
 
 (defrecord constant-value-rexpr [value]
   RexprValue
   (get-value [this] value)
-  (set-value! [this  v]
+  (set-value! [this v]
     (if (not= v value)
       (throw (UnificationFailure. "can not assign value to constant"))))
   (is-bound? [this] true)
   Object
   (toString [this] (str "(constant " value ")")))
+
+(defn make-constant [val]
+  (constant-value-rexpr. val))
+
+(defmethod print-method constant-value-rexpr [^constant-value-rexpr this ^java.io.Writer w]
+  (.write w (str "(constant " (.value this) ")")))
 
 
 ;; should the structured types have their own thing for how their are represented
@@ -155,15 +191,26 @@
   (get-value [this]
     ;; this is going to have to construct the structure for this
     ;; which means that it has to get all of the values, and then flatten it to a structure
-    (make-structure name (map (fn [x] (context/get-value context/*context* x)) arguments)))
+    (make-structure name (doall (map get-value arguments))))
 
   (set-value! [this v]
     (if (or (not= (car v) name) (not= (+ 1 (count arguments)) (count v)))
-      nil));(throw (Unification
+      (throw (UnificationFailure. "name/arity does not match structure"))
+      (doall (map set-value! arguments (cdr v)))
+      ))
 
   (is-bound? [this]
-    (context/need-context (every? (fn [x] (context/is-bound? context/*context* x)) arguments))))
+    (context/need-context (every? is-bound? arguments)))
+  Object
+  (toString [this] (str "(structure " name " " arguments ")")))
 
+(defmethod print-method structured-rexpr [^structured-rexpr this ^java.io.Writer w]
+  (.write w (.toString this)))
+
+(defn make-structured-value [name values]
+  (assert (every? (partial satisfies? RexprValue) values))
+  (assert (string? name))
+  (structured-rexpr. name values))
 
 (defn is-constant? [x] (instance? constant-value-rexpr x))
 
@@ -174,11 +221,13 @@
   (and (satisfies? Rexpr rexpr)
        (not (or (is-variable? rexpr) (is-constant? rexpr)))))
 
-(defn check-argument-mult [x] (int? x))
+
+(defn check-argument-mult [x] (or (and (int? x) (>= x 0)) (= ##Inf x)))
 (defn check-argument-rexpr [x] (is-rexpr? x))
 (defn check-argument-rexpr-list [x] (every? is-rexpr? x))
-(defn check-argument-var [x] (or (is-variable? x) (is-constant? x)))
+(defn check-argument-var [x] (or (is-variable? x) (is-constant? x))) ;; a variable or constant of a single value.  Might want to remove is-constant? from this
 (defn check-argument-var-list [x] (every? is-variable? x))
+(defn check-argument-value [x] (satisfies? RexprValue x)) ;; something that has a get-value method (possibly a structure)
 (defn check-argument-hidden-var [x] (check-argument-var x))
 (defn check-argument-str [x] (string? x))
 (defn check-argument-unchecked [x] true)
@@ -197,25 +246,25 @@
 
 (def make-+ make-disjunct)
 
-(defn make-variable [varname]
-  (variable-rexpr. varname))
 
-(defmethod print-method variable-rexpr [this ^java.io.Writer w]
-  (.write w (str "(variable " (.varname this) ")")))
+;; there should be a more complex expression for handling this in the case of a if statement or something
+;; this will want for this to somehow handle if there are some ways in which this can handle if there
+(defn is-empty-rexpr? [rexpr]
+  (and (is-rexpr? rexpr) (= (make-multiplicity 0) rexpr)))
 
-(defn make-constant [val]
-  (constant-value-rexpr. val))
-
-(defmethod print-method constant-value-rexpr [this ^java.io.Writer w]
-  (.write w (str "(constant " (.value this) ")")))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
+(defn is-non-empty-rexpr? [rexpr]
+  (and (is-rexpr? rexpr)
+       (or (and (is-multiplicity? rexpr) (> (get-argument rexpr 0) 0))
+           (and (is-disjunct? rexpr) (some is-non-empty-rexpr? (get-argument rexpr 0)))
+           )))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def-base-rexpr unify [:var a
-                       :var b])
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def-base-rexpr unify [:value a
+                       :value b])
 
 (def-base-rexpr proj [:hidden-var v
                       :rexpr body])
@@ -252,6 +301,12 @@
                              :rexpr base-expr
                              :rexpr-list bodies])
 
+
+
+
+(def-base-rexpr project-all-except [:var-list exposed-vars
+                                    :rexpr R]
+  (exposed-variables [this] exposed-vars))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -317,7 +372,7 @@
                        v))]
 
     `(fn ~'[rexpr]
-       (let [~(vec named-args) (.get-arguments ~'rexpr)] ; unsure if using the global function vs the .func is better?
+       (let [~(vec named-args) (get-arguments ~'rexpr)] ; unsure if using the global function vs the .func is better?
          (if (and ~@(map (fn [arg mat]
                            `(~(get @rexpr-matchers mat mat)
                               ~arg)) named-args (for [m (cdr matcher)]
@@ -379,7 +434,7 @@
 
 (defn simplify-construct [rexpr]
   (let [typ (type rexpr)
-        rrs (.get @rexpr-rewrites-construct typ)]
+        rrs (get @rexpr-rewrites-construct typ)]
     (if (nil? rrs)
       rexpr
       (or (first (filter (complement nil?)
@@ -411,12 +466,15 @@
 ;; this is going to have to have some context in which an expression
 
 (def-rewrite-matcher :ground [var-name]
-                     ;; is-variable-set? is going to have to take
+                                        ; this should be redfined such that it will return the ground value for the variable
+                                        ; though we might not want to have the matchers identifying a given expression
                      (if (and (is-variable? var-name) (is-variable-set? var-name))
                        (get-variable-value var-name)
                        (if (is-constant? var-name)
                          (.value var-name))))
 
+(def-rewrite-matcher :not-ground [var]
+  (not (is-bound? var)))
 
 (def-rewrite-matcher :free [var-name]
                      (and (is-variable? var-name) (not (is-variable-set? var-name)) var-name))
@@ -430,9 +488,7 @@
 
 ;; something that has a name first followed by a number of different unified expressions
 (def-rewrite-matcher :structured [rexpr]
-                     (and (not (is-variable? rexpr))
-                          (not (instance? Rexpr rexpr))
-                          (or (list? rexpr) (vector? rexpr))))
+  (instance? structured-rexpr rexpr))
 ;; this could have that there is some meta-data that is contained in the context
 ;; then this will have to look at those values
 
@@ -454,8 +510,8 @@
   :run-at :construction
   (if (or (not= (count A) (count B)) (not= (car A) (car B)))
     (make-multiplicity 0) ;; meaning that the names on these expressions does not match.
-    ;; return the original rexpr
-    nil))
+    (make-conjunct (doall (map make-unify (cdar A) (cdar B)))) ; then make a bunch of smaller unifications on the variables themselves directly
+    ))
 
 (def-rewrite
   ;; the matched variable should have what value is the result of the matched expression.
@@ -466,14 +522,25 @@
     (make-multiplicity 0)))
 
 (def-rewrite
-  :match (unify (:ground A) (:free B))
+  :match (unify (:ground A) (:not-ground B))
   :run-at :construction
   (make-unify B A))
+
+(def-rewrite
+  :match (unify (:structured B) (:ground A))
+  :run-at :construction
+  (let [Av (get-value A)]
+    (if (not (and (instance? structured-term-value Av)
+                  (= (.name ^structured-rexpr B) (.name ^structured-term-value Av))
+                  (= (count (.arguments ^structured-rexpr B)) (count (.arguments ^structured-term-value Av)))))
+      (make-multiplicity 0)
+      (make-conjunct (doall (map make-unify (.arguments ^structured-rexpr B) (.arguments ^structured-term-value Av))))
+      )))
 
 ; this should run at both, so there should be a :run-at :both option that can be selected
 (def-rewrite
   :match (unify (:free A) (:ground B))
-  :run-at :construction ; this will want to run at construction and when it encounters the value
+  :run-at :construction ; this will want to run at construction and when it encounters the value so that we can use it as early as possible
   (do
     ; record that a value has been assigned with the context
     (if (context/has-context)
@@ -504,15 +571,6 @@
 ;  (if (exists? (fn [x] (or (instance? conjunct-rexpr x) (instance? multiplicity-rexpr x))) children)
 ;      ;; then this should flatten the children out such that
 ;    ))
-
-;; (def-rewrite
-;;   :match (conjunct (:rexpr-list children))
-;;   :run-at :construnction
-;;   ;; which expressions are we going to allow with the given expression
-;;   (case (count children)
-;;     0 (make-multiplicity 1)
-;;     1 (car children)
-;;     :else original-rexpr))
 
 (def-rewrite
   ; in the case that there is only 1 argument, this will just run that single argument
@@ -559,22 +617,143 @@
                                          [x])) children))))
 
 
-(def-rewrite
-  :match (disjunct (:rexpr-list children))
-  :run-at :standard
-  (make-disjunct (for [child children]
-                   (let [ctx (context/make-nested-context child)]
-                     (context/bind-context ctx (simplify child))))))
+;; (def-rewrite
+;;   :match (disjunct (:rexpr-list children))
+;;   :run-at :standard
+;;   (make-disjunct (for [child children]
+;;                    (let [ctx (context/make-nested-context child)]
+;;                      (context/bind-context ctx (simplify child))))))
 
 ;; this needs to have some additional combining of the rules.  In the case that there is some
 
+;; (def-rewrite
+;;   :match (disjunct (:rexpr-list children))
+;;   (case (count children)
+;;     0 (make-multiplicity 0)
+;;     1 (car children)
+;;     :else rexpr))
+
+(def-rewrite
+  :match (disjunct ((fn [x] (= 1 (count x))) children))
+  :run-at :construction
+  (car children))
+
+(def-rewrite
+  :match (disjunct ((fn [x] (= 0 (count x))) children))
+  :run-at :construction
+  (make-multiplicity 0))
+
+
 (def-rewrite
   :match (disjunct (:rexpr-list children))
-  (case (count children)
-    0 (make-multiplicity 0)
-    1 (car children)
-    :else rexpr))
+  :run-at :standard
+  (do
+    ;; this is going to have to construct a nested context for everything that it goes into, and then
+    (let [found (transient [])]
+      (doseq [c children]
+           (let [ctx (context/make-nested-context c)
+                 ns (context/bind-context ctx (simplify c))]
+             (if (not (is-empty-rexpr? ns))
+               (do ; then we want to save these rexpr into the list of objects that we have constructed
+                 (conj! found [ctx ns])
+                 )
+               )
+             )
+           )
+      (case (count found)
+        0 (make-multiplicity 0)
+        1 (do
+            ;; then this should just return this single item, there is no need to keep the disjunct aronud in this case
+            ;; this will have to move the context info up
+            (let [[ctx r] (get found 0)]
+              (context/add-context! context/*context* ctx)
+              r)
+            (assert false))
+        (do
+          ;; then there are two or more values, so this needs to intersect all of the contexts and
+          (let [same-context (reduce context/intersect (map car found))]
+            ;; the new intersection is going to be added to the global context
+            (context/add-context! context/*context* same-context)
+            (make-disjunct (doall (for [[ctx r] found]
+                                    ;; this is going to have to make an r-expr for the stuff that this wants to save behind
+                                    ;; in the case that there are bindings to a value, then this should
+                                    (assert false)
+                                    )))
+            )
+          (assert false)
+          ))
+      (if (empty? found)
+        (make-multiplicity 0)
+        (do
+          ;; then there is one or more found objects
+          ))
+      )
 
+    nil))
+
+(def-rewrite
+  ;; this is proj(A, 0) -> 0
+  :match (proj (:variable A) (is-empty-rexpr? R))
+  :run-at :construction
+  (make-multiplicity 0))
+
+(def-rewrite
+  ;; proj(A, 1) -> inf
+  :match (proj (:variable A) (is-multiplicity? M))
+  :run-at :construction
+  (if (not= (get-argument M 0) 0)
+    (make-multiplicity ##Inf)))
+
+(def-rewrite
+  :match (proj (:variable A) (:rexpr R))
+  :run-at :standard
+  (do
+    (let [ctx (context/make-nested-context-introduce-variable R A)
+          nR (context/bind-context ctx (simplify R))]
+      (if (context/is-bound? ctx A)
+        ;; then this could just replace the value in the remainder of the expression
+        ;; otherwise this can just return the value back
+        (do (???))
+        (do (make-proj A nR))
+        )
+      )
+
+    nil
+    ))
+
+;; there neeeds to be a projection rewrite for moving expressions out which do not
+;; depend on the variable which is getting projected
+(def-rewrite
+  :match (proj (:variable A) (is-conjunct? R))
+  :run-at :construction
+  (let [inner (transient [])
+        outer (transient [])]
+    (doseq [c (get-argument R 0)]
+      (if (contains? (exposed-variables c) A)
+        (conj! inner c)
+        (conj! outer c)))
+    (if (empty? outer)
+      nil ; then there is nothing for us to move out of the expression
+      (make-conjunct (cons outer (make-proj A inner))) ; make a new rexpr with the outer expressions moved out
+      )
+    ))
+
+(def-rewrite
+  :match (if (is-empty-rexpr? A) (:rexpr B) (:rexpr C))
+  :run-at :construction
+  C)
+
+(def-rewrite
+  :match (if (is-non-empty-rexpr? A) (:rexpr B) (:rexpr C))
+  :run-at :construction
+  B)
+
+(def-rewrite
+  :match (if (:rexpr A) (:rexpr B) (:rexpr C))
+  :run-at :standard
+  (make-if (let [ctx (context/make-nested-context A)]
+             (context/bind-context ctx (simplify A)))
+           B C))
 
 
 ;

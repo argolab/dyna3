@@ -9,6 +9,7 @@
   (is-bound? [this variable])
   (set-value! [this variable value])
   (add-rexpr! [this rexpr])
+  (add-context! [this other-context])
   (all-rexprs [this])
   (construct-context-rexpr [this])
   (intersect [this other])
@@ -56,9 +57,12 @@
     ;                                    (dyna-backend.rexpr/unify-rexpr. (car x) (cdar x)))))
 
   (intersect [this other]
-    nil)
+    (???))
   (subtract [this other]
-    nil)
+    (???))
+
+  (add-context! [this other-context]
+    (???))
   Object
   (toString ^String [this]
     (str "Context {" rexprs "}")))
