@@ -130,6 +130,17 @@
   (v2 (<= v0 v1))
   )
 
+(comment
+  (def-rewrite
+    :match (lessthan (:var A) (:var B) (is-true? x))
+    :run-at :inference
+    :context (lessthan (:var C) (:var A) (is-true? y))
+    :infers (lessthan C B (make-constant true))
+    ;; then this will need to make a new conjucntive constraint
+    nil
+    )
+  )
+
 (def-base-rexpr greaterthan [:var v0 :var v1 :var v2])
 (def-rewrite
   :match (greaterthan (:any v0) (:any v1) (:any v2))
@@ -212,18 +223,32 @@
                        :var Step
                        :var Out])
 
+;; there should be notation that this is going to introduce a disjunct
+;; such that it knows that this would have some loop or something
 (def-rewrite
   :match (range (:ground Low) (:ground High) (:ground Step) (:any Out))
-  :run-at :standard
+  :run-at :standard ;; there should be some version of run-at where it would be able to indicate that it would introduce a disjunct, so that this could be some "optional" rewrite or something that it might want to defer until later.  This would be trying to find if
   (let [LowV (get-value Low)
         HighV (get-value High)
         StepV (get-value Step)]
-    (if (>= LowV HighV) (make-multiplicity 0)
-        (make-disjunct [(make-no-simp-unify Out (make-constant LowV)) ; this make-unify will have to avoid running the constructors, otherwise it will assign the value directly.  So no-simp should allow for this to avoid those at construction rewrites
-                        (make-range (make-constant (+ LowV StepV))
-                                    High
-                                    Step
-                                    Out)])))
+    (if (is-bound? Out)
+      (let [OutV (get-value Out)]
+        (make-multiplicity
+         (and (int? OutV)
+              (>= LowV OutV)
+              (< OutV HighV)
+              (= (mod (- OutV LowV) StepV) 0))))
+      (if (>= LowV HighV) (make-multiplicity 0)
+          (make-disjunct [(make-no-simp-unify Out (make-constant LowV)) ; this make-unify will have to avoid running the constructors, otherwise it will assign the value directly.  So no-simp should allow for this to avoid those at construction rewrites
+                          (make-range (make-constant (+ LowV StepV))
+                                      High
+                                      Step
+                                      Out)])))))
+
+(comment
+  (def-iterator
+    :match (range (:ground Low) (:ground High) (:ground Step) (:iterate Out))
+    (make-iterator Out (range (get-value Low) (get-value High) (get-value Step))))
   )
 
 ;; there is no way to define a range with 3 arguments, as it would use the same name here

@@ -11,7 +11,9 @@
 
 
 (declare simplify)
-(declare simplify-construct)
+(def simplify-construct identity)
+(declare find-iterators)
+
 
 ;(defn simplify-construct [r] r)
 
@@ -238,6 +240,21 @@
 
 (def-base-rexpr multiplicity [:mult m])
 
+;; there is meta information on this which needs to be carried forward
+(let [prev make-multiplicity
+      true-mul (prev 1)
+      false-mul (prev 0)]
+  (defn make-multiplicity
+    {:rexpr-constructor 'multiplicity
+     :rexpr-constructor-type multiplicity-rexpr}
+    [x]
+    (case x
+      true true-mul
+      false false-mul
+      0 false-mul ; we can special case the common values to avoid creating these objects many times
+      1 true-mul
+      (prev x))))
+
 (def-base-rexpr conjunct [:rexpr-list args])
 
 (def make-* make-conjunct)
@@ -311,19 +328,19 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; functions which are used to perform matchings against a given Rexpr
 (def rexpr-matchers (atom {}))
 (def rexpr-matchers-mappers (atom {}))
 (def rexpr-matchers-meta (atom {}))
 
-(def rexpr-rewrites (atom {}))
-(def rexpr-rewrites-construct (atom {}))
+;; functions which actually perform rewrites against an Rexpr
+;; these functions perform their own internal matching
+(def rexpr-rewrites (atom {})) ; run at standard time
+(def rexpr-rewrites-construct (atom {})) ; run at the time of construction
+(def rexpr-rewrites-inference (atom {})) ; run to construct new objects, but there are
 
-;; we are going to have to have different collections depending on when the rewrite is run at
-
-;; (def rewrite-run-at
-;;   { :construction {}
-;;     :standard {}
-;;     :complete {}  })
+;; functions which define how iterators are accessed for a given Rexpr
+(def rexpr-iterators-accessors (atom {}))
 
 
 (defmacro def-rewrite-matcher
@@ -399,9 +416,34 @@
     `(save-defined-rewrite
        ~(case (:run-at kw-args :standard)
           :standard 'rexpr-rewrites
-          :construction 'rexpr-rewrites-construct)
+          :construction 'rexpr-rewrites-construct
+          :inference 'rexpr-rewrites-inference)
        ~(symbol (str functor-name "-rexpr"))
        ~rewriter-function)))
+
+(defmacro def-iterator [& args]
+  (let [kw-args (apply hash-map (drop-last args))
+        func-body (last args)
+        functor-name (car (:match kw-args))
+        arity (if (= (cdar (:match kw-args)) :any) nil (- (count (:match kw-args)) 1))
+        matcher (:matcher kw-args)
+        func (make-rewriter-function matcher func-body)]
+    ;; there needs to be some find iterator method
+    ;; we could use the same methods to construct the function for getting the iterators
+    ;; then it would have the same access methods.  I suppose that there could be some base methods
+    ;; where it would call the base insteace, but we would like to union across the different methods
+    ;; for constructing something where
+
+    `(save-defined-rewrite
+      'rexpr-iterators-accessors
+      ~(symbol (str functor-name "-rexpr"))
+      ~func)
+
+    nil))
+
+(defn make-iterator [variable iterator]
+  ; these are going to need to be hashable, otherwise this would mean that
+  [variable iterator])
 
 
 (defn is-variable-set? [variable]
@@ -453,6 +495,9 @@
     (context/bind-context ctx
                           (simplify rexpr))))
 
+
+;; the context is assumed to be already constructed outside of this function
+;; this will need for something which needs for the given functionq
 (defn simplify-fully [rexpr]
   (let [prev (atom nil)
         cr (atom rexpr)]
@@ -474,7 +519,7 @@
                          (.value var-name))))
 
 (def-rewrite-matcher :not-ground [var]
-  (not (is-bound? var)))
+  (and (is-variable? var) (not (is-bound? var))))
 
 (def-rewrite-matcher :free [var-name]
                      (and (is-variable? var-name) (not (is-variable-set? var-name)) var-name))
@@ -501,6 +546,11 @@
 ;; just match anything
 (def-rewrite-matcher :unchecked [x] true)
 
+;; this are things which we want to iterate over the domain for
+;; this should
+(def-rewrite-matcher :iterate [x]
+  (and (is-variable? x) (not (is-bound? x))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def-rewrite
@@ -516,7 +566,7 @@
 (def-rewrite
   ;; the matched variable should have what value is the result of the matched expression.
   :match (unify (:ground A) (:ground B))
-  :run-at :standard ; this should run at construction
+  :run-at :construction
   (if (= A B)
     (make-multiplicity 1)
     (make-multiplicity 0)))
@@ -525,6 +575,7 @@
   :match (unify (:ground A) (:not-ground B))
   :run-at :construction
   (make-unify B A))
+
 
 (def-rewrite
   :match (unify (:structured B) (:ground A))
@@ -555,6 +606,9 @@
     (do (set-value! A (get-value B))
         (make-multiplicity 1))))
 
+(def-iterator
+  :match (unify (:iterate A) (:ground B))
+  (make-iterator A [(get-value B)]))
 
 
 (def-rewrite
@@ -615,6 +669,11 @@
   (make-conjunct (vec (mapcat (fn [x] (if (instance? conjunct-rexpr x)
                                          (get-argument x 0)
                                          [x])) children))))
+
+
+(def-iterator
+  :match (conjunct (:rexpr-list children))
+  (apply union (map find-iterators children)))
 
 
 ;; (def-rewrite

@@ -15,16 +15,17 @@
 (def ^:dynamic work-agenda (atom #{}))
 
 (defn make-new-system-state []
-  {
-   :user-expressions (atom {})
+  {:user-expressions (atom {})
+   :memoized-expressions (atom {})
    :optimized-expressions (atom {})
-   :memoized (atom {})
-
    })
 
 (defmacro run-under-state [state & args]
   `(binding [user-defined-expressions (:user-expressions ~state)
              optimized-user-defined-expressions (:optimized-expressions ~state)
-             memoized-expressions (:memoized ~state)]
+             memoized-expressions (:memoized-expressions ~state)]
      ~@args
      ))
+
+
+;; the memozied expressions should be somehow embedded into the

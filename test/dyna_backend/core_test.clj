@@ -38,7 +38,9 @@
     (is (= (context/get-value ctx (make-variable 'v2)) 7))))
 
 
-
+;; (deftest basic-disjunct
+;;   (let [rexpr (make-disjunct
+;;               )]))
 
 
 
