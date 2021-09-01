@@ -1,4 +1,6 @@
-(ns dyna-backend.assumptions)
+(ns dyna-backend.assumptions
+  (:require [dyna-backend.system :as system])
+  )
 
 
 (defprotocol Watcher
@@ -52,6 +54,18 @@
 
 
 ;; this would have that there are some expressions
-(def-base-rexpr assumption-wrapper
-  [:assumption assumption
-   :rexpr expression])
+;; (def-base-rexpr assumption-wrapper
+;;   [:assumption assumption
+;;    :rexpr expression])
+
+;; (def-rewrite
+;;   :match (asusmption-wrapper assumption (:rexpr R))
+;;   :run-at :standard
+;;   (if (is-valid? assumption)
+;;     (make-assumption-wrapper assumption (simplify R))
+;;     ;; this is going to have to somehow identify what the new expression is.  If there is something tha t
+;;     (assert false) ; this is going to need to somehow handle that there are expressions which
+;;     )
+;;   )
+
+(defn make-assumption-wrapper [x] (assert false))

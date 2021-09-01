@@ -1,6 +1,7 @@
 (ns dyna-backend.rexpr
   (:require [dyna-backend.utils :refer :all])
   (:require [dyna-backend.context :as context])
+  (:require [dyna-backend.system :as system])
              ;:rename '{get-value context-get-value,
              ;          is-bound? context-is-bound?
              ;          set-value! context-set-value!}
@@ -26,7 +27,9 @@
   (get-arguments [this])
   (as-list [this]) ; use for printing out the structure
 
-  (exposed-variables [this])) ; return variables values that are exposed externally (so hide aggregators and proj)
+  (exposed-variables [this])        ; return variables values that are exposed externally (so hide aggregators and proj)
+  )
+
 
 
 ;; the annotation on a variable can be one of
@@ -182,6 +185,11 @@
 (defn make-constant [val]
   (constant-value-rexpr. val))
 
+(let [tv (make-constant true)
+      fv (make-constant false)]
+  (defn make-constant-bool [val]
+    (if val tv fv)))
+
 (defmethod print-method constant-value-rexpr [^constant-value-rexpr this ^java.io.Writer w]
   (.write w (str "(constant " (.value this) ")")))
 
@@ -298,6 +306,11 @@
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def-base-rexpr user-call [:str name
+                           :var-list args
+                           :unchecked call-depth])
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; an optimized version of aggregation which does projection and the aggregation in the same operator
@@ -366,7 +379,7 @@
   [collection functor-name rewriter]
   (swap-vals! collection
               (fn [old] (assoc old functor-name
-                                   (conj (get old functor-name #{}) rewriter)))))
+                               (conj (get old functor-name #{}) rewriter)))))
 
 
 
@@ -442,8 +455,9 @@
     nil))
 
 (defn make-iterator [variable iterator]
-  ; these are going to need to be hashable, otherwise this would mean that
-  [variable iterator])
+  ;; these are going to need to be hashable, otherwise this would mean that we can't use the set to identify which expressions are iterable
+  ;; there are some values which
+  #{[variable iterator]})
 
 
 (defn is-variable-set? [variable]
@@ -506,17 +520,26 @@
       (swap! cr simplify))
     @cr))
 
+(defn find-iterators [rexpr]
+  (let [typ (type rexpr)
+        rrs (get @rexpr-iterators-accessors typ)]
+    (apply union (for [rs rrs] (rs rexpr)))))
+
+
 ;; there should be some matcher which is going to identify which expression.
 ;; this would have some which expressions are the expressions
 ;; this is going to have to have some context in which an expression
 
+(defn is-ground? [var-name]
+  (if (and (is-variable? var-name) (is-variable-set? var-name))
+    (get-variable-value var-name)
+    (if (is-constant? var-name)
+      (.value var-name))))
+
 (def-rewrite-matcher :ground [var-name]
                                         ; this should be redfined such that it will return the ground value for the variable
                                         ; though we might not want to have the matchers identifying a given expression
-                     (if (and (is-variable? var-name) (is-variable-set? var-name))
-                       (get-variable-value var-name)
-                       (if (is-constant? var-name)
-                         (.value var-name))))
+  (is-ground? var-name))
 
 (def-rewrite-matcher :not-ground [var]
   (and (is-variable? var) (not (is-bound? var))))
@@ -538,7 +561,13 @@
 ;; then this will have to look at those values
 
 (def-rewrite-matcher :variable [var]
-                     (is-variable? var))
+  (is-variable? var))
+
+(def-rewrite-matcher :varible-list [var-list]
+  (every? is-variable? var-list))
+
+(def-rewrite-matcher :ground-var-list [var-list]
+  (every? is-ground? var-list))
 
 (def-rewrite-matcher :any [v]
                      (or (is-variable? v) (is-constant? v)))
@@ -875,3 +904,14 @@
 ;;     )))))
 
 ;; )
+
+
+(def-rewrite
+  :match (user-call (:str name) args call-depth)
+  :run-at :standard
+  (let [n [name (count args)]
+        expr (system/lookup-named-expression name)]
+    ;; this needs to rename the variables which represent the expression
+    nil
+    )
+  )

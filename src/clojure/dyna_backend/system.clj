@@ -1,5 +1,7 @@
 (ns dyna-backend.system)
 
+(def base-user-expressions (atom {}))
+
 ;; expressions which are defined by the user
 (def ^:dynamic user-defined-expressions (atom {}))
 
@@ -29,3 +31,22 @@
 
 
 ;; the memozied expressions should be somehow embedded into the
+
+;; this should first have that this is going to find which of the defined expression will be used for something
+(defn lookup-named-expression
+  ([name] (lookup-named-expression name :all))
+  ([name what]
+   (or (get memoized-expressions name)
+       (get optimized-user-defined-expressions name)
+       (get user-defined-expressions name)
+       (get base-user-expressions name)))
+  )
+
+
+;; (defn set-user-expression [name rexpr]
+;;   (swap! user-defined-expressions
+;;          (fn [prev]
+;;            (let [pv (get prev name)]
+;;              (if ()))
+;;            (assoc prev name rexpr)
+;;            )))
