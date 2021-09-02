@@ -6,8 +6,9 @@
   )
 
 (gen-class
-  :name "dyna_backend.DynaInterface"
+  :name "dyna_backend.DynaInterfaceImpl"
   :prefix "-"
+  :implements [dyna_backend.DynaInterface]
   :methods [[make_rexpr [String "[Ljava.lang.Object;"] Object]
             [make_variable [String] Object]
             [make_constant [Object] Object]

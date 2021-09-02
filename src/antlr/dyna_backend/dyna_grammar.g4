@@ -8,14 +8,8 @@
 grammar dyna_grammar;
 //
 @header {
-package dyna_backend.genparser;
+package dyna_backend;//.genparser;
 
-
-// import dyna_bac.parser.*;
-// import static org.dyna.parser.ParserCheck.*;
-
-// import dyna_backend.rexpr.Rexpr;
-// import dyna_backend.rexpr.RexprValue;
 import dyna_backend.DynaParserInterface;
 }
 
@@ -71,7 +65,8 @@ atom returns[String t]
       {
         $t = $m.getText();
         $t = $t.substring(1, $t.length() - 1);
-        check(! $t.startsWith("\$_"), "the namespace \$_ is reserved for internal use");
+        if($t.startsWith("\$_"))
+            throw new RuntimeException("the namespace \$_ is reserved for internal use");
       }
     ;
 
@@ -185,14 +180,16 @@ term [DynaParserInterface prog]
      returns[]
     locals [DynaParserInterface lprog]
     : a=atom p=parameters[$prog] agg=aggregatorName
-        {$prog.set_atom_name($a.t, $p.args.size(), $agg.t); }
+        {$prog.set_atom($a.t, $p.args, $agg.t); }
       ({$lprog = (DynaParserInterface)$prog.copy_interface(); }
-            termBody[$lprog, $a.t, $agg.t, $p.args] ';')*
-        l=termBody[$prog, $a.t, $agg.t, $p.args] EndTerm
+            termBody[$lprog] ';')*
+        termBody[$prog] EndTerm
     | a=atom p=parameters[$prog] EndTerm
       {
-        // writing `a(1,2,3).` is just a short hand for `a(1,2,3) :- true.`
-
+            // writing `a(1,2,3).` is just a short hand for `a(1,2,3) :- true.`
+            $prog.set_atom($a.t, $p.args, ":-");
+            // there needs to be some construct atom rule with the current cojuncts and something which takes the current value for an expression
+            $prog.construct_atom($prog.make_constant(true));
       }
     // queries
     | query EndQuery {
@@ -201,22 +198,26 @@ term [DynaParserInterface prog]
     // compiler statements
     // | ':-' ce=compilerExpression EndTerm { $trm = $ce.trm; $prog.addTerm($trm); }
     // assert statement check at the end of a transaction
-    | 'assert' (e=expression[$prog] Comma {$prog.unify_with_true($e.value);})* e2=expression[$prog] {$prog.unify_with_true($e2.value);} EndTerm
-      {
-assert(false);
-      }
+    | 'assert'
+      {$prog.set_atom("assert", new Object[]{}, "assert=");}
+      termBody[$prog]
     ;
 
 
-termBody[DynaParserInterface prog]
+termBody[DynaParserInterface prog] returns[]
       locals [
-         Object with_key=null
+         Object with_key=null,
+         Object result_value = null;
       ]
     : (e=expression[$prog] Comma { $prog.unify_with_true($e.value); })* e2=expression[$prog]
       (withKey[$prog] {$with_key = $withKey.value;})?
       forExpr[$prog]?
       {
-assert(false);
+            $result_value = $e2.value;
+            if($with_key != null) {
+                $result_value = $prog.make_structure("\$with_key_pair", new Object[]{$with_key, $result_value});
+            }
+            $prog.construct_atom($result_value);
       }
     ;
 
@@ -270,7 +271,7 @@ methodCall[DynaParserInterface prog] returns [String name, ArrayList<Object> arg
     ;
 
 arguments[DynaParserInterface prog]
-         returns [ArrayList<Objects> args = new ArrayList<>();]
+         returns [ArrayList<Object> args = new ArrayList<>();]
     : (e=expression[$prog] Comma {$args.add($e.value);})* e=expression[$prog] {$args.add($e.value);}
     ;
 

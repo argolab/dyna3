@@ -6,13 +6,14 @@
                  [org.clojure/tools.namespace "1.1.0"]
                  [aprint "0.1.3"]
                  ;[clj-python/libpython-clj "2.00-beta-22"]
-                 [com.clojure-goes-fast/clj-java-decompiler "0.3.0"]]
+                 [com.clojure-goes-fast/clj-java-decompiler "0.3.0"]
+                 [org.antlr/antlr4-runtime "4.7.2"]]
   :repl-options {:init-ns dyna-backend.core}
   :aot [dyna-backend.interface
         dyna-backend.parser_interface]
   ;:aot :all
   :source-paths ["src/clojure"]
-  :java-source-paths ["src/java" "target/gen-src"]
+  :java-source-paths ["target/gen-src" "src/java"]
   :test-paths ["test"]
   :profiles {:uberjar {:aot :all}}
   :plugins [[lein-antlr-plugin "0.1.0"]]
