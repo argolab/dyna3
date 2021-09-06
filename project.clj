@@ -18,4 +18,6 @@
   :profiles {:uberjar {:aot :all}}
   :plugins [[lein-antlr-plugin "0.1.0"]]
   :antlr-src-dir "src/antlr"
-  :antlr-dest-dir "target/gen-src")
+  :antlr-dest-dir "target/gen-src"
+  :aliases {"compile" ["do" ["antlr"] "compile"]}
+  )

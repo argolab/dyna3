@@ -4,3 +4,6 @@
 
 (deftest basic-parser
   (parse-string "foo1 = 123."))
+
+(deftest dynabase-test
+  (parse-string "db_baz(X) = Y = 9, { something(W) = W*44. }."))

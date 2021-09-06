@@ -1,4 +1,6 @@
-(ns dyna-backend.utils)
+(ns dyna-backend.utils
+  (:require [aprint.core :refer [aprint]])
+  )
 
 ;; make functions like car caar cdr etc
 
@@ -46,13 +48,18 @@
      `(let ~(vec (mapcat #(list % `(*locals* '~%)) (keys locals)))
         ~form))))
 
+;; the system.out might be getting messed with.  The system/in is not getting echoed back
+
 (defmacro debug-repl
   "Starts a REPL with the local bindings available."
   ([] `(debug-repl "dr"))
   ([prompt]
-   `(clojure.main/repl
-     :prompt #(print ~prompt "=> ")
-     :eval (partial ~eval-with-locals (debugger-get-local-bindings)))))
+   `(let [~'local-bindings (debugger-get-local-bindings)]
+      (.printStackTrace (Throwable. "Entering Debugger") System/out)
+      (aprint ~'local-bindings)
+      (clojure.main/repl
+         :prompt #(print ~prompt "=> ")
+         :eval (partial ~eval-with-locals ~'local-bindings)))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

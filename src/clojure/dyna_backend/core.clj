@@ -12,6 +12,10 @@
 
 
 
+;; (defn parse-string [str]
+;;   (require 'dyna-backend.parser_interface)
+;;   (dyna-backend.parser_interface/parse-string str))
+
 
 ;; (require '[])
 ;;(use 'aprint.core)

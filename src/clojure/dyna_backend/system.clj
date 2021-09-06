@@ -43,6 +43,11 @@
   )
 
 
+(defn add-user-atom [name arity rexpr]
+  ;; this is going to need to combine the aggregators together.  Which means that this is going to have to figure out where in the expression this should be combined into it
+  )
+
+
 ;; (defn set-user-expression [name rexpr]
 ;;   (swap! user-defined-expressions
 ;;          (fn [prev]

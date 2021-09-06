@@ -114,11 +114,17 @@ StringConst
     ;
 // ' stupid highlighting
 
+StringConst2
+    : '\'' (~['\r\n])* '\''
+    ;
+// ' stupid highlighting
+
 junk3: ;
 
 // if we want to support multilined strings in the future or something, we can just do that here
 stringConst returns[String t] locals [String vv]
     : a=StringConst { $vv = $a.getText(); $t = $vv.substring(1, $vv.length() - 1); }
+    | a=StringConst2 { $vv = $a.getText(); $t = $vv.substring(1, $vv.length() - 1); }
     // TODO: we need to handle string escapes etc
     ;
 
@@ -179,17 +185,24 @@ program [DynaParserInterface prog]
 term [DynaParserInterface prog]
      returns[]
     locals [DynaParserInterface lprog]
-    : a=atom p=parameters[$prog] agg=aggregatorName
-        {$prog.set_atom($a.t, $p.args, $agg.t); }
+    : {$prog.start_new_atom();}
+        (dbase=expression[$prog] '.'  {$prog.set_dynabase_self_variable($dbase.value);})?
+      a=atom {$prog.set_atom_name($a.t);}
+      p=parameters[$prog] {$prog.set_atom_args($p.args);}
+      agg=aggregatorName {$prog.set_atom_aggregator($agg.t);}
       ({$lprog = (DynaParserInterface)$prog.copy_interface(); }
             termBody[$lprog] ';')*
         termBody[$prog] EndTerm
-    | a=atom p=parameters[$prog] EndTerm
+    | {$prog.start_new_atom();}
+        (dbase=expression[$prog] '.'  {$prog.set_dynabase_self_variable($dbase.value);})?
+        a=atom {$prog.set_atom_name($a.t);}
+      p=parameters[$prog] EndTerm
       {
             // writing `a(1,2,3).` is just a short hand for `a(1,2,3) :- true.`
-            $prog.set_atom($a.t, $p.args, ":-");
-            // there needs to be some construct atom rule with the current cojuncts and something which takes the current value for an expression
-            $prog.construct_atom($prog.make_constant(true));
+            $prog.set_atom_args($p.args);
+            $prog.set_atom_aggregator(":-");
+            $prog.set_atom_result_variable($prog.make_constant(true));
+            $prog.finish_atom();
       }
     // queries
     | query EndQuery {
@@ -199,7 +212,10 @@ term [DynaParserInterface prog]
     // | ':-' ce=compilerExpression EndTerm { $trm = $ce.trm; $prog.addTerm($trm); }
     // assert statement check at the end of a transaction
     | 'assert'
-      {$prog.set_atom("assert", new Object[]{}, "assert=");}
+        {$prog.start_new_atom();
+         $prog.set_atom_name("assert");
+         $prog.set_atom_args(new Object[]{});
+         $prog.set_atom_aggregator("assert=");}
       termBody[$prog]
     ;
 
@@ -217,7 +233,8 @@ termBody[DynaParserInterface prog] returns[]
             if($with_key != null) {
                 $result_value = $prog.make_structure("\$with_key_pair", new Object[]{$with_key, $result_value});
             }
-            $prog.construct_atom($result_value);
+            $prog.set_atom_result_variable($result_value);
+            $prog.finish_atom();
       }
     ;
 
@@ -276,14 +293,85 @@ arguments[DynaParserInterface prog]
     ;
 
 array[DynaParserInterface prog] returns [Object value] locals []
-    : '[' elems=arrayElements[$prog] ']'  { assert(false); }
-    | '[' elems=arrayElements[$prog] '|' t=expression[$prog] ']' { assert(false); }
-    | '[' ']' { assert(false); }
+    : '[' elems=arrayElements[$prog] ']'
+        {
+            $value = $prog.make_call("\$nil", new Object[]{});
+            for(int i = $elems.elems.size() - 1; i >= 0; i--) {
+                $value = $prog.make_call("\$cons", new Object[]{$elems.elems.get(i), $value});
+            }
+        }
+    | '[' elems=arrayElements[$prog] '|' t=expression[$prog] ']'
+       {
+            $value = $t.value;
+            for(int i = $elems.elems.size() - 1; i >= 0; i--) {
+                $value = $prog.make_call("\$cons", new Object[]{$elems.elems.get(i), $value});
+            }
+       }
+    | '[' ']' { $value = $prog.make_call("\$nil", new Object[]{}); }
     ;
 
 arrayElements[DynaParserInterface prog] returns [ArrayList<Object> elems = new ArrayList<>(); ]
     : (e=expression[$prog] Comma {$elems.add($e.value);})* e=expression[$prog] {$elems.add($e.value);}
     ;
+
+assocativeMap[DynaParserInterface prog] returns[Object value] locals []
+    : '{' '}'   { $value = $prog.make_call("\$map_empty", new Object[]{}); }
+    |
+        '{' a=assocativeMapElements[$prog] '}'
+        {
+            $value = $prog.make_call("\$map_empty", new Object[]{});
+            for(SimplePair<Object,Object> p : $a.elements) {
+                $value = $prog.make_call("\$map_element", new Object[]{p.a, p.b, $value});
+            }
+        }
+    | '{' a=assocativeMapElements[$prog] '|' b=expression[$prog] '}'
+        {
+            $value = $b.value;
+            for(SimplePair<Object,Object> p : $a.elements) {
+                $value = $prog.make_call("\$map_element", new Object[]{p.a, p.b, $value});
+            }
+        }
+    ;
+
+assocativeMapElements[DynaParserInterface prog] returns[ArrayList<SimplePair<Object,Object>> elements = new ArrayList<>();]
+    : (a=assocativeMapElement[$prog] {$elements.add(new SimplePair($a.key, $a.value));} )+
+    ;
+
+assocativeMapElement[DynaParserInterface prog] returns[Object key, Object value]
+    : v=Variable { $key = $prog.make_constant($v.getText()); $value = $prog.make_variable($v.getText()); }
+    | a=expression[$prog] '->' b=expression[$prog] {$key=$a.value; $value=$b.value;}
+    ;
+
+
+// there could be some syntax for specifying which variables are captured.  This would have that there are some expressions with
+dynabase[DynaParserInterface prog] returns[Object value] locals [DynaParserInterface lprog]
+    : {$lprog = $prog.copy_interface();
+        $lprog.start_new_dynabase(); }
+        'new'
+        (parent=expression[$lprog] {$lprog.set_dynabase_inherits_variable($parent.value);})? // if this inherits from some other dynabase
+        ('{' (term[$lprog])* '}')?  // any terms which are defined inside of this dynabase
+        {
+            $value = $lprog.get_dynabase_construct_variable();
+            $lprog.finish_dynabase();
+            $lprog = null; // delete our reference to this as this is no longer needed
+        }
+    ;
+
+dynabaseAccess[DynaParserInterface prog] returns[Object value]
+    : base=expression[$prog] '.' m=methodCall[$prog]
+        {
+            $value = $prog.make_call_with_dynabase($base.value, $m.name, $m.args);
+        }
+    ;
+
+
+// : {$lprog = prog.enter_dynabase_context(); } '{'  dynabaseElements[$lprog] '}'
+    // | 'new' ('(' parent=expression[$prog] ')')? ('{' dynabaseElements[$lprog] '}')?
+    // ;
+
+// dynabaseElements[DynaParserInterface prog]
+//     : (term[$prog])*
+//     ;
 
 ////////////////////
 
@@ -297,11 +385,19 @@ arrayElements[DynaParserInterface prog] returns [ArrayList<Object> elems = new A
 //     : (a=inlineAggregatedBody ';' {$bodies.add($a.trm);})* a=inlineAggregatedBody {$bodies.add($a.trm);}
 //     ;
 
+
+// this is apparently the suggested way to deal with order of operators in antlr
 expressionRoot[DynaParserInterface prog] returns [Object value]
     : m=methodCall[$prog] { $value = $prog.make_call($m.name, $m.args); }
     | '&' m=methodCall[$prog] { $value = $prog.make_structure($m.name, $m.args); }
 
-    | v=Variable { $value = $prog.make_variable($v.getText()); }
+    | v=Variable {
+            if($v.getText().equals("_")) {
+                $value = $prog.make_unnamed_variable();  // these are variables which can not be referenced in more than once place by name
+            } else {
+                $value = $prog.make_variable($v.getText());
+            }
+      }
     | primitive { $value = $prog.make_constant($primitive.v); }
     // | '(' agg=aggregatorName ia=inlineAggregatedBodies')'
     //   {
@@ -313,6 +409,9 @@ expressionRoot[DynaParserInterface prog] returns [Object value]
             $value = $prog.make_unnamed_variable();
             $m.args.add($value);
             $prog.unify_with_true($prog.make_call($m.name, $m.args)); }
+    | mp=assocativeMap[$prog] { $value=$mp.value; }
+    | db=dynabase[$prog] { $value = $db.value; }
+    //| dba=dynabaseAccess[$prog] { $value = $dba.value; }
     ;
 
 expressionTyped[DynaParserInterface prog] returns [Object value]
@@ -321,14 +420,17 @@ expressionTyped[DynaParserInterface prog] returns [Object value]
             $value = $a.value;
             $b.args.add($value);
             $prog.unify_with_true($prog.make_call($b.name, $b.args));
-            assert(false); } // this is going to ahve to add some method call to the value of the statement
+      } // this is going to ahve to add some method call to the value of the statement
     ;
 
-// this is apparently the suggested way to deal with order of operators in antlr
+expressionDynabaseAccess[DynaParserInterface prog] returns[Object value]
+    : a=expressionTyped[$prog] {$value=$a.value;} ('.' m=methodCall[$prog] {$value = $prog.make_call_with_dynabase($value, $m.name, $m.args);})*
+    ;
+
 
 expressionUnaryMinus[DynaParserInterface prog] returns [Object value]
-    : b=expressionTyped[$prog] {$value = $b.value;}
-    | '-' b=expressionTyped[$prog] {$value = $prog.make_call("unary_-", new Object[]{$b.value});}
+    : b=expressionDynabaseAccess[$prog] {$value = $b.value;}
+    | '-' b=expressionDynabaseAccess[$prog] {$value = $prog.make_call("\$unary_-", new Object[]{$b.value});}
     ;
 
 expressionExponent[DynaParserInterface prog] returns [Object value]

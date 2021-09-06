@@ -21,7 +21,7 @@
 (defprotocol Rexpr
   (primitive-rexpr [this]) ;; return a primitive r-expr for the expression
   ;;(replace-expressions [this expressions-map]) ;; replace a given nested expression
-  (get-variables [this])
+  (get-variables [this])  ;; get the variables from the current rexpr
   (get-children [this])
   (get-argument [this n])
   (get-arguments [this])
@@ -53,7 +53,7 @@
          Rexpr
          ~'(primitive-rexpr [this] this) ;; this is a primitive expression so we are going to just always return ourselves
          (~'get-variables ~'[this]
-          (filter is-variable?
+          (filter variable?
                   (union #{~@(map cdar (filter #(= :var (car %1)) vargroup))}
                          ~@(map cdar (filter #(= :var-list `(set ~(car %1))) vargroup))
                          )))
@@ -77,7 +77,7 @@
          (~'exposed-variables ~'[this]
           (cache-field ~'cached-exposed-variables
                        (set
-                        (filter is-variable?
+                        (filter variable?
                                 (difference (union (get-variables ~'this)
                                                    ~@(keep
                                                       #(if (= :rexpr (car %))
@@ -105,7 +105,8 @@
           :rexpr-constructor-type ~(symbol rname)}
          ~(vec (map cdar vargroup))
          ~@(map (fn [x] `(if (not (~(resolve (symbol (str "check-argument-" (symbol (car x))))) ~(cdar x)))
-                           (do (debug-repl ~(str "check argument " (car x)))
+                           (do (.printStackTrace (Throwable. (str "Argument value check failed: " ~(car x) ~(cdar x))) System/err)
+                               (debug-repl ~(str "check argument " (car x)))
                                (assert false)))) vargroup)
          (~(symbol (str rname "."))
           (+ ~(hash rname) ~@(for [[var idx] (zipmap vargroup (range))]
@@ -135,6 +136,13 @@
        (defmethod print-method ~(symbol rname) ~'[this ^java.io.Writer w]
          (aprint (as-list ~'this) ~'w)))))
 
+
+(defprotocol RexprValue
+  (get-value [this])
+  (set-value! [this value])
+  (is-bound? [this]))
+
+;; this is the value of the object itself
 (defrecord structured-term-value [name arguments])
 
 
@@ -148,11 +156,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; things like variables and constants should instead be some other type rather than an R-expr
 ;; this could be something
-
-(defprotocol RexprValue
-  (get-value [this])
-  (set-value! [this value])
-  (is-bound? [this]))
 
 
 (defrecord variable-rexpr [varname]
@@ -214,6 +217,11 @@
   Object
   (toString [this] (str "(structure " name " " arguments ")")))
 
+(defn make-structured-rexpr [name arguments]
+  (assert (string? name))
+  (assert (every? (partial satisfies? RexprValue) arguments))
+  (structured-rexpr. name arguments))
+
 (defmethod print-method structured-rexpr [^structured-rexpr this ^java.io.Writer w]
   (.write w (.toString this)))
 
@@ -224,19 +232,19 @@
 
 (defn is-constant? [x] (instance? constant-value-rexpr x))
 
-(defn is-variable? [variable]
+(defn variable? [variable]
   (instance? variable-rexpr variable))
 
-(defn is-rexpr? [rexpr]
+(defn rexpr? [rexpr]
   (and (satisfies? Rexpr rexpr)
-       (not (or (is-variable? rexpr) (is-constant? rexpr)))))
+       (not (or (variable? rexpr) (is-constant? rexpr)))))
 
 
 (defn check-argument-mult [x] (or (and (int? x) (>= x 0)) (= ##Inf x)))
-(defn check-argument-rexpr [x] (is-rexpr? x))
-(defn check-argument-rexpr-list [x] (every? is-rexpr? x))
-(defn check-argument-var [x] (or (is-variable? x) (is-constant? x))) ;; a variable or constant of a single value.  Might want to remove is-constant? from this
-(defn check-argument-var-list [x] (every? is-variable? x))
+(defn check-argument-rexpr [x] (rexpr? x))
+(defn check-argument-rexpr-list [x] (every? rexpr? x))
+(defn check-argument-var [x] (or (variable? x) (is-constant? x))) ;; a variable or constant of a single value.  Might want to remove is-constant? from this
+(defn check-argument-var-list [x] (every? variable? x))
 (defn check-argument-value [x] (satisfies? RexprValue x)) ;; something that has a get-value method (possibly a structure)
 (defn check-argument-hidden-var [x] (check-argument-var x))
 (defn check-argument-str [x] (string? x))
@@ -275,10 +283,10 @@
 ;; there should be a more complex expression for handling this in the case of a if statement or something
 ;; this will want for this to somehow handle if there are some ways in which this can handle if there
 (defn is-empty-rexpr? [rexpr]
-  (and (is-rexpr? rexpr) (= (make-multiplicity 0) rexpr)))
+  (and (rexpr? rexpr) (= (make-multiplicity 0) rexpr)))
 
 (defn is-non-empty-rexpr? [rexpr]
-  (and (is-rexpr? rexpr)
+  (and (rexpr? rexpr)
        (or (and (is-multiplicity? rexpr) (> (get-argument rexpr 0) 0))
            (and (is-disjunct? rexpr) (some is-non-empty-rexpr? (get-argument rexpr 0)))
            )))
@@ -531,7 +539,7 @@
 ;; this is going to have to have some context in which an expression
 
 (defn is-ground? [var-name]
-  (if (and (is-variable? var-name) (is-variable-set? var-name))
+  (if (and (variable? var-name) (is-variable-set? var-name))
     (get-variable-value var-name)
     (if (is-constant? var-name)
       (.value var-name))))
@@ -542,16 +550,16 @@
   (is-ground? var-name))
 
 (def-rewrite-matcher :not-ground [var]
-  (and (is-variable? var) (not (is-bound? var))))
+  (and (variable? var) (not (is-bound? var))))
 
 (def-rewrite-matcher :free [var-name]
-                     (and (is-variable? var-name) (not (is-variable-set? var-name)) var-name))
+                     (and (variable? var-name) (not (is-variable-set? var-name)) var-name))
 
 
-(def-rewrite-matcher :rexpr [rexpr] (is-rexpr? rexpr))
+(def-rewrite-matcher :rexpr [rexpr] (rexpr? rexpr))
 
 (def-rewrite-matcher :rexpr-list [rexpr-list]
-                     (and (seqable? rexpr-list) (every? is-rexpr? rexpr-list)))
+                     (and (seqable? rexpr-list) (every? rexpr? rexpr-list)))
 
 
 ;; something that has a name first followed by a number of different unified expressions
@@ -561,16 +569,16 @@
 ;; then this will have to look at those values
 
 (def-rewrite-matcher :variable [var]
-  (is-variable? var))
+  (variable? var))
 
 (def-rewrite-matcher :varible-list [var-list]
-  (every? is-variable? var-list))
+  (every? variable? var-list))
 
 (def-rewrite-matcher :ground-var-list [var-list]
   (every? is-ground? var-list))
 
 (def-rewrite-matcher :any [v]
-                     (or (is-variable? v) (is-constant? v)))
+                     (or (variable? v) (is-constant? v)))
 
 ;; just match anything
 (def-rewrite-matcher :unchecked [x] true)
@@ -578,7 +586,7 @@
 ;; this are things which we want to iterate over the domain for
 ;; this should
 (def-rewrite-matcher :iterate [x]
-  (and (is-variable? x) (not (is-bound? x))))
+  (and (variable? x) (not (is-bound? x))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

@@ -343,3 +343,52 @@
 
 (def-user-term "$value" 1 (make-multiplicity 1)) ;; TODO: should return the value for some pair which might have the withkey construct
 (def-user-term "$arg" 1 (make-multiplicity 1)) ;; TODO: should return the argument which is associated with the withkey construct
+
+
+;; operators for handling an array.  An array in Dyna is just a linked list of cells with the name ".".  This is akin to prolog
+
+(def-user-term "$nil" 1 (make-unify v0 (make-structured-rexpr "$nil" [])))
+(def-user-term "$cons" 2 (make-unify v2 (make-structured-rexpr "." [v0 v1])))
+
+;; operators for handing a map of elements.  The map is a wrapped clojure map which is associate
+(defrecord DynaMap [map-elements])
+
+(def-base-rexpr map-element-access [:var Key
+                                    :var Value
+                                    :var previous_map
+                                    :var resulting_map])
+
+(def-user-term "$map_empty" 0 (make-unify v0 (make-constant (DynaMap. {})))) ;; return an empty map value
+(def-user-term "$map_element" 3 (make-map-element-access v0 v1 v2 v3))
+;(def-user-term "$map_merge" 2) ;; take two maps and combine them together
+
+(def-rewrite
+  :match (map-element-access (:ground Key) (:any Value) (:any previous_map) (:ground resulting_map))
+  ;; read a value out of the map
+  (let [pm (get-value resulting_map)]
+    (if (not (instance? DynaMap pm))
+      (make-multiplicity 0)
+      (let [m (.map-elements ^DynaMap pm)
+            k (get-value Key)
+            r (get m k)]
+        (if (nil? r)
+          (make-multiplicity 0)
+          (make-conjunct [(make-unify Value (make-constant r))
+                          ;; remove the key from the map
+                          (make-unify previous_map (make-constant (DynaMap. (dissoc m k))))])))
+      )))
+
+(def-rewrite
+  :match (map-element-access (:ground Key) (:ground Value) (:ground previous_map) (:any resulting_map))
+  ;; put a value into the map
+  (let [pm (get-value previous_map)]
+    (if (not (instance? DynaMap pm))
+      (make-multiplicity 0)
+      (let [m (.map-elements ^DynaMap pm)
+            k (get-value Key)
+            v (get-value Value)
+            r (assoc m k v)]
+        (make-unify resulting_map (make-constant (DynaMap. r)))))))
+
+
+(def-user-term "$unary_-" 1 (make-add v0 v1 (make-constant 0)))
