@@ -377,13 +377,60 @@ dynabaseAccess[DynaParserInterface prog] returns[Object value]
 
 // inlineAggregatedBody[DynaParserInterface prog] returns [Object value]
 //     locals [ArrayList<ParseNode> exprList = new ArrayList<>();]
-//     : (e=expression Comma {$exprList.add($e.trm);})* e=expression {$exprList.add($e.trm);}
+//     : (e=expression[$prog] Comma {$exprList.add($e.trm);})* e=expression {$exprList.add($e.trm);}
 //       { $trm = CommaOperatorNode.make($exprList); }
 //     ;
 
 // inlineAggregatedBodies returns [ArrayList<ParseNode> bodies = new ArrayList<>();]
 //     : (a=inlineAggregatedBody ';' {$bodies.add($a.trm);})* a=inlineAggregatedBody {$bodies.add($a.trm);}
 //     ;
+
+
+inlineAggregated[DynaParserInterface prog] returns [Object value]
+locals [DynaParserInterface lprog, DynaParserInterface lprog2]
+    : '(' agg=aggregatorName {
+            $lprog = $prog.copy_interface();
+            $lprog.start_new_annon_atom();
+            $lprog.set_atom_aggregator($agg.t);
+            $value = $lprog.make_unnamed_variable();
+        }
+        ({$lprog2 = $lprog.copy_interface();}
+            termBody[$lprog2] ';')*
+        {$lprog2 = $lprog.copy_interface();}
+        termBody[$lprog2]
+        {$value = $lprog.finish_annon_atom();}
+        ')'
+    ;
+
+inlineAnnonFunction[DynaParserInterface prog] returns [Object value]
+locals [ArrayList<String> varlist = new ArrayList<>(), DynaParserInterface lprog]
+    : '(' (v=Variable Comma {$varlist.add($v.getText());} )* v=Variable {$varlist.add($v.getText());} '~>'
+    {
+        $lprog = $prog.copy_interface();
+$lprog.start_new_annon_atom();
+$lprog.set_atom_aggregator("=");
+Object[] arga = new Object[$varlist.size()];
+for(int i = 0; i < $varlist.size(); i++) {
+        if($varlist.get(i).equals("_"))
+            arga[i] = $lprog.make_unnamed_variable();
+        else
+            arga[i] = $lprog.make_variable($varlist.get(i));
+    }
+$lprog.set_atom_args(arga);
+    }
+    termBody[$lprog]
+{
+    assert(false);
+    // this wants to get a reference to the annon function, not call it immediately.
+    // so this should construct what the name for the item is, but not identify which of the arguments
+    $lprog.finish_annon_atom();
+}
+')'
+    ;
+
+
+
+
 
 
 // this is apparently the suggested way to deal with order of operators in antlr
@@ -399,7 +446,8 @@ expressionRoot[DynaParserInterface prog] returns [Object value]
             }
       }
     | primitive { $value = $prog.make_constant($primitive.v); }
-    // | '(' agg=aggregatorName ia=inlineAggregatedBodies')'
+    | inlineAggregated[$prog] { $value=$inlineAggregated.value; }
+        // | '(' agg=aggregatorName ia=inlineAggregatedBodies')'
     //   {
     //     $trm = new InlinedAggregatedExpression($agg.t, $ia.bodies);
     //   }
@@ -535,7 +583,6 @@ expressionIs[DynaParserInterface prog] returns [Object value]
 expression[DynaParserInterface prog] returns [Object value]
     : a=expressionIs[$prog] { $value = $a.value; }
     ;
-
 
 // // expressions which change how the parser behaves or how the runtime works for given expression
 // compilerExpression returns [ParseNode trm]

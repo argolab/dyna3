@@ -24,7 +24,9 @@ interface DynaParserInterface {
     DynaParserInterface copy_interface();
 
     void start_new_atom();
+    void start_new_annon_atom();
     void finish_atom();
+    Object finish_annon_atom();
     void set_atom_name(String name);
     void set_atom_args(Object args_values_array);
     void set_atom_aggregator(String aggregator_name);
@@ -45,4 +47,12 @@ interface DynaParserInterface {
 
     // void set_atom(String name, Object args_values_array, String aggregator_name);
     // void construct_atom(Object value);
+
+    public static DynaParserInterface create() {
+        // this could call into the clojure runtime and get a constructor method.
+        // through is there any reason for the interface to be created for something like this?
+
+
+        return null;
+    }
 }

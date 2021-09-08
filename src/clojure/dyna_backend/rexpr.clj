@@ -54,7 +54,7 @@
          ~'(primitive-rexpr [this] this) ;; this is a primitive expression so we are going to just always return ourselves
          (~'get-variables ~'[this]
           (filter variable?
-                  (union #{~@(map cdar (filter #(= :var (car %1)) vargroup))}
+                  (union #{~@(map cdar (filter #(contains?  #{:var :value} (car %1)) vargroup))}
                          ~@(map cdar (filter #(= :var-list `(set ~(car %1))) vargroup))
                          )))
 
@@ -140,7 +140,8 @@
 (defprotocol RexprValue
   (get-value [this])
   (set-value! [this value])
-  (is-bound? [this]))
+  (is-bound? [this])
+  (all-variables [this]))
 
 ;; this is the value of the object itself
 (defrecord structured-term-value [name arguments])
@@ -164,6 +165,7 @@
   (set-value! [this value]
     (context/set-value! context/*context* this value))
   (is-bound? [this]  (context/need-context (context/is-bound? context/*context* this)))
+  (all-variables [this] #{this})
   Object
   (toString [this] (str "(variable " varname ")")))
 
@@ -182,6 +184,7 @@
     (if (not= v value)
       (throw (UnificationFailure. "can not assign value to constant"))))
   (is-bound? [this] true)
+  (all-variables [this] #{})
   Object
   (toString [this] (str "(constant " value ")")))
 
@@ -214,6 +217,7 @@
 
   (is-bound? [this]
     (context/need-context (every? is-bound? arguments)))
+  (all-variables [this] (apply union (map all-variables arguments)))
   Object
   (toString [this] (str "(structure " name " " arguments ")")))
 
@@ -316,7 +320,18 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def-base-rexpr user-call [:str name
-                           :var-list args
+                           :var dynabase  ;; have a variable which referneces
+                                          ;; what dynabase this call is being
+                                          ;; made from.  This will be unfied
+                                          ;; with $self on the other end.  In
+                                          ;; the case that this is calling
+                                          ;; something that is "primitive" or a
+                                          ;; builtin, then the $self parameter can be ignored in those cases.
+                           :var-list args  ;; the arguments which are passed
+                                           ;; through via positions.  This will
+                                           ;; be $0, $1, ....  The last variale
+                                           ;; will be the returned value by
+                                           ;; convention.
                            :unchecked call-depth])
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -336,15 +351,27 @@
 ;; was matching the expression
 
 (def-base-rexpr disjunct-op [:var-list disjunction-variables
-                             :rexpr base-expr
-                             :rexpr-list bodies])
+                             ;:disjunct-trie rexprs
+                             :unchecked rexprs
+                             ]
+  (primitive-rexpr [this] (assert false))
+  (get-children [this] (assert false))
+  (primitive-rexpr [this] ;; this would have to construct many disjuncts for the given expression.
+                   )
+  )
 
 
 
 
-(def-base-rexpr project-all-except [:var-list exposed-vars
+(def-base-rexpr proj-all-except [:var-list exposed-vars
                                     :rexpr R]
   (exposed-variables [this] exposed-vars))
+
+;; this is going to project many of the variables in the expression
+(def-base-rexpr proj-many [:var-list projected-vars
+                              :rexpr R]
+  (exposed-variables [this] (different (exposed-variables R) projected-vars))
+  )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

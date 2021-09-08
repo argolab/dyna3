@@ -7,6 +7,11 @@
 
 (defrecord Dynabase [access-map])
 
+;; list of dynabases names which do not inherit from anything.  When these names
+;; appear, it can allow for some additional rewrites to take place as we know
+;; there will be only at most 1 instance of the dynabase in the inheritance for
+;; a given class.
+(def ^:dynamic dyna-base-roots-names (atom #{}))
 
 
 ;; for when a dynabase does not have any parent objects, this is going to be the root dynabase
@@ -30,11 +35,18 @@
                                  :var-list arguments])
 
 
+;; (def-rewrite
+;;   :match (dynabase-constructor (:str name) (:any arguments) (:any dynabase))
+;;   :run-at :construction
+;;   (do
+;;     (swap! dyna-base-roots-names conj name) ;; add the name that this is constructed from something that is a root element?
+;;     nil ; don't change the value
+;;     ))
 
 (def-rewrite
   :match (dynabase-constructor (:str name) (:ground-var-list arguments) (:any dynabase))
-  (make-unify dynabase (make-constant (Dynabase. {name [(doall (map get-value arguments))]})))
-  )
+  (let [db (Dynabase. {name [(doall (map get-value arguments))]})]
+    (make-unify dynabase (make-constant db))))
 
 (def-rewrite
   :match (dynabase-inherit (:str name) (:ground parent-dynabase) (:ground-var-list arguments) (:any dynabase))
@@ -62,14 +74,19 @@
             (make-conjunct (doall (map (fn [var val])
                                        (make-unify var (make-constant val))
                                        args (get arr 0))))
-            (do
-              ;; (make-disjunct
-              ;;  (doall (map (fn )))
-              ;;  )
-              (assert false) ;; this is going to have to make some disjunct for the different expressions
-              ;; this is going to be a disjunct over the different cojuncts, so we might want to have a more efficient representation for this
-              ;; in the case that
-              )
+            ;; this needs to have some disjunct over all of the different values that this can take on.  In this case, this would
+            (make-disjunct
+             (doall (map (fn [ae]
+                           (make-conjunct (doall (map (fn [var val] (make-no-simp-unify var (make-constant val))))))
+                           ) arr)))
+            ;; (do
+            ;;   ;; (make-disjunct
+            ;;   ;;  (doall (map (fn )))
+            ;;   ;;  )
+            ;;   (assert false) ;; this is going to have to make some disjunct for the different expressions
+            ;;   ;; this is going to be a disjunct over the different cojuncts, so we might want to have a more efficient representation for this
+            ;;   ;; in the case that
+            ;;   )
             )
           )))))
 

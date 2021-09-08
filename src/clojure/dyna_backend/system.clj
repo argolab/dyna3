@@ -14,12 +14,30 @@
 ;; the agenda of pending work.  When an assumption is invalidated, this will want to push the work onto this object
 ;; this should probably be a queue type rather than just a set, also some priority function will want to be constructed
 ;; for this also
-(def ^:dynamic work-agenda (atom #{}))
+(def ^:dynamic work-agenda (atom #{})) ;; this should really be a priority queue instead of just a set
+
+
+(declare get-priority)
+(def work-agenda2 {:contains-set (java.util.HashSet.)
+                   :contains-queue (java.util.PriorityQueue.
+                                    100
+                                    (reify java.util.Comparator
+                                      (compare ^int [this a b]
+                                        (let [pa (get-priority a)
+                                              pb (get-priority b)]
+                                          (cond (< pa pb) 1
+                                                (> pa pb) -1
+                                                :else 0)))))
+                   :lock (Object.)})
+
+;; how many times a user-defined function can be expanded before we stop expanding
+(def ^:dynamic user-recursion-limit (atom 20))
 
 (defn make-new-system-state []
   {:user-expressions (atom {})
    :memoized-expressions (atom {})
    :optimized-expressions (atom {})
+   :work-agenda (atom #{})
    })
 
 (defmacro run-under-state [state & args]

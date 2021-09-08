@@ -13,6 +13,23 @@
  :state state
  :implements [dyna_backend.DynaParserInterface])
 
+(def ^:private atom-init-state
+  {:name nil
+   :arguments []
+   :aggregator nil
+   :result-variable nil
+   :conjunct-rexprs (list)
+   :all-variables #{}
+   :variables-unified {} ;; map of variables and anything that they are unified with
+   :dynabase-unify-from-parent-variable nil ;; the variable which represents what we are called into from
+   :dynabase-call-into-others-variable nil ;; what variable we should use in the case that we are generating a call
+
+   :dynabase-name nil ;; the name which should be passed to the unify with dynabase object
+   :dynabase-variables-names [] ;; the variable names which are present on this dynabase
+
+   :is-annon-atom false
+   })
+
 (defn -init [arg]
   [[] (atom (if (map? arg)
               {:current-system arg
@@ -24,16 +41,7 @@
                :current-filename "REPL" ;; what the current file name is that this is parsing from.  So $load should allow for relatitive imports of a file
                ;; something like $load() takes either 1 sor 2 arguments, this would return the handle to the root dynabase which represents the file
                ;; in the case that this has something that would represent which of the expressions might find
-               :current-atom {:name nil
-                              :arguments []
-                              :aggregator nil
-                              :result-variable nil
-                              :conjunct-rexprs (list)
-                              :all-variables #{}
-                              :variables-unified {} ;; map of variables and anything that they are unified with
-                              :dynabase-unify-from-parent-variable nil ;; the variable which represents what we are called into from
-                              :dynabase-call-into-others-variable nil ;; what variable we should use in the case that we are generating a call
-                              }
+               :current-atom atom-init-state
                :current-dynabase {:inherits-from-variable nil
                                   :externally-visable-variables []  ;; these are names of variables in the order in which they are referenced from the surrounding context.  We might not know this until later, so should instead use the end-of-dynabase-callback to handle this
 
@@ -62,7 +70,7 @@
   (make-constant value))
 
 (defn- add-rexpr [^dyna_backend.DynaParserInterfaceImpl this rexpr]
-  (assert (instance? Rexpr rexpr))
+  (assert (satisfies? Rexpr rexpr))
   (if (not= rexpr (make-multiplicity 1))
     (swap! (.state this) (fn [old]
                            (let [new-state1 (assoc-in (assoc-in old [:current-atom :conjunct-rexprs]
@@ -135,14 +143,10 @@
 ;;   (???))
 
 (defn -start_new_atom [^dyna_backend.DynaParserInterfaceImpl this]
-  (swap! (.state this) assoc :current-atom
-         {:name nil
-          :arguments []
-          :aggregator nil
-          :result-variable nil
-          :conjunct-rexprs (list)
-          :all-variables #{}
-          }))
+  (swap! (.state this) assoc :current-atom atom-init-state))
+
+(defn -start_new_annon_atom [^dyna_backend.DynaParserInterfaceImpl this]
+  (swap! (.state this) assoc :current-atom (assoc atom-init-state :is-annon-atom true)))
 
 (defn -set_atom_name [^dyna_backend.DynaParserInterfaceImpl this ^String name]
   (swap! (.state this) assoc-in [:current-atom :name] name))
@@ -162,8 +166,16 @@
           (get-in @(.state this) [:current-atom :all-variables])
           value)))
 
+(defn- make-new-atom [this]
+
+  )
+
 (defn -finish_atom [^dyna_backend.DynaParserInterfaceImpl this]
   ;; we are going to need to add some $self variable which represents the current dynabase.  The dynabase will want to combine with the expression such that
+  (if (get-in @(.state this) [:current-atom :is-annon-atom])
+    ;; then there needs to be something that stores this for later
+    (do)
+    )
   (while (not (empty? (:end-of-atom-callbacks @(.state this))))
     (let [rf (:end-of-atom-callbacks @(.state this))]
       (swap! (.state this) assoc :end-of-atom-callbacks [])  ; clear out what is currently there
@@ -185,6 +197,9 @@
                                )
         ]
     (debug-repl)))
+
+(defn -finish_annon_atom [this]
+  (assert false))
 
 
 (defn -start_new_dynabase [^dyna_backend.DynaParserInterfaceImpl this]
