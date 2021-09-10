@@ -1,5 +1,9 @@
 package dyna_backend;
 
+import java.util.Set;
+import java.util.HashSet;
+import java.util.Arrays;
+
 /**
  * This is the interface that the parser uses to generate R-exprs and load them
  * into the main runtime The parser interface will have to track the current
@@ -49,10 +53,14 @@ interface DynaParserInterface {
     // void construct_atom(Object value);
 
     public static DynaParserInterface create() {
-        // this could call into the clojure runtime and get a constructor method.
-        // through is there any reason for the interface to be created for something like this?
-
-
-        return null;
+        // there is probably no use for this, as we would just be calling which of the
+        try {
+            return (DynaParserInterface)Class.forName("dyna_backend.DynaParserInterfaceImpl").newInstance();
+        } catch(ClassNotFoundException|InstantiationException|IllegalAccessException e) {
+            return null;
+        }
     }
+
+
+    final public static Set<String> quote_function_names = new HashSet<String>(Arrays.asList("$priority", "$key"));
 }

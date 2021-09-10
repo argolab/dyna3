@@ -1,6 +1,7 @@
 (ns dyna-backend.rexpr-dynabase
   (:require [dyna-backend.utils :refer :all])
-  (:require [dyna-backend.rexpr :refer :all]))
+  (:require [dyna-backend.rexpr :refer :all])
+  (:require [dyna-backend.user-defined-terms :refer [def-user-term]]))
 
 ;; R-exprs which represent construction of dynabases
 ;; dynabases are a prototype styled inheritiance system for dyna
@@ -11,12 +12,12 @@
 ;; appear, it can allow for some additional rewrites to take place as we know
 ;; there will be only at most 1 instance of the dynabase in the inheritance for
 ;; a given class.
-(def ^:dynamic dyna-base-roots-names (atom #{}))
+(def dynabase-metainfo (atom {}))
 
 
 ;; for when a dynabase does not have any parent objects, this is going to be the root dynabase
 ;; this will likely be associated with top level files which import everything
-(def-base-rexpr dynabase-constructor [:str name
+(def-base-rexpr dynabase-constructor [:opaque-constant name
                                       :var-list arguments
                                       :var dynabase])
 
@@ -24,13 +25,13 @@
 ;; the dynabase that we are inheriting from will not be known at compile time necessarily
 ;; as such there could be some expression like `f(X) = new (X) { stuff(Z) = 123*Z. }.`
 ;; I suppose that something like `{}` or `new { . }` could use the constructor version above rather than having this construct some inheritance
-(def-base-rexpr dynabase-inherit [:str name
+(def-base-rexpr dynabase-inherit [:opaque-constant name
                                   :var parent-dynabase
                                   :var-list arguments
                                   :var dynabase])
 
 ; this should be used for accessing a field or function on a dynabase.  This is a check where we are going to perform
-(def-base-rexpr dynabase-access [:str name
+(def-base-rexpr dynabase-access [:opaque-constant name
                                  :var dynabase
                                  :var-list arguments])
 
@@ -71,8 +72,8 @@
           (if (= 1 (count arr))
             ;; then we can just make a unification of all of the values directly
             ;; this will likely set the values into the context info
-            (make-conjunct (doall (map (fn [var val])
-                                       (make-unify var (make-constant val))
+            (make-conjunct (doall (map (fn [var val]
+                                         (make-unify var (make-constant val)))
                                        args (get arr 0))))
             ;; this needs to have some disjunct over all of the different values that this can take on.  In this case, this would
             (make-disjunct
@@ -100,3 +101,34 @@
     ;; perform some mapping to that structure.  This would not have to track the
     ;; representation through many different values
     ))
+
+
+
+;; this should
+(def-base-rexpr load-file [:var filename
+                           :var calling-from-dynabase
+                           :var resulting-dynabase])
+
+(def-user-term "$load" 1 (make-load-file v0 self v1))
+
+
+
+(defn make-new-dynabase-identifier [has-parent
+                                    referenced-variables]
+  ;; if we are going to somehow seralize and then relaod new items, then we are going to make these unique
+  ;; we might consider using UUID as the identifier for a dynabase name.  Then we could just assume that those would be unique between different seralization
+  (let [name (gensym)]
+    (swap! dynabase-metainfo assoc name
+           {:has-parent has-parent ;; true or false to indicate if this is a
+                                   ;; "root" dynabase, as that indicates that we
+                                   ;; are not going to see more than one
+                                   ;; instance of it, which unlocks some
+                                   ;; rewrites to avoid having to process the
+                                   ;; dynabase more than once
+            :referenced-variables (vec referenced-variables)
+            :assumption nil  ;; there should be some assumption about the
+                             ;; dynabase not inheriting from itself.  This will
+                             ;; enable us to have more "efficient" code where an
+                             ;; expression can again make the same assumptions
+                             ;; as the there not being any parents
+            })))

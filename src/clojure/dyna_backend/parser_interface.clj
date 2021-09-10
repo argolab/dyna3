@@ -2,6 +2,7 @@
   (:require [dyna-backend.utils :refer :all])
   (:require [dyna-backend.core])
   (:require [dyna-backend.rexpr :refer :all])
+  (:require [dyna-backend.aggregators :refer [get-colon-equals-count]])
   (:require [clojure.set :refer [union difference]])
   (:import [org.antlr.v4.runtime CharStream CharStreams UnbufferedTokenStream]))
 
@@ -31,6 +32,7 @@
    })
 
 (defn -init [arg]
+  (require 'dyna-backend.core)
   [[] (atom (if (map? arg)
               {:current-system arg
                ;; :dynabase {:variables []  ;; the variables which are externally referenced for the currnt dynabase
@@ -181,6 +183,8 @@
       (swap! (.state this) assoc :end-of-atom-callbacks [])  ; clear out what is currently there
       (doseq [func rf]
         (func))))
+  (if (= ":=" (get-in @(.state this) [:current-atom :aggregator]))
+    (swap! (.state this) assoc-in [:current-atom :result-variable] (-make_structure "$colon_line_tracking")))
   (let [state @(.state this)
         arity (count (get-in state [:current-atom :arguments]))
         name (get-in state [:current-atom :name])

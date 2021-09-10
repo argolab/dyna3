@@ -144,12 +144,14 @@
   (all-variables [this]))
 
 ;; this is the value of the object itself
-(defrecord structured-term-value [name arguments])
+;; this will want to keep a reference to which dynabase it was constructed in, as we might be using this
+;; as a reference to some function.  In which case, there might be multiple arguments for this.  How this object is constructed
+(defrecord structured-term-value [name constructing-dynabase arguments])
 
 
 (defn make-structure [name args]
   (assert (seqable? args))
-  (structured-term-value. name args))
+  (structured-term-value. name nil args))
 
 (def ^:const null-term (make-structure '$null []))
 
@@ -253,6 +255,8 @@
 (defn check-argument-hidden-var [x] (check-argument-var x))
 (defn check-argument-str [x] (string? x))
 (defn check-argument-unchecked [x] true)
+(defn check-argument-opaque-constant [x] ;; something that is not in the R-expr language
+  (not (or (satisfies? Rexpr x) (satisfies? RexprValue x))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -302,6 +306,20 @@
 
 (def-base-rexpr unify [:value a
                        :value b])
+
+(def-base-rexpr unify-structure [:var out
+                                 :var dynabase ;; the dynabase variable is only
+                                               ;; used for reading.  When
+                                               ;; destrcturing a term, this will
+                                               ;; _not_ unify with this variable
+                                 :str name
+                                 :var-list arguments])
+
+;; read the dynabase from a particular constructed structure.  This will require that structure become ground
+(def-base-rexpr unify-structure-get-dynabase [:var structure
+                                              :var dynabase])
+
+
 
 (def-base-rexpr proj [:hidden-var v
                       :rexpr body])
@@ -363,15 +381,20 @@
 
 
 
-(def-base-rexpr proj-all-except [:var-list exposed-vars
-                                    :rexpr R]
-  (exposed-variables [this] exposed-vars))
+;; (def-base-rexpr proj-all-except [:var-list exposed-vars
+;;                                     :rexpr R]
+;;   (exposed-variables [this] exposed-vars))
 
 ;; this is going to project many of the variables in the expression
-(def-base-rexpr proj-many [:var-list projected-vars
-                              :rexpr R]
-  (exposed-variables [this] (different (exposed-variables R) projected-vars))
-  )
+;; (def-base-rexpr proj-many [:var-list projected-vars
+;;                               :rexpr R]
+;;   (exposed-variables [this] (different (exposed-variables R) projected-vars))
+;;   )
+
+(defn make-proj-many [vars R]
+  (if (empty vars) R
+      (make-proj (first vars) (make-proj-many (rest vars) R))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -614,6 +637,11 @@
 ;; this should
 (def-rewrite-matcher :iterate [x]
   (and (variable? x) (not (is-bound? x))))
+
+(def-rewrite-matcher :type-known [x]
+  ;; if there is meta data present for an expression in which case we can just use this
+  (do (or (is-ground? x))
+      (assert false)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

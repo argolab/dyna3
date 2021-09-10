@@ -11,11 +11,12 @@
     `(do ~@(for [x name]
              `(def-user-term ~x ~arity ~rexpr)))
     `(swap! base-user-expressions assoc ~[name arity]
-            (let ~(vec
-                   (mapcat #(list (symbol (str "v" %))
-                                  `(make-variable ~(str "$" %)))
-                           (range (+ 1 arity))))
-              ~rexpr))))
+            (let [~'self (make-variable "$self")] ;; the self variable can be the current dynabase which is calling this expression, most builtin don't care
+              (let ~(vec
+                     (mapcat #(list (symbol (str "v" %))
+                                    `(make-variable ~(str "$" %)))
+                             (range (+ 1 arity))))
+                ~rexpr)))))
 
 ;; (defn lookup-user-def [name arity]
 ;;   (get base-user-defs [name arity]))

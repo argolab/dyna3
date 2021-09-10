@@ -392,3 +392,6 @@
 
 
 (def-user-term "$unary_-" 1 (make-add v0 v1 (make-constant 0)))
+
+
+(def-user-term "," 2 (make-conjunct [(make-unify (make-constant true) v0) (make-unify v1 v2)]))

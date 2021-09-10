@@ -9,12 +9,13 @@
   :name "dyna_backend.DynaInterfaceImpl"
   :prefix "-"
   :implements [dyna_backend.DynaInterface]
-  :methods [[make_rexpr [String "[Ljava.lang.Object;"] Object]
-            [make_variable [String] Object]
-            [make_constant [Object] Object]
-            [simplify [Object] Object]
-            [parse_program [String] void]
-            [parse_program_file [String] void]])
+  ;; :methods [[make_rexpr [String "[Ljava.lang.Object;"] Object]
+  ;;           [make_variable [String] Object]
+  ;;           [make_constant [Object] Object]
+  ;;           [simplify [Object] Object]
+  ;;           [parse_program [String] void]
+  ;;           [parse_program_file [String] void]]
+  )
 
 ;; this is such a hack using resolve to avoid the ahead of time operation for resolving these symbols
 ;; would be better to maybe define local variables which reference these functions, and then just call those

@@ -7,9 +7,13 @@
   (:require [dyna-backend.rexpr :refer :all])
   (:require [dyna-backend.rexpr-builtins :refer :all])
   (:require [dyna-backend.context :as context])
-  ;(:require [dyna-backend.parser_interface :refer [parse-string]])
+  (:require [dyna-backend.rexpr-dynabase])
+                                        ;(:require [dyna-backend.parser_interface :refer [parse-string]])
   )
 
+(defn parse-string [str]
+  (require 'dyna-backend.parser_interface)
+  ((resolve 'dyna-backend.parser_interface 'parse-string) str))
 
 
 ;; (defn parse-string [str]

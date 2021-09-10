@@ -210,13 +210,15 @@ term [DynaParserInterface prog]
         }
     // compiler statements
     // | ':-' ce=compilerExpression EndTerm { $trm = $ce.trm; $prog.addTerm($trm); }
-    // assert statement check at the end of a transaction
+    // assert is something that if it fails, then it can report an error all of the way back to the user.  There should be no calling dynabase in this case
     | 'assert'
         {$prog.start_new_atom();
          $prog.set_atom_name("assert");
          $prog.set_atom_args(new Object[]{});
          $prog.set_atom_aggregator("assert=");}
-      termBody[$prog]
+      termBody[$prog] EndTerm
+// there could be warnings if some library is used in a particular way.  This should somehow defer in the case that some dynabase has not been constructed, but this would want to have that the expression would later come into existence
+    | 'warning' '(' we=expression[$prog] ')' termBody[$prog] EndTerm
     ;
 
 
@@ -287,6 +289,18 @@ methodCall[DynaParserInterface prog] returns [String name, ArrayList<Object> arg
     }
     ;
 
+
+// we could have something like $atoms will just quote their arguments so it
+// would be something like a macro a bit, where those somehow expand out more.
+// This is the approach that julia takes for its macros.
+// there is also the name!() syntax used in rust for macros.  So this would not be without precident.  If there was something dt
+
+// methodCall2[DynaParserInterface prog] returns[String name, ArrayList<Object>
+// args] : m=methodName {$m.getText().startswith("$")}? '(' a=arguments[$prog]
+// ')' | m=methodName {false}? '(' a=arguments[$prog] ')' ;
+
+
+
 arguments[DynaParserInterface prog]
          returns [ArrayList<Object> args = new ArrayList<>();]
     : (e=expression[$prog] Comma {$args.add($e.value);})* e=expression[$prog] {$args.add($e.value);}
@@ -355,23 +369,13 @@ dynabase[DynaParserInterface prog] returns[Object value] locals [DynaParserInter
             $lprog.finish_dynabase();
             $lprog = null; // delete our reference to this as this is no longer needed
         }
+    | {$lprog = $prog.copy_interface();
+        $lprog.start_new_dynabase(); }
+      '{' (term[$lprog])+ '}'
+        {$value = $lprog.get_dynabase_construct_variable();
+            $lprog.finish_dynabase();
+            $lprog = null; }
     ;
-
-dynabaseAccess[DynaParserInterface prog] returns[Object value]
-    : base=expression[$prog] '.' m=methodCall[$prog]
-        {
-            $value = $prog.make_call_with_dynabase($base.value, $m.name, $m.args);
-        }
-    ;
-
-
-// : {$lprog = prog.enter_dynabase_context(); } '{'  dynabaseElements[$lprog] '}'
-    // | 'new' ('(' parent=expression[$prog] ')')? ('{' dynabaseElements[$lprog] '}')?
-    // ;
-
-// dynabaseElements[DynaParserInterface prog]
-//     : (term[$prog])*
-//     ;
 
 ////////////////////
 
@@ -437,7 +441,10 @@ $lprog.set_atom_args(arga);
 expressionRoot[DynaParserInterface prog] returns [Object value]
     : m=methodCall[$prog] { $value = $prog.make_call($m.name, $m.args); }
     | '&' m=methodCall[$prog] { $value = $prog.make_structure($m.name, $m.args); }
-
+    | '&' dbase=expression[$prog] '.' m=methodCall[$prog] {
+            assert(false);
+            // this is something like constructing, or deconstructing a structured term in a specific dynabase
+        }
     | v=Variable {
             if($v.getText().equals("_")) {
                 $value = $prog.make_unnamed_variable();  // these are variables which can not be referenced in more than once place by name
@@ -460,6 +467,11 @@ expressionRoot[DynaParserInterface prog] returns [Object value]
     | mp=assocativeMap[$prog] { $value=$mp.value; }
     | db=dynabase[$prog] { $value = $db.value; }
     //| dba=dynabaseAccess[$prog] { $value = $dba.value; }
+    | '*' v=Variable '(' arguments[$prog] ')' {
+            // for doing an indirect call to some value
+            $arguments.args.add(0, $prog.make_variable($v.getText()));
+            $value = $prog.make_call("\$call", $arguments.args);
+        }
     ;
 
 expressionTyped[DynaParserInterface prog] returns [Object value]
