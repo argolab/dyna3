@@ -9,11 +9,12 @@
   (:require [dyna-backend.context :as context])
   (:require [dyna-backend.rexpr-dynabase])
                                         ;(:require [dyna-backend.parser_interface :refer [parse-string]])
+  (:require [dyna-backend.ast-to-rexpr :refer [parse-string]])
   )
 
-(defn parse-string [str]
-  (require 'dyna-backend.parser_interface)
-  ((resolve 'dyna-backend.parser_interface 'parse-string) str))
+;; (defn parse-string [str]
+;;   (require 'dyna-backend.parser_interface)
+;;   ((resolve 'dyna-backend.parser_interface 'parse-string) str))
 
 
 ;; (defn parse-string [str]

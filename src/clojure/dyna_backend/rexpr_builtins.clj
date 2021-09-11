@@ -368,7 +368,7 @@
   (let [pm (get-value resulting_map)]
     (if (not (instance? DynaMap pm))
       (make-multiplicity 0)
-      (let [m (.map-elements ^DynaMap pm)
+      (let [m (.map-elements  pm)
             k (get-value Key)
             r (get m k)]
         (if (nil? r)
@@ -384,7 +384,7 @@
   (let [pm (get-value previous_map)]
     (if (not (instance? DynaMap pm))
       (make-multiplicity 0)
-      (let [m (.map-elements ^DynaMap pm)
+      (let [m (.map-elements  pm)
             k (get-value Key)
             v (get-value Value)
             r (assoc m k v)]

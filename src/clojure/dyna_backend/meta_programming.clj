@@ -46,7 +46,7 @@
 ;; So there would probably have to be special handing around this expression.  I
 ;; suppose that this would also have to
 
-(def-base-rexpr eval-user-form [:var Out
-                                :var structure])
+;; (def-base-rexpr eval-user-form [:var Out
+;;                                 :var structure])
 
-(def-user-term "$eval" 1 (eval-user-form vv1 v0))
+;; (def-user-term "$eval" 1 (eval-user-form vv1 v0))

@@ -1,14 +1,17 @@
 (ns dyna-backend.aggregators
   (:require [dyna-backend.rexpr :refer :all])
-  (:require [dyna-backend.rexpr-builtins :refer [DynaMap make-lessthan make-lessthan-eq]]))
+  (:require [dyna-backend.rexpr-builtins :refer [make-lessthan make-lessthan-eq]])
+  (:require [dyna-backend.term :refer :all])
+  (:import (dyna_backend UnificationFailure))
+    (:import (dyna_backend DynaTerm)))
 
 (def aggregators (atom {}))
 
-(defm def-aggregator [name & args]
+(defn def-aggregator [name & args]
   (let [kw-args (apply hash-map args)]
     ;; this should construct the other functions if they don't already exist, so that could mean that there are some defaults for everything
     ;; when the aggregator is created, it can have whatever oeprations are
-    (swap! aggregators name (assoc kw-args :name name))))
+    (swap! aggregators assoc name (assoc kw-args :name name))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -37,9 +40,10 @@
              a))
 
 
-(def- get-aggregated-value [v]
-  (if (and (instance? structured-term-value v) (= (.name ^structured-term-value v) "$with_key_pair"))
-    (get (.arguments ^structured-term-value v) 1)
+(defn- get-aggregated-value [v]
+  (if (and (instance? DynaTerm v)
+           (= (.name ^DynaTerm v) "$with_key_pair"))
+    (get (.arguments ^DynaTerm v) 1)
     v))
 
 
@@ -107,27 +111,28 @@
 
 (def-aggregator ":="
   :combine (fn [a b]
-             (let [[la va] (.arguments ^structured-term-value a)
-                   [lb vb] (.arguments ^structured-term-value b)]
+             (let [[la va] (.arguments ^DynaTerm a)
+                   [lb vb] (.arguments ^DynaTerm b)]
                (if (> lb la) b a)))
   :check-input (fn [x]
                  (and
-                  (instance? structured-term-value x)
-                  (= "$colon_line_tracking" (.name ^structured-term-value x))))
+                  (instance? DynaTerm x)
+                  (= "$colon_line_tracking" (.name ^DynaTerm x))))
   :add-to-rexpr (let [linevar (make-variable (gensym))
                       valvar (make-variable (gensym))]
                   (fn [current-value incoming-variable]
-                    (let [[line val] (.arguments ^structured-term-value current-value)]
-                      (make-proj-many [linwvar valvar] (make-conjunct [
+                    (let [[line val] (.arguments ^DynaTerm current-value)]
+                      (make-proj-many [linevar valvar] (make-conjunct [
                                                                        (make-unify-structure incoming-variable (make-constant nil)
                                                                                              "$colon_line_tracking" [linevar valvar])
                                                                        (make-lessthan-eq (make-constant line) linevar)]))))))
 
 
 ; this should merge a map together.  This would not have which of the expressions would
-(def-aggregator "merge="
-  :combine merge
-  :check-input (partial instance? DynaMap))
+;; (def-aggregator "merge="
+;;   :combine merge
+;;   :check-input (partial instance? DynaMap)
+;;   )
 
 (def-aggregator "?="
   :combine (fn [a b] a) ;; we just have to choose something

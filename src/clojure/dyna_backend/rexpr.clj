@@ -8,13 +8,17 @@
 
   (:require [clojure.set :refer [union difference]])
   (:require [aprint.core :refer [aprint]])
-  (:import (dyna_backend UnificationFailure)))
+  (:import (dyna_backend UnificationFailure))
+  (:import (dyna_backend DynaTerm)))
 
 
 (declare simplify)
 (def simplify-construct identity)
 (declare find-iterators)
 
+
+;; maybe this should recurse through the structure and make a nice print out of the term objets
+(defmethod print-method DynaTerm [this ^java.io.Writer w] (.write w (.toString this)))
 
 ;(defn simplify-construct [r] r)
 
@@ -146,14 +150,13 @@
 ;; this is the value of the object itself
 ;; this will want to keep a reference to which dynabase it was constructed in, as we might be using this
 ;; as a reference to some function.  In which case, there might be multiple arguments for this.  How this object is constructed
-(defrecord structured-term-value [name constructing-dynabase arguments])
+;;(defrecord structured-term-value [name constructing-dynabase arguments])
 
 
 (defn make-structure [name args]
-  (assert (seqable? args))
-  (structured-term-value. name nil args))
+  (DynaTerm. name nil args))
 
-(def ^:const null-term (make-structure '$null []))
+(def ^:const null-term (DynaTerm/null_term))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -189,6 +192,8 @@
   (all-variables [this] #{})
   Object
   (toString [this] (str "(constant " value ")")))
+
+
 
 (defn make-constant [val]
   (constant-value-rexpr. val))
@@ -673,11 +678,11 @@
   :match (unify (:structured B) (:ground A))
   :run-at :construction
   (let [Av (get-value A)]
-    (if (not (and (instance? structured-term-value Av)
-                  (= (.name ^structured-rexpr B) (.name ^structured-term-value Av))
-                  (= (count (.arguments ^structured-rexpr B)) (count (.arguments ^structured-term-value Av)))))
+    (if (not (and (instance? DynaTerm Av)
+                  (= (.name ^DynaTerm B) (.name ^DynaTerm Av))
+                  (= (count (.arguments ^DynaTerm B)) (count (.arguments ^DynaTerm Av)))))
       (make-multiplicity 0)
-      (make-conjunct (doall (map make-unify (.arguments ^structured-rexpr B) (.arguments ^structured-term-value Av))))
+      (make-conjunct (doall (map make-unify (.arguments ^DynaTerm B) (.arguments ^DynaTerm Av))))
       )))
 
 ; this should run at both, so there should be a :run-at :both option that can be selected
