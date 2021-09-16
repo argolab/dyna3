@@ -6,3 +6,4 @@ target/
 .nrepl-port
 .lein-failures
 .attach_pid*
+dyna-*

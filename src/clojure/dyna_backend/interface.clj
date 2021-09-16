@@ -17,6 +17,10 @@
   ;;           [parse_program_file [String] void]]
   )
 
+
+(defn get-backend-interface []
+  (dyna_backend.DynaInterfaceImpl.))
+
 ;; this is such a hack using resolve to avoid the ahead of time operation for resolving these symbols
 ;; would be better to maybe define local variables which reference these functions, and then just call those
 (defn -make_rexpr [this ^String name args]

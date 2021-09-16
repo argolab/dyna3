@@ -1,0 +1,23 @@
+
+multiply(A,B) = matrix {
+    elem(X,Y) += A.elem(X,Z) * B.elem(Z,Y).
+}.
+
+add(A, B) = matrix {
+    elem(X,Y) += A.elem(X,Y) ; B.elem(X,Y).
+}.
+
+transpose(A) = matrix {
+    elem(X,Y) = A.elem(Y,X).
+}.
+
+matrix(M) = {
+    elem(X,Y) = M.elem(X,Y).
+    transpose = transpose(Self).
+    add(Other) = add(Self, Other).
+    multiply(Other) = multiply(Self,Other).
+}.
+
+zero_matrix(A,B) = matrix {
+    elem(X: range(0, A), Y: range(0,B)) = 0.
+}.

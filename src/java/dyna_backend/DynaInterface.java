@@ -2,8 +2,10 @@ package dyna_backend;
 
 import java.util.Iterator;
 
+import clojure.java.api.Clojure;
+import clojure.lang.IFn;
+
 public interface DynaInterface {
-    // TODO: fill in with the basic methods for interacting with the runtime
 
 
     // high level interface for working with the dyna runtime
@@ -42,10 +44,6 @@ public interface DynaInterface {
 
 
     public static DynaInterface create() {
-        try {
-            return (DynaInterface)Class.forName("dyna_backend.DynaInterfaceImpl").newInstance();
-        } catch(ClassNotFoundException|InstantiationException|IllegalAccessException e) {
-            return null;
-        }
+        return (DynaInterface)Clojure.var("dyna-backend.interface", "get-backend-interface").invoke();
     }
 }

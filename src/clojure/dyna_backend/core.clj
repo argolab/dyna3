@@ -9,7 +9,7 @@
   (:require [dyna-backend.context :as context])
   (:require [dyna-backend.rexpr-dynabase])
                                         ;(:require [dyna-backend.parser_interface :refer [parse-string]])
-  (:require [dyna-backend.ast-to-rexpr :refer [parse-string]])
+  (:require [dyna-backend.ast-to-rexpr :refer [parse-string parse-file]])
   )
 
 ;; (defn parse-string [str]
@@ -29,3 +29,7 @@
 
 ;(def ^:dynamic *current-rewrites* nil)  ;; dynamic means that this can be set using (binding ...), and this will be local to the current thread
 ;(def ^:dynamic *current-context* nil)
+
+
+(defn main [args]
+  (println "this is the main function for dyna"))

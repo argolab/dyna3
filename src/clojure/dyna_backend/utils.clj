@@ -56,6 +56,7 @@
   ([prompt]
    `(let [~'local-bindings (debugger-get-local-bindings)]
       (.printStackTrace (Throwable. "Entering Debugger") System/out)
+
       (aprint ~'local-bindings)
       (clojure.main/repl
          :prompt #(print ~prompt "=> ")
@@ -100,18 +101,40 @@
 ;; I suppose that this should allow for the function to be such that it
 (defmacro cache-field [field & func]
   (let [sr (gensym)]
-    `(if (nil? ~field)
+    `(if (nil? ~field) ;; what if the field is an int, like we want to
        (let [~sr (do ~@func)]
          (set! ~field ~sr)
          ~sr)
        ~field)))
 
 
-(defn overrideable-function
-  "Allows for a function in a macro to be overriden via the optional arguments"
-  [opts name body]
-  (let [ret (atom body)]
-    (doseq [o opts]
-      (if (= (car o) name)
-        (reset! ret o)))
-    @ret))
+
+;; a macro for overriding functions in the body which also appear in the opts
+;; this shoudl allow us to make it such that there is a generic function which
+;; is called, but also something which will cause the values of the expression to corresponds
+(defmacro override-functions [opts & bodies]
+  (debug-repl)
+  bodies)
+
+(defmacro deftype-with-overrides
+  [name args overrides & bodies]
+  (let [override-map (into {} (map vec overrides))]
+    `(deftype ~name ~args
+       ~@(for [b bodies]
+           (if (and (seqable? b) (contains? override-map (car b)))
+             (get override-map (car b))
+             b)))))
+
+
+;; (defmacro deftype-with-overrides
+;;   [name args overrides & bodies]
+;;   )
+
+;; (defn overrideable-function
+;;   "Allows for a function in a macro to be overriden via the optional arguments"
+;;   [opts name body]
+;;   (let [ret (atom body)]
+;;     (doseq [o opts]
+;;       (if (= (car o) name)
+;;         (reset! ret o)))
+;;     @ret))

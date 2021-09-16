@@ -9,15 +9,18 @@
                  [com.clojure-goes-fast/clj-java-decompiler "0.3.0"]
                  [org.antlr/antlr4-runtime "4.7.2"]]
   :repl-options {:init-ns dyna-backend.core}
-  :aot [dyna-backend.interface
-        dyna-backend.parser_interface]
+  ;; :aot [dyna-backend.interface
+  ;;       dyna-backend.parser_interface]
   ;:aot :all
   :source-paths ["src/clojure"]
   :java-source-paths ["target/gen-src" "src/java"]
+  :resource-paths ["src/resources"]
   :test-paths ["test"]
-  :profiles {:uberjar {:aot :all}}
+  ;;:profiles {:uberjar {:aot :all}}
   :plugins [[lein-antlr-plugin "0.1.0"]]
   :antlr-src-dir "src/antlr"
   :antlr-dest-dir "target/gen-src"
-  :aliases {"compile" ["do" ["antlr"] "compile"]}
+  :aliases {"compile" ["do" ["antlr"] ["javac"] "compile"]
+            "uberjar" ["do" ["antlr"] ["javac"] ["compile"] "uberjar"]}
+  :main dyna_backend.DynaMain
   )

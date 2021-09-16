@@ -1,7 +1,4 @@
-(ns dyna-backend.meta-programming
-  (:require [dyna-backend.utils :refer :all])
-  (:require [dyna-backend.rexpr :refer :all])
-  (:require [dyna-backend.user-defined-terms :refer [def-user-term]]))
+ns dyna-backend.meta-programming
 
 
 ;; there should be some meta-programming operations

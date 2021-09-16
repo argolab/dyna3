@@ -132,3 +132,10 @@
                              ;; expression can again make the same assumptions
                              ;; as the there not being any parents
             })))
+
+
+
+;; if some variable is an instance of a dynabase.  This would be that the
+;; dynabases are equal to each other, or the instance is a superset of the first
+;; map
+(def-user-term "instance" 2 (make-multiplicity 1))

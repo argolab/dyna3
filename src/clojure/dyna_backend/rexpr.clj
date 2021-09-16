@@ -52,7 +52,13 @@
         rname (str name "-rexpr")
         opt (if (not (nil? optional)) (vec optional) [])]
     `(do
-       (deftype ~(symbol rname) ~(vec (concat (quote [cached-hash-code ^:unsynchronized-mutable cached-exposed-variables])
+       ;; (deftype-with-overrides ~(symbol rname) ~(vec (concat (quote [cached-hash-code ^:unsynchronized-mutable cached-exposed-variables])
+       ;;                                                       (map cdar vargroup)))
+       ;;   ~opt
+
+       ;;   )
+
+       (deftype ~(symbol rname) ~(vec (concat (quote [^int cached-hash-code ^:unsynchronized-mutable cached-exposed-variables])
                                               (map cdar vargroup)))
          Rexpr
          ~'(primitive-rexpr [this] this) ;; this is a primitive expression so we are going to just always return ourselves
@@ -67,7 +73,15 @@
            (list ~@(map cdar (filter #(= :rexpr (car %1)) vargroup)))
            ~@(map cdar (filter #(= :rexpr-list (car %1)) vargroup))))
 
-         (~'get-argument ~'[this n] (nth ~(vec (map cdar vargroup)) ~'n))
+         ;; might be better if there was some case and switch statement for get-argument
+         ;; constructing the vector is likely going to be slow.  Would be nice if there was some array representation or something
+         (~'get-argument ~'[this n] ;; trying to add a type hit to this makes it such that the interface will not get cast correctly
+          (case ~'n
+            ~@(apply concat (for [[var idx] (zipmap vargroup (range))]
+                              `(~idx ~(cdar var))))
+            (throw (RuntimeException. "invalid index for get-argument"))))
+
+         ;(~'get-argument ~'[this n] (nth ~(vec (map cdar vargroup)) ~'n))
          (~'get-arguments ~'[this] ~(vec (map cdar vargroup)))
 
          (~'as-list ~'[this]
@@ -101,7 +115,7 @@
                     ~@(for [[var idx] (zipmap vargroup (range))]
                         `(= ~(cdar var) (get-argument ~'other ~idx))))))
 
-         (hashCode [this] ~'cached-hash-code)
+         (hashCode [this] ~'cached-hash-code) ;; is this something that should only be computed on demand instead of when it is constructed?
          (toString ~'[this] (str (as-list ~'this))))
 
        (defn ~(symbol (str "make-no-simp-" name))
@@ -116,7 +130,7 @@
           (+ ~(hash rname) ~@(for [[var idx] (zipmap vargroup (range))]
                                `(* (hash ~(cdar var)) ~(+ 3 idx))))
 
-          nil       ; the cached unique variables
+          nil                           ; the cached unique variables
           ~@(map cdar vargroup))
          )
 
@@ -129,8 +143,10 @@
                                (assert false)))) vargroup)
 
          (simplify-construct (~(symbol (str rname "."))
-                              (+ ~(hash rname) ~@(for [[var idx] (zipmap vargroup (range))]
-                                                   `(* (hash ~(cdar var)) ~(+ 3 idx))))
+                              ;; this might do the computation as a big value, would be nice if this could be forced to use a small int value
+                              ;; I suppose that we could write this in java and call out to some static function if that really became necessary
+                              (.intValue ^java.lang.Number (+ ~(hash rname) ~@(for [[var idx] (zipmap vargroup (range))]
+                                                                                `(* (hash ~(cdar var)) ~(+ 3 idx)))))
 
                               nil       ; the cached unique variables
                               ~@(map cdar vargroup))))
@@ -154,7 +170,7 @@
 
 
 (defn make-structure [name args]
-  (DynaTerm. name nil args))
+  (DynaTerm. name nil nil args))
 
 (def ^:const null-term (DynaTerm/null_term))
 
@@ -321,8 +337,10 @@
                                  :var-list arguments])
 
 ;; read the dynabase from a particular constructed structure.  This will require that structure become ground
-(def-base-rexpr unify-structure-get-dynabase [:var structure
-                                              :var dynabase])
+;; the file reference is also required to make a call to a top level expression
+(def-base-rexpr unify-structure-get-meta [:var structure
+                                          :var dynabase
+                                          :var from-file])
 
 
 
@@ -342,7 +360,17 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; the user call object will figure out which information is getting called, this also will resolve
 (def-base-rexpr user-call [:str name
+                           :var from-file ;; which file is this call from.
+                                          ;; There might be import statements
+                                          ;; that we have to resolve.  This will
+                                          ;; control what something is going to
+                                          ;; be resolved as.  So collecing the
+                                          ;; resulting R-expr can be done when
+                                          ;; the user-call is resolved rather
+                                          ;; than having this done ahead of
+                                          ;; time?
                            :var dynabase  ;; have a variable which referneces
                                           ;; what dynabase this call is being
                                           ;; made from.  This will be unfied

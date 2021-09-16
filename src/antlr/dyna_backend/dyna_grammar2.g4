@@ -8,9 +8,10 @@
 grammar dyna_grammar2;
 //
 @header {
-package dyna_backend;//.genparser;
+package dyna_backend;
 
-//import dyna_backend.DynaParserInterface2;
+import java.math.BigInteger;
+
 }
 
 fragment EndLine
@@ -106,7 +107,7 @@ NumberInt16
     ;
 
 NumberFloat
-    : [0-9]* '.' [0-9]+ ('e' [0-9]+)?
+    : [0-9]* '.' [0-9]+ ('e' [0-9]+)?  // this always requires some number after the '.' otherwise it could be an end of term
     ;
 
 StringConst
@@ -130,12 +131,26 @@ stringConst returns[String t] locals [String vv]
 
 primitive returns[Object v]
     // TODO: automatically choose the correct representation size for these objects depending on what value they are
-    : neg='-'? a=NumberInt { $v = ($neg != null ? -1 : 1) * java.lang.Integer.valueOf($a.getText()); }
-    | a=NumberInt16 { $v = java.lang.Integer.valueOf($a.getText().substring(2), 16); }
-    // TODO: have support for bigger 64 bit doubles
+    // this should parse as a bigint, and then check if it size is with in the range of a 64 bit int.
+    : neg='-'? a=NumberInt {
+      BigInteger b = new BigInteger($a.getText());
+      if(b.bitCount() <= 63) {
+          $v = ($neg != null ? -1 : 1) * b.longValue();
+      } else {
+          $v = $neg != null ? b.negate() : b;
+      }
+    }
+    | a=NumberInt16 {
+      BigInteger b = new BigInteger($a.getText().substring(2), 16);
+      if(b.bitCount() <= 63) {
+          $v = b.longValue();
+      } else {
+          $v = b;
+      }
+    }
     // question if that should just always use double when inputed, or try and cast down in the case that it can represent
     // or if there should be some special signal such as `0.0f`
-    | neg='-'? a=NumberFloat { $v = ($neg != null ? -1 : 1) * java.lang.Float.valueOf($a.getText()); }
+    | neg='-'? a=NumberFloat { $v = ($neg != null ? -1 : 1) * java.lang.Double.valueOf($a.getText()); }
     | b=stringConst { $v = $b.t; }
     | 'true' { $v = java.lang.Boolean.valueOf(true); } // these possibly get confused as aggregators if used like true=
     | '$true' { $v = java.lang.Boolean.valueOf(true); }
@@ -145,9 +160,9 @@ primitive returns[Object v]
     ;
 
 
-program returns[Object rterm]
+program returns[DynaTerm rterm = null]
     : (t=term
-        {
+       {
 
           //   // this is not a case that we want to be in.....sigh
           //   System.err.println(_input.getText($term.ctx.getSourceInterval()));
@@ -184,37 +199,29 @@ program returns[Object rterm]
       }
     ;
 
+// this version can load the data via a callback rather than constructing a single large object
+// this will want for
+program_LoadAsGo[clojure.lang.IFn callback_function]
+    : (t=term {
+            callback_function.invoke($t.rterm);
+            if(_localctx.children != null && _localctx.children.size() > 2000)
+                _localctx.children = null;
+        })* EOF
+    ;
 
-term returns[Object rterm = null]
-    locals [Object dbase_rterm = null]
-    :
-        (dbase=expression '.' {$dbase_rterm = $dbase.rterm;  assert(false);})?
-      a=atom
-      p=parameters
-      agg=aggregatorName
-      (t=termBody ';'
-            { Object l = DynaTerm.create("\$define_term", DynaTerm.create_arr($a.t, $p.args), $agg.t, $t.rterm);
-              if($rterm == null) $rterm = l;
-              else { $rterm = DynaTerm.create(",", $rterm, l); }
-             })*
-        t=termBody EndTerm
-        { Object l = DynaTerm.create("\$define_term", DynaTerm.create_arr($a.t, $p.args), $agg.t, $t.rterm);
-              if($rterm == null) $rterm = l;
-              else { $rterm = DynaTerm.create(",", $rterm, l);  }
-        }
-    |
-        (dbase=expression '.'  {$dbase_rterm = $dbase.rterm;  assert(false);})?
-        a=atom
-      p=parameters EndTerm
-      {
-            // writing `a(1,2,3).` is just a short hand for `a(1,2,3) :- true.`
-            $rterm = DynaTerm.create("\$define_term", DynaTerm.create_arr($a.t, $p.args), ":-", DynaTerm.create("\$constant", true));
-      }
-    // queries
+
+term returns[DynaTerm rterm = null]
+    : term_unended EndTerm {$rterm=$term_unended.rterm;}
+        // queries
     | query EndQuery {
                       assert(false); // todo
         }
-    // compiler statements
+    | ':-' a=atom p=parameters EndTerm
+        {
+            $rterm = DynaTerm.create("\$compiler_pragma", DynaTerm.create_arr($a.t, $p.args));
+        }
+
+        // compiler statements
     // | ':-' ce=compilerExpression EndTerm { $trm = $ce.trm; $prog.addTerm($trm); }
     // assert is something that if it fails, then it can report an error all of the way back to the user.  There should be no calling dynabase in this case
     | 'assert'
@@ -227,9 +234,42 @@ term returns[Object rterm = null]
     ;
 
 
-termBody returns[Object rterm]
+// the un-ended term does not consume the EndTerm token at the end.  The EndTerm toekn requires a new line which would require that dynabases have a new line before the closing `}`
+term_unended returns[DynaTerm rterm = null]
+    locals [DynaTerm dbase_rterm = null]
+    :
+        (dbase=expression '.' {$dbase_rterm = $dbase.rterm;  assert(false);})?
+      a=atom
+      p=parameters
+      agg=aggregatorName
+      (t=termBody ';'
+            { DynaTerm l = DynaTerm.create("\$define_term", DynaTerm.create_arr($a.t, $p.args), $agg.t, $t.rterm);
+              if($rterm == null) $rterm = l;
+              else { $rterm = DynaTerm.create(",", $rterm, l); }
+             })*
+        t=termBody
+        { DynaTerm l = DynaTerm.create("\$define_term", DynaTerm.create_arr($a.t, $p.args), $agg.t, $t.rterm);
+              if($rterm == null) $rterm = l;
+              else { $rterm = DynaTerm.create(",", $rterm, l);  }
+        }
+    |
+        (dbase=expression '.'  {$dbase_rterm = $dbase.rterm;  assert(false);})?
+        a=atom
+      p=parameters
+      {
+            // writing `a(1,2,3).` is just a short hand for `a(1,2,3) :- true.`
+            $rterm = DynaTerm.create("\$define_term", DynaTerm.create_arr($a.t, $p.args), ":-", DynaTerm.create("\$constant", true));
+      }
+    ;
+
+// there should be a term which is at the
+// term_program returns[DynaTerm rterm = null]
+
+
+
+termBody returns[DynaTerm rterm]
       locals [
-         Object with_key=null
+         DynaTerm with_key=null
       ]
     : (e=expression Comma {
             if($rterm == null) {
@@ -265,11 +305,11 @@ query returns []
         'asdfasdfasdfasdf'
     ;
 
-withKey returns [Object rterm]
+withKey returns [DynaTerm rterm]
     : 'arg' e=expression { $rterm = $e.rterm; }
     ;
 
-forExpr returns [Object rterm=null]
+forExpr returns [DynaTerm rterm=null]
     : 'for' (e=expression Comma {
         if($rterm == null) { $rterm = $e.rterm; }
         else { $rterm = DynaTerm.create(",", $rterm, $e.rterm); }
@@ -279,7 +319,7 @@ forExpr returns [Object rterm=null]
     }
     ;
 
-parameters returns [ArrayList<Object> args]
+parameters returns [ArrayList<DynaTerm> args]
     :/* empty */ { $args = new ArrayList<>(); }
     | '(' p=arguments ')' { $args = $p.args; }
     | '(' ')' { $args = new ArrayList<>(); }
@@ -289,7 +329,7 @@ methodName returns [String name]
     : r=readAtom {$name = $r.t;}
     ;
 
-methodCall returns [String name, ArrayList<Object> args]
+methodCall returns [String name, ArrayList<DynaTerm> args]
     : m=methodName '(' a=arguments ')'
     {
        $name = $m.name;
@@ -314,11 +354,11 @@ methodCall returns [String name, ArrayList<Object> args]
 
 
 
-arguments returns [ArrayList<Object> args = new ArrayList<>();]
+arguments returns [ArrayList<DynaTerm> args = new ArrayList<>();]
     : (e=expression Comma {$args.add($e.rterm);})* e=expression {$args.add($e.rterm);}
     ;
 
-array returns [Object rterm] locals []
+array returns [DynaTerm rterm] locals []
     : '[' elems=arrayElements ']'
         {
             $rterm = DynaTerm.null_term;
@@ -336,51 +376,75 @@ array returns [Object rterm] locals []
     | '[' ']' { $rterm = DynaTerm.null_term; }
     ;
 
-arrayElements returns [ArrayList<Object> elems = new ArrayList<>(); ]
+arrayElements returns [ArrayList<DynaTerm> elems = new ArrayList<>(); ]
     : (e=expression Comma {$elems.add($e.rterm);})* e=expression {$elems.add($e.rterm);} Comma?
     ;
 
-assocativeMap returns[Object rterm] locals []
-    : '{' '}'   { $rterm = DynaTerm.create("\$map_empty"); }
-    | '{' a=assocativeMapElements '}'
+assocativeMap returns[DynaTerm rterm] locals []
+    : '{' a=assocativeMapInnerBrackets '}' {$rterm=$a.rterm;}
+    ;
+    // : '{' '}'   { $rterm = DynaTerm.create("\$map_empty"); }
+    // | '{' a=assocativeMapElements '}'
+    //     {
+    //         $rterm = DynaTerm.create("\$map_empty");
+    //         for(SimplePair<Object,Object> p : $a.elements) {
+    //             $rterm = DynaTerm.create("\$map_element", p.a, p.b, $rterm);
+    //         }
+    //     }
+    // | '{' a=assocativeMapElements '|' b=expression '}'
+
+    // ;
+
+assocativeMapInnerBrackets returns[DynaTerm rterm]
+    : { $rterm = DynaTerm.create("\$map_empty"); }
+    | a=assocativeMapElements
         {
             $rterm = DynaTerm.create("\$map_empty");
-            for(SimplePair<Object,Object> p : $a.elements) {
+            for(SimplePair<DynaTerm,DynaTerm> p : $a.elements) {
                 $rterm = DynaTerm.create("\$map_element", p.a, p.b, $rterm);
             }
         }
-    | '{' a=assocativeMapElements '|' b=expression '}'
+    | a=assocativeMapElements '|' b=expression
         {
             $rterm = $b.rterm;
-            for(SimplePair<Object,Object> p : $a.elements) {
+            for(SimplePair<DynaTerm,DynaTerm> p : $a.elements) {
                 $rterm = DynaTerm.create("\$map_element", p.a, p.b, $rterm);
             }
         }
     ;
 
-assocativeMapElements returns[ArrayList<SimplePair<Object,Object>> elements = new ArrayList<>();]
+assocativeMapElements returns[ArrayList<SimplePair<DynaTerm,DynaTerm>> elements = new ArrayList<>();]
     : (a=assocativeMapElement Comma {$elements.add(new SimplePair($a.key, $a.value));} )*
         a=assocativeMapElement {$elements.add(new SimplePair($a.key, $a.value));} Comma?
     ;
 
-assocativeMapElement returns[Object key, Object value]
+assocativeMapElement returns[DynaTerm key, DynaTerm value]
     : v=Variable { $key = DynaTerm.create("\$constant", $v.getText()); $value = DynaTerm.create("\$variable", $v.getText()); }
     | a=expression '->' b=expression {$key=$a.rterm; $value=$b.rterm;}
     ;
 
 
 // there could be some syntax for specifying which variables are captured.  This would have that there are some expressions with
-dynabase returns[Object rterm]
-    locals [ArrayList<Object> terms = new ArrayList<>(), Object par = null]
+dynabase returns[DynaTerm rterm]
+    locals [ArrayList<DynaTerm> terms = new ArrayList<>(), DynaTerm par = null, DynaTerm dterms = null]
     : 'new'
         (parent=expression {$par = $parent.rterm;})? // if this inherits from some other dynabase
-        {$terms.add($par != null ? $par : DynaTerm.null_term);}
-        ('{' (t=term {$terms.add($t.rterm);})* '}')?  // any terms which are defined inside of this dynabase
-        {$rterm = DynaTerm.create_arr("\$dynabase_create",  $terms);}
-    | {$terms.add(DynaTerm.null_term);} // indicate that there is no dynabase which is the parent of this
-      '{' (t=term {$terms.add($t.rterm);})+ '}'
-        {$rterm = DynaTerm.create_arr("\$dynabase_create",  $terms);}
+        ('{' ((t=term {$dterms = ($dterms == null ? $t.rterm : DynaTerm.create(",", $dterms, $t.rterm));})*
+               t2=term_unended '.' {$dterms = ($dterms == null ? $t2.rterm : DynaTerm.create(",", $dterms, $t2.rterm));})?
+            '}')?
+        {$rterm = DynaTerm.create("\$dynabase_create",
+                $par == null ? DynaTerm.null_term : $par,
+                $dterms == null ? DynaTerm.null_term : $dterms);}
+    | '{' dd=dynabaseInnerBracket {$rterm=$dd.rterm;} '}'
     ;
+
+dynabaseInnerBracket returns[DynaTerm rterm]
+    locals [ArrayList<DynaTerm> terms = new ArrayList<>(), DynaTerm dterms = null]
+    : (t=term {$dterms = ($dterms == null ? $t.rterm : DynaTerm.create(",", $dterms, $t.rterm));})*
+           t2=term_unended '.' {$dterms = ($dterms == null ? $t2.rterm : DynaTerm.create(",", $dterms, $t2.rterm));}
+        {$rterm = DynaTerm.create("\$dynabase_create", DynaTerm.null_term, $dterms == null ? DynaTerm.null_term : $dterms);}
+    ;
+
 
 ////////////////////
 
@@ -395,7 +459,7 @@ dynabase returns[Object rterm]
 //     ;
 
 
-inlineAggregated returns [Object value]
+inlineAggregated returns [DynaTerm value]
     : '(' agg=aggregatorName
         {assert(false);}
         (termBody ';')*
@@ -403,7 +467,7 @@ inlineAggregated returns [Object value]
         ')'
     ;
 
-inlineAnnonFunction returns [Object value]
+inlineAnnonFunction returns [DynaTerm value]
 locals [ArrayList<String> varlist = new ArrayList<>()]
     : '(' (v=Variable Comma {$varlist.add($v.getText());} )* v=Variable {$varlist.add($v.getText());} '~>'
     {
@@ -424,7 +488,7 @@ locals [ArrayList<String> varlist = new ArrayList<>()]
 
 
 // this is apparently the suggested way to deal with order of operators in antlr
-expressionRoot returns [Object rterm]
+expressionRoot returns [DynaTerm rterm]
     : m=methodCall { $rterm = DynaTerm.create_arr($m.name, $m.args); }
     | '&' m=methodCall {
           $rterm = DynaTerm.create("\$quote1", DynaTerm.create_arr($m.name, $m.args)); }
@@ -461,7 +525,7 @@ expressionRoot returns [Object rterm]
         }
     ;
 
-expressionTyped returns [Object rterm]
+expressionTyped returns [DynaTerm rterm]
     : a=expressionRoot {$rterm=$a.rterm;}
     | a=expressionRoot ':' b=methodCall {
             $b.args.add($a.rterm);
@@ -469,133 +533,88 @@ expressionTyped returns [Object rterm]
       } // this is going to ahve to add some method call to the value of the statement
     ;
 
-expressionDynabaseAccess returns[Object rterm]
+
+// this should probably be higher priority than the type
+expressionDynabaseAccess returns[DynaTerm rterm]
     : a=expressionTyped {$rterm=$a.rterm;} ('.' m=methodCall {$rterm = DynaTerm.create("\$dynabase_call", $rterm, DynaTerm.create_arr($m.name, $m.args));})*
     ;
 
+expressionUnqualitiedAddBrakcetsCall returns [DynaTerm rterm]
+locals [DynaTerm add_arg=null]
+    : a=expressionDynabaseAccess  { $rterm = $a.rterm; }
+    | a=expressionDynabaseAccess '{'
+        (db=dynabaseInnerBracket {$add_arg=$db.rterm;}
+        | nm=assocativeMapInnerBrackets {$add_arg=$nm.rterm;})
+        '}'
+        {
+            if($rterm.name.equals("\$dynabase_call")) {
+                assert(false); // this has to rebuild the dynabase call object with adding in the additional argument to the expression
+            } else {
+                $rterm = $rterm.extend_args($add_arg);
+            }
+        }
+    ;
 
-expressionUnaryMinus returns [Object rterm]
+
+expressionUnaryMinus returns [DynaTerm rterm]
     : b=expressionDynabaseAccess {$rterm = $b.rterm;}
     | '-' b=expressionDynabaseAccess {$rterm = DynaTerm.create("\$unary_-", $b.rterm);}
     ;
 
-expressionExponent returns [Object rterm]
+expressionExponent returns [DynaTerm rterm]
     : b=expressionUnaryMinus {$rterm = $b.rterm;}
     | a=expressionUnaryMinus '**' b=expressionUnaryMinus {$rterm = DynaTerm.create("**", $a.rterm, $b.rterm);}
     ;
 
-expressionMulicative returns [Object rterm]
+expressionMulicative returns [DynaTerm rterm]
     : a=expressionExponent {$rterm = $a.rterm;} (op=('*'|'/'|'//') b=expressionExponent
                 {$rterm = DynaTerm.create($op.getText(), $rterm, $b.rterm);})*
     ;
 
-// expressionMulicative returns [Object rterm]
-//     locals [Object pvalue = null, String prev_op  = null;]
-//     : (a=expressionExponent[$prog] op=('*'|'/'|'//')
-//          {
-//            if($pvalue != null) {
-//                $pvalue = $prog.make_call($prev_op, new Object[]{$pvalue, $a.value});
-//            } else {
-//                $pvalue = $a.value;
-//            }
-//            $prev_op = $op.getText();
-//          })* b=expressionExponent[$prog] {
-//             if($pvalue != null) {
-//                 $value = $prog.make_call($prev_op, new Object[]{$pvalue, $b.value});
-//             } else {
-//                 $value = $b.value;
-//             }
-//          }
-//     ;
-
-expressionAdditive returns [Object rterm]
+expressionAdditive returns [DynaTerm rterm]
     : a=expressionMulicative {$rterm = $a.rterm;} (op=('+'|'-') b=expressionMulicative
             {$rterm = DynaTerm.create($op.getText(), $rterm, $b.rterm);})*
     ;
 
-// expressionAdditive[DynaParserInterface prog] returns [Object value]
-//     locals [Object pvalue = null, String prev_op  = null;]
-//     : (a=expressionMulicative[$prog] op=('+'|'-')
-//             {
-//            if($pvalue != null) {
-//                $pvalue = $prog.make_call($prev_op, new Object[]{$pvalue, $a.value});
-//            } else {
-//                $pvalue = $a.value;
-//            }
-//            $prev_op = $op.getText();
-//          })* b=expressionMulicative[$prog] {
-//             if($pvalue != null) {
-//                 $value = $prog.make_call($prev_op, new Object[]{$pvalue, $b.value});
-//             } else {
-//                 $value = $b.value;
-//             }
-//          }
-//     ;
-
-expressionRelationCompare returns [Object rterm]
-    : b=expressionAdditive {$rterm = $b.rterm;}
-    | a=expressionAdditive op=('>'|'<'|'<='|'>=') b=expressionAdditive
-        {$rterm= DynaTerm.create($op.getText(), $a.rterm, $b.rterm);}
+expressionRelationCompare returns [DynaTerm rterm]
+locals[DynaTerm last_expression]
+    : a=expressionAdditive {$rterm = $a.rterm; $last_expression=$a.rterm;}
+        (op=('>'|'<'|'<='|'>=') b=expressionAdditive
+            { // this enables multiple of these expressions to get chained together like 0 < A < 10, like in python
+                $rterm = DynaTerm.create($op.getText(), $last_expression, $b.rterm);
+                $last_expression = $b.rterm;
+            })*
     ;
+    // : b=expressionAdditive {$rterm = $b.rterm;}
+    // | a=expressionAdditive op=('>'|'<'|'<='|'>=') b=expressionAdditive
+    //     {$rterm= DynaTerm.create($op.getText(), $a.rterm, $b.rterm);}
+    // ;
 
-expressionEqualsCompare returns [Object rterm]
+expressionEqualsCompare returns [DynaTerm rterm]
     : a=expressionRelationCompare {$rterm = $a.rterm;}
         (op=('=='|'!=') b=expressionRelationCompare
             {$rterm = DynaTerm.create($op.getText(), $rterm, $b.rterm);})*
     ;
 
-// expressionEqualsCompare returns [Object rterm]
-//     locals [Object pvalue = null, String prev_op  = null;]
-//     : (a=expressionRelationCompare[$prog] op=('=='|'!=')
-//         {
-//            if($pvalue != null) {
-//                $pvalue = $prog.make_call($prev_op, new Object[]{$pvalue, $a.value});
-//            } else {
-//                $pvalue = $a.value;
-//            }
-//            $prev_op = $op.getText();
-//          })* b=expressionRelationCompare[$prog] {
-//             if($pvalue != null) {
-//                 $value = $prog.make_call($prev_op, new Object[]{$pvalue, $b.value});
-//             } else {
-//                 $value = $b.value;
-//             }
-//          }
-//     ;
-
-expressionLogical returns [Object rterm]
+expressionLogical returns [DynaTerm rterm]
     : a=expressionEqualsCompare {$rterm = $a.rterm;}
         (op=('||'|'&&') b=expressionEqualsCompare
             {$rterm = DynaTerm.create($op.getText(), $rterm, $b.rterm);})*
     ;
 
-// expressionLogical[DynaParserInterface prog] returns [Object value]
-//     locals [Object pvalue = null, String prev_op  = null;]
-//     : (a=expressionEqualsCompare[$prog] op=('||'|'&&')
-//         {
-//            if($pvalue != null) {
-//                $pvalue = $prog.make_call($prev_op, new Object[]{$pvalue, $a.value});
-//            } else {
-//                $pvalue = $a.value;
-//            }
-//            $prev_op = $op.getText();
-//          })* b=expressionEqualsCompare[$prog] {
-//             if($pvalue != null) {
-//                 $value = $prog.make_call($prev_op, new Object[]{$pvalue, $b.value});
-//             } else {
-//                 $value = $b.value;
-//             }
-//          }
-//     ;
-
-expressionIs returns [Object rterm]
+expressionIs returns [DynaTerm rterm]
     : a=expressionLogical {$rterm=$a.rterm;}
     | a=expressionLogical ('is'|'=') b=expressionLogical
         {$rterm = DynaTerm.create("\$unify", $a.rterm, $b.rterm);}
     ;
 
-expression returns [Object rterm]
+expression returns [DynaTerm rterm]
     : a=expressionIs { $rterm = $a.rterm; }
+    ;
+
+compilerExpression returns [DynaTerm rterm]
+    : a=atom p=parameters {$rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create_arr($a.t, $p.args));}
+    | a=atom m=methodId { $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create($a.t, DynaTerm.create("/", $m.name, $m.n))); }
     ;
 
 // // expressions which change how the parser behaves or how the runtime works for given expression
@@ -631,11 +650,12 @@ expression returns [Object rterm]
 // //    | '$quote' { $t = "$quote"; }  // TODO remove. this isn't actually going to be used any more (I think
 //     ;
 
-onOffArgument returns [boolean t]
-    : 'on' { $t = true; }
-    | 'off' { $t = false; }
-    ;
+// onOffArgument returns [boolean t]
+//     : 'on' { $t = true; }
+//     | 'off' { $t = false; }
+//     ;
 
 methodId returns [String name, int n]
     : a=atom '/' b=NumberInt { $name = $a.t; $n = java.lang.Integer.valueOf($b.getText()); }
+    | a=atom { $name = $a.t; $n = 0; }
     ;
