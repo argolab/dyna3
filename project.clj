@@ -7,7 +7,8 @@
                  [aprint "0.1.3"]
                  ;[clj-python/libpython-clj "2.00-beta-22"]
                  [com.clojure-goes-fast/clj-java-decompiler "0.3.0"]
-                 [org.antlr/antlr4-runtime "4.7.2"]]
+                 [org.antlr/antlr4-runtime "4.7.2"]
+                 [org.jline/jline "3.20.0"]]
   :repl-options {:init-ns dyna-backend.core}
   ;; :aot [dyna-backend.interface
   ;;       dyna-backend.parser_interface]

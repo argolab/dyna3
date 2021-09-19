@@ -118,7 +118,8 @@
 
 (defmacro deftype-with-overrides
   [name args overrides & bodies]
-  (let [override-map (into {} (map vec overrides))]
+  (let [override-map (into {} (for [o  overrides]
+                                [(car o) o]))]
     `(deftype ~name ~args
        ~@(for [b bodies]
            (if (and (seqable? b) (contains? override-map (car b)))

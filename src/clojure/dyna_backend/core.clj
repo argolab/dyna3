@@ -10,6 +10,8 @@
   (:require [dyna-backend.rexpr-dynabase])
                                         ;(:require [dyna-backend.parser_interface :refer [parse-string]])
   (:require [dyna-backend.ast-to-rexpr :refer [parse-string parse-file]])
+
+  (:require [dyna-backend.repl :refer [repl]])
   )
 
 ;; (defn parse-string [str]
@@ -31,5 +33,13 @@
 ;(def ^:dynamic *current-context* nil)
 
 
+;; (defn repl []
+;;   (let [console (System/console)]
+;;     (loop [])
+;;     )
+;;   )
+
+
 (defn main [args]
+  (repl)
   (println "this is the main function for dyna"))

@@ -32,6 +32,14 @@
   (as-list [this]) ; use for printing out the structure
 
   (exposed-variables [this])        ; return variables values that are exposed externally (so hide aggregators and proj)
+
+  ;; these functions can recursivy walk the R-expr and rewmap the different variables which appear
+  ;; if there is something that
+
+
+  (remap-variables [this variable-renaming-map])
+  ;; (visit-rexpr-children [this remap-function]) ;; this will visit any nested R-exprs on the expression, and return a new expression of the same type with
+  ;(visit-all-children [this remap-function]) ;; this will visit
   )
 
 
@@ -52,14 +60,12 @@
         rname (str name "-rexpr")
         opt (if (not (nil? optional)) (vec optional) [])]
     `(do
-       ;; (deftype-with-overrides ~(symbol rname) ~(vec (concat (quote [cached-hash-code ^:unsynchronized-mutable cached-exposed-variables])
-       ;;                                                       (map cdar vargroup)))
-       ;;   ~opt
-
-       ;;   )
-
-       (deftype ~(symbol rname) ~(vec (concat (quote [^int cached-hash-code ^:unsynchronized-mutable cached-exposed-variables])
-                                              (map cdar vargroup)))
+       (declare ~(symbol (str "make-" name))
+                ~(symbol (str "make-no-simp-" name))
+                ~(symbol (str "is-" name "?")))
+       (deftype-with-overrides ~(symbol rname) ~(vec (concat (quote [^int cached-hash-code ^:unsynchronized-mutable cached-exposed-variables])
+                                                             (map cdar vargroup)))
+         ~opt
          Rexpr
          ~'(primitive-rexpr [this] this) ;; this is a primitive expression so we are going to just always return ourselves
          (~'get-variables ~'[this]
@@ -107,6 +113,26 @@
                                             #{~@(keep
                                                  #(if (= :hidden-var (car %)) (cdar %))
                                                  vargroup)})))))
+         (~'remap-variables ~'[this variable-map]
+          (if (empty? ~'variable-map)
+            ~'this ;; in this case, there are no variables in the expression to rename, so don't do any replacements and just return our selves
+            (let ~(vec (apply concat (for [v vargroup]
+                                       [(symbol (str "new-" (cdar v)))
+                                        (case (car v)
+                                          :var `(get ~'variable-map ~(cdar v) ~(cdar v))
+                                          :hidden-var `(get ~'variable-map ~(cdar v) ~(cdar v))
+                                          :var-list `(map #(get ~'variable-map % %) ~(cdar v))
+                                          :rexpr `(remap-variables ~(cdar v) ~'variable-map)
+                                          :rexpr-list `(map #(remap-variables % ~'variable-map) ~(cdar v))
+                                          (cdar v) ;; the default is that this is the same
+                                          )])))
+              (if (and ~@(for [v vargroup]
+                           `(= ~(cdar v) ~(symbol (str "new-" (cdar v))))
+                           ))
+                ~'this ;; then there was no change, so we can just return ourself
+                ;; there was some change, so we are going to need to create a new object with the new values
+                (~(symbol (str "make-no-simp-" name)) ~@(for [v vargroup]
+                                                          (symbol (str "new-" (cdar v)))))))))
          Object
          (equals ~'[this other]
            (or (identical? ~'this ~'other)
@@ -127,8 +153,9 @@
                                (debug-repl ~(str "check argument " (car x)))
                                (assert false)))) vargroup)
          (~(symbol (str rname "."))
-          (+ ~(hash rname) ~@(for [[var idx] (zipmap vargroup (range))]
-                               `(* (hash ~(cdar var)) ~(+ 3 idx))))
+          ;; this hash implementation needs to match the one below....
+          (unchecked-int (+ ~(hash rname) ~@(for [[var idx] (zipmap vargroup (range))]
+                                              `(* (hash ~(cdar var)) ~(+ 3 idx)))))
 
           nil                           ; the cached unique variables
           ~@(map cdar vargroup))
@@ -145,8 +172,9 @@
          (simplify-construct (~(symbol (str rname "."))
                               ;; this might do the computation as a big value, would be nice if this could be forced to use a small int value
                               ;; I suppose that we could write this in java and call out to some static function if that really became necessary
-                              (.intValue ^java.lang.Number (+ ~(hash rname) ~@(for [[var idx] (zipmap vargroup (range))]
-                                                                                `(* (hash ~(cdar var)) ~(+ 3 idx)))))
+                              ;; this hash implementation needs to match the one above....
+                              (unchecked-int (+ ~(hash rname) ~@(for [[var idx] (zipmap vargroup (range))]
+                                                                  `(* (hash ~(cdar var)) ~(+ 3 idx)))))
 
                               nil       ; the cached unique variables
                               ~@(map cdar vargroup))))
@@ -401,15 +429,32 @@
 ;; integrated into the aggregator before, or the disjunction included that it
 ;; was matching the expression
 
+(defn- recurse-values-depth [m depth]
+  (if (= depth 0)
+    (vals m)
+    (lazy-seq (map #(recurse-values-depth % (- depth 1)) (vals m)))))
+
+
+;; I suppose that in the case that there are non-ground disjunction-variables, then this would still need this structure
+;; once all of the disjunct variables are ground, then this can just rewrite as the wrapped R-expr.  I suppose that this can
+;; also consider which of the variables are forced to take a particular value.  Then those can be created as unification expressions
+;; such that it will take which of the values might corresponds with it having some of the different
 (def-base-rexpr disjunct-op [:var-list disjunction-variables
                              ;:disjunct-trie rexprs
                              :unchecked rexprs
                              ]
-  (primitive-rexpr [this] (assert false))
-  (get-children [this] (assert false))
-  (primitive-rexpr [this] ;; this would have to construct many disjuncts for the given expression.
-                   )
-  )
+  ;; (primitive-rexpr [this] (assert false))
+  ;; (get-children [this] (assert false))
+  ;; (primitive-rexpr [this] ;; this would have to construct many disjuncts for the given expression.
+  ;;                  )
+
+  ;; this will need to walk through all of the rexprs trie and find the depth in
+  ;; which an expression corresponds with it.  I suppose that we do not need to
+  ;; have a list of disjuncts, as those can just be other disjunctive R-exprs in
+  ;; the case that there is more than 1 thing
+  (get-children [this] (let [depth (count disjunction-variables)]
+
+                         (assert false))))
 
 
 
@@ -521,6 +566,8 @@
        ~(case (:run-at kw-args :standard)
           :standard 'rexpr-rewrites
           :construction 'rexpr-rewrites-construct
+          :standard-and-construction 'rexpr-rewrites-construct ;; this should also run these when their variables become ground
+          :construction-and-grounding-change nil ;; this could run it when there is a new variable which is ground, which might be useful in avoiding running sutff too much?
           :inference 'rexpr-rewrites-inference)
        ~(symbol (str functor-name "-rexpr"))
        ~rewriter-function)))
@@ -1002,12 +1049,30 @@
 ;; )
 
 
+;; (def-rewrite
+;;   :match (user-call (:str name) args call-depth)
+;;   :run-at :standard
+;;   (let [n [name (count args)]
+;;         expr (system/lookup-named-expression name)]
+;;     ;; this needs to rename the variables which represent the expression
+;;     nil
+;;     )
+;;   )
+
+
+;; (def-rewrite
+;;   :match (user-call (:unchecked a) (:unchecked b) (:unchecked c) (:unchecked d) (:unchecked e))
+;;   :run-at :construction
+;;   (make-multiplicity 0))
+
+
+;; this rewrite finds buitin expressions and replaces them once they are created.  There is no need to delay expanding these expressions
 (def-rewrite
-  :match (user-call (:str name) args call-depth)
-  :run-at :standard
-  (let [n [name (count args)]
-        expr (system/lookup-named-expression name)]
-    ;; this needs to rename the variables which represent the expression
-    nil
-    )
-  )
+  :match (user-call (:unchecked name) (:unchecked from-file) (:unchecked dynabase) (:unchecked args) (:unchecked call-depth))
+  :run-at :construction
+  (let [n [name (- (count args) 1)]
+        s (get @system/system-defined-user-term n)]
+    (when (not (nil? s))
+      ;; here we can just replace the expression with the variable names
+      (let [vmap (zipmap (map #(make-variable (str "$" %)) (range)) args)]
+        (remap-variables s vmap)))))

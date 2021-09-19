@@ -3,7 +3,9 @@
   (:require [dyna-backend.rexpr :refer :all])
   (:require [dyna-backend.rexpr-dynabase :refer :all])
   (:require [clojure.set :refer [union]])
+  (:require [clojure.string :refer [join]])
   (:import [org.antlr.v4.runtime CharStream CharStreams UnbufferedTokenStream])
+  (:import [org.antlr.v4.runtime.misc Interval])
   (:import [dyna_backend DynaTerm])
   (:import [java.net URL]))
 
@@ -51,6 +53,18 @@
                                :unchecked variable-name-mapping ;; these are variable names which are in scope and the associated R-expr variable/constant
                                :unchecked source-file ;; this is the filename of the current item, so if we do $load, then we can have that get the relative file path
                                ]
+  (get-variables [this] (into #{} (filter variable?
+                                          (concat (vals variable-name-mapping)
+                                                  [out-variable ast]))))
+  (remap-variables [this variable-map]
+                   (make-eval-from-ast
+                    (get variable-map out-variable out-variable)
+                    (get variable-map ast ast)
+                    (into {} (for [[k v] variable-name-mapping]
+                               [k (get variable-map v v)]))
+                    source-file ;; this is just some constant
+                    ))
+
   ;; this is going to need something custom for the variable-name-mapping so that it is able to get the values for the variables when it comes
   )
 
@@ -62,9 +76,18 @@
 
 ;; there needs to be some queue of
 
+(def true-constant-dterm (DynaTerm. "$constant" true))
+
 (defn make-comma-conjunct
-  ([a] a)
-  ([a & args] (DynaTerm. "," [a (make-comma-conjunct args)])))
+  ([] true-constant-dterm)
+  ([a] (if (nil? a)
+         true-constant-dterm
+         a))
+  ([a & args]
+   (if (or (nil? a) (= a true-constant-dterm))
+     (make-comma-conjunct args)
+     (DynaTerm. "," [a (make-comma-conjunct args)]))))
+
 
 ;; special variables
 ;; $0, .., $n-1 the arguments to an n-arity function
@@ -88,7 +111,7 @@
     #{}))
 
 
-(defn conversion-from-ast [^DynaTerm ast out-variable variable-name-mapping source-file]
+(defn convert-from-ast [^DynaTerm ast out-variable variable-name-mapping source-file]
   (let [project-out-vars (transient {})
         get-variable (fn [name]
           (if (contains? variable-name-mapping name)
@@ -99,10 +122,59 @@
                 (assoc! project-out-vars name nv)
                 nv))))
         get-variable-mapping (fn [] (merge project-out-vars variable-name-mapping))]
+
     (let [constructed-rexpr
           (case (.name ast)
+            "$compiler_expression" (case (.name (get ast 0))
+                                     "import" (???) ;; import some file, or some symbols from another file
+                                     "export" (???) ;; list some symbols as getting exported
+                                     "dispose" (???) ;; some of the arugments to a function should get escaped escaped, or quoted
+                                     "macro" (???) ;; mark a function as being a macro, meaning that it gets its argument's AST and will return an AST which should get evaluated
+                                     "memoize_unk" (???)  ;; mark some function as being memoized
+                                     "memoize_null" (???)
+
+                                     "import_csv" (???) ;; import some CSV file as a term
+                                     "export_csv" (???) ;; export a CSV file for a term after the program is done running
+                                     )
+
+            "$define_term" (let [[head dynabase aggregator body] (.arguments ast)
+                                 new-body (make-comma-conjunct
+                                           (apply make-comma-conjunct (for [[arg idx] (zipmap (.arguments head) (range))]
+                                                                        (DynaTerm. "$unify" [(DynaTerm. "$variable" [(str "$" idx)])
+                                                                                             arg])))
+                                           body
+                                           (when (not (nil? dynabase))
+                                             (DynaTerm. "$unify" [(DynaTerm. "$variable" ["$self"])
+                                                                  (DynaTerm. "$dynabase_access" [dynabase])])
+                                             ))
+                                 new-ast (DynaTerm. "$define_term_normalized"
+                                                    [(.name head)
+                                                     (- (.arity head) 1)
+                                                     source-file
+                                                     dynabase
+                                                     aggregator
+                                                     new-body])]
+                             (make-eval-from-ast out-variable new-ast {} source-file))
+            "$define_term_normalized" (let [[functor-name functor-arity source-file dynabase aggregator ast] (.arguments ast)
+                                            all-variables (find-all-variables ast)
+                                            project-variables (filter #(not (re-matcher #"\$self|\$[0-9]+" %) all-variables))
+                                            project-variables-map (into {} (for [v project-variables]
+                                                                            [v (make-variable v)]
+                                                                            ))
+                                            incoming-variable (make-variable (gensym "incoming-variable"))
+                                            rexpr (make-aggregator aggregator
+                                                                   out-variable
+                                                                   incoming-variable
+                                                                   (make-proj-many (vals project-variables-map)
+                                                                                   (make-eval-from-ast incoming-variable
+                                                                                                       ast
+                                                                                                       project-variables-map
+                                                                                                       source-file)))]
+                                        (user-add-to-user-expression source-file dynabase functor-name functor-arity rexpr))
+            ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
             ;; $define_term is the standard define term expression, this not have some dynabase additional reference or anything else yet
-            "$define_term" (let [[head aggregator body] (.arguments ast)
+            "$define_term_junk" (let [[head aggregator body] (.arguments ast)
                                  new-body (make-comma-conjunct
                                            (DynaTerm. "$unify" [(DynaTerm. "$variable" "$self")
                                                                 (DynaTerm. "$variable" "$dynabase")])
@@ -137,7 +209,7 @@
                                                                    [name arity aggregator new-body])]
                                             ;; this returns a new ast element as we have not fully constructed this object yet
                                             (make-eval-from-ast out-variable new-ast variable-name-mapping source-file))
-            "$define_term_normalized" (let [[name arity aggregator body] (.arguments ast)
+            "$define_term_normalized_junk" (let [[name arity aggregator body] (.arguments ast)
                                             agg-in-var (make-variable "$result")
                                             agg-out-var (make-variable (str "$" arity))
                                             variables (assoc
@@ -273,6 +345,44 @@
 ;;     ))
 
 
+(defn get-parser-print-name [token]
+  (.getDisplayName dyna_backend.dyna_grammar2Lexer/VOCABULARY token))
+
+(def parse-error-handler
+  (proxy [org.antlr.v4.runtime.DefaultErrorStrategy] []
+    ;; (reportError [recognizer exception]
+    ;;   ;; this is going to just be called in the general case, so I suppose that if this is not defined, then
+    ;;   ;; this is going to try and report some error
+    ;;   (debug-repl)
+    ;;   (println "report error" exception))
+    (reportFailedPredicate [recognizer exception]
+      (debug-repl)
+      (println "report failed predicate" exception))
+    (reportInputMismatch [recognizer exception]
+      (debug-repl)
+      (println "report input missmatch" exception))
+    (reportNoViableAlternative [recognizer exception]
+      (let [token (.getStartToken exception)
+            offending (.getOffendingToken exception)
+            stream (.getInputStream token)
+            continuations (map get-parser-print-name (.toList (.getExpectedTokens exception)))]
+        (println "====================================================================================================")
+        (println "PARSER ERROR -- invalid input")
+        (println "")
+        (println "Input was incomplete")
+        (println "")
+        (println (str "Line: " (.getLine token) ":" (.getCharPositionInLine token) "-" (.getLine offending) ":" (.getCharPositionInLine offending)))
+        (println "--------------------")
+        (println (.getText stream (Interval. ^int (.getStartIndex token) ^int (.getStopIndex offending))))
+        (println "--------------------")
+        (println "possible missing tokens: " (join " OR " continuations))
+        (println "====================================================================================================")))
+    (reportUnwantedToken [recognizer]
+      (debug-repl)
+      (println "unwanted token"))
+    ))
+
+
 (defn run-parser [^CharStream stream]
   (let [lexer (dyna_backend.dyna_grammar2Lexer. ^CharStream stream)
         token-stream (UnbufferedTokenStream. lexer)
@@ -282,6 +392,7 @@
                           ;; configured or something.  I suppose that this could
                           ;; happen via flags or for large inputs
         (.setErrorHandler parser (BailErrorStrategy.))))
+    (.setErrorHandler parser parse-error-handler)
     (let [r (.program parser)
           e (.getNumberOfSyntaxErrors parser)]
       (if (not= e 0)
@@ -314,6 +425,8 @@
     (run-parser astream)))
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (def-rewrite
   :match (ast-from-string (:any out) (:ground in))
   (let [s (get-value in)]
@@ -326,6 +439,11 @@
       (make-multiplicity 0) ;; the input is not a string, there is no way in which this is going to parse
       )))
 
+;; (def-rewrite
+;;   :match (eval-from-ast (:any out-variable) (:ground ast) (:unchecked variable-name-mapping) (:unchecked source-file))
+;;   :run-at :standard-and-construction ;; this should run when it is constructed and when it might have a ground variable
+;;   (let [a (get-value ast)]
+;;     (convert-from-ast a out-variable variable-name-mapping source-file)))
 
 
 ;; (def-rewrite

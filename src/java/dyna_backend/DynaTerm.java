@@ -2,8 +2,9 @@ package dyna_backend;
 
 import clojure.java.api.Clojure;
 import clojure.lang.IFn;
+import clojure.lang.ILookup;
 
-public final class DynaTerm {
+public final class DynaTerm implements ILookup {
 
     public final String name;
     public final Object dynabase;
@@ -39,7 +40,8 @@ public final class DynaTerm {
                 b.append("(");
                 for(int i = 0; i < count; i++) {
                     if(i != 0) b.append(", ");
-                    b.append(clojure_get.invoke(arguments, i).toString());
+                    Object o = get(i);
+                    b.append(o == null ? "null" : o.toString());
                 }
                 b.append(")");
             }
@@ -58,7 +60,8 @@ public final class DynaTerm {
             int count = arity();
             h ^= count;
             for(int i = 0; i < count; i++) {
-                h = h * 31 + ((java.lang.Number)clojure_hash.invoke(clojure_get.invoke(arguments, i))).intValue();
+                // .get does not work with a list
+                h = h * 31 + ((java.lang.Number)clojure_hash.invoke(clojure_nth.invoke(arguments, i))).intValue();
             }
             hashcode_cache = h;
         }
@@ -74,8 +77,8 @@ public final class DynaTerm {
         int count = arity();
         if(count != t.arity()) return false;
         for(int i = 0; i < count; i++) {
-            if(clojure_eq.invoke(clojure_get.invoke(arguments, i),
-                                 clojure_get.invoke(t.arguments, i)) != Boolean.TRUE)
+            if(clojure_eq.invoke(clojure_nth.invoke(arguments, i),
+                                 clojure_nth.invoke(t.arguments, i)) != Boolean.TRUE)
                 return false;
         }
         return true;
@@ -86,17 +89,34 @@ public final class DynaTerm {
     }
 
     public DynaTerm extend_args(Object value) {
-        assert(false);
-        return null;
+        // this makes a new term with something appended to the end of the argument list
+        Object args = clojure_vec.invoke(clojure_concat.invoke(arguments, clojure_list.invoke(value)));
+        return new DynaTerm(name, dynabase, from_file, args);
+    }
+
+    public Object get(int i) {
+        return clojure_nth.invoke(arguments, i);
+    }
+
+    public Object valAt(Object key) {
+        if("name".equals(key)) return name;
+        return clojure_nth.invoke(arguments, key);
+    }
+
+    public Object valAt(Object key, Object notfound) {
+        if("name".equals(key)) return name;
+        return clojure_nth.invoke(arguments, key, notfound);
     }
 
     static private final IFn clojure_seqable;
     static private final IFn clojure_hash;
     static private final IFn clojure_count;
-    static private final IFn clojure_get;
+    static private final IFn clojure_nth;
     static private final IFn clojure_eq;
     static private final IFn clojure_vec;
     static private final IFn clojure_gensym;
+    static private final IFn clojure_concat;
+    static private final IFn clojure_list;
 
     static public final DynaTerm null_term;
 
@@ -104,10 +124,12 @@ public final class DynaTerm {
         clojure_seqable = Clojure.var("clojure.core", "seqable?");
         clojure_hash = Clojure.var("clojure.core", "hash");
         clojure_count = Clojure.var("clojure.core", "count");
-        clojure_get = Clojure.var("clojure.core", "get");
+        clojure_nth = Clojure.var("clojure.core", "nth");
         clojure_eq = Clojure.var("clojure.core", "=");
         clojure_vec = Clojure.var("clojure.core", "vec");
         clojure_gensym = Clojure.var("clojure.core", "gensym");
+        clojure_concat = Clojure.var("clojure.core", "concat");
+        clojure_list = Clojure.var("clojure.core", "list");
 
         null_term = new DynaTerm("$nil", new Object[]{});
     }
@@ -126,5 +148,35 @@ public final class DynaTerm {
 
     public static Object gensym_variable_name() {
         return clojure_gensym.invoke("$runtime_var_");
+    }
+
+    public static DynaTerm make_list(Object arr) {
+        DynaTerm ret = DynaTerm.null_term;
+        final int cnt = ((java.lang.Number)clojure_count.invoke(arr)).intValue();
+        for(int i = cnt - 1; i >= 0; i--) {
+            ret = DynaTerm.create(".", clojure_nth.invoke(arr, i), ret);
+        }
+        return ret;
+    }
+
+    public Object list_to_vec() {
+        // this has to construct a clojure vector from a dyna linked list object
+        int count = 0;
+        DynaTerm s = this;
+        while(s.name.equals(".")) {
+            count++;
+            Object v = s.get(1);
+            if(v == null || !(v instanceof DynaTerm)) return null; // the structure is not what we expect
+            s = (DynaTerm)v;
+        }
+        if(!s.equals(null_term)) return null; // not the structure that we expect
+        Object[] tmp = new Object[count];
+        s = this;
+        for(int i = 0; i < count; i++) {
+            tmp[i] = s.get(0);
+            s = (DynaTerm)s.get(1);
+        }
+        // vec is going to alias java arrays?  So this should just keep a reference to the above array rather than copying it?
+        return clojure_vec.invoke(tmp);
     }
 }

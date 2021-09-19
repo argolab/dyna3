@@ -11,8 +11,19 @@ grammar dyna_grammar2;
 package dyna_backend;
 
 import java.math.BigInteger;
+import clojure.java.api.Clojure;
 
 }
+
+
+// @rulecatch {
+//     catch(Exception e) {
+//         // just handle any error using a callback into the clojure runtime
+//         // the error is either going to be some recognition error or something else
+//         // I supppose that this can re-throw the error if it wants
+//         Clojure.var("dyna-backend.ast-to-rexpr", "handle-parser-error").invoke(e);
+//    }
+// }
 
 fragment EndLine
     : [ \t]* ('%' ~[\n\r]*)? [\n\r]
@@ -180,12 +191,16 @@ program returns[DynaTerm rterm = null]
 
               // for the number of different values which this might represent
               // if there is some expression around how this would
-         if($rterm == null) {
-             $rterm = $t.rterm;
-         } else {
-             // the term create object should just return true, so we can use ',' to unify it together into a single object
-             $rterm = DynaTerm.create(",", $rterm, $t.rterm);
-         }
+        if($t.rterm == null) {
+            _syntaxErrors++;
+        } else {
+            if($rterm == null) {
+                $rterm = $t.rterm;
+            } else {
+                // the term create object should just return true, so we can use ',' to unify it together into a single object
+                $rterm = DynaTerm.create(",", $rterm, $t.rterm);
+            }
+        }
       })* EOF
     | query EOF
       {
@@ -216,13 +231,13 @@ term returns[DynaTerm rterm = null]
     | query EndQuery {
                       assert(false); // todo
         }
-    | ':-' a=atom p=parameters EndTerm
-        {
-            $rterm = DynaTerm.create("\$compiler_pragma", DynaTerm.create_arr($a.t, $p.args));
-        }
+    // | ':-' a=atom p=parameters EndTerm
+    //     {
+    //         $rterm = DynaTerm.create("\$compiler_pragm", DynaTerm.create_arr($a.t, $p.args));
+    //     }
 
         // compiler statements
-    // | ':-' ce=compilerExpression EndTerm { $trm = $ce.trm; $prog.addTerm($trm); }
+    | ':-' ce=compilerExpression EndTerm { $rterm = $ce.rterm; }
     // assert is something that if it fails, then it can report an error all of the way back to the user.  There should be no calling dynabase in this case
     | 'assert'
         t=termBody EndTerm
@@ -237,29 +252,28 @@ term returns[DynaTerm rterm = null]
 // the un-ended term does not consume the EndTerm token at the end.  The EndTerm toekn requires a new line which would require that dynabases have a new line before the closing `}`
 term_unended returns[DynaTerm rterm = null]
     locals [DynaTerm dbase_rterm = null]
-    :
-        (dbase=expression '.' {$dbase_rterm = $dbase.rterm;  assert(false);})?
+    : (dbase=expression '.' {$dbase_rterm = $dbase.rterm;})?
       a=atom
       p=parameters
       agg=aggregatorName
       (t=termBody ';'
-            { DynaTerm l = DynaTerm.create("\$define_term", DynaTerm.create_arr($a.t, $p.args), $agg.t, $t.rterm);
+            { DynaTerm l = DynaTerm.create("\$define_term", DynaTerm.create_arr($a.t, $p.args), $dbase_rterm, $agg.t, $t.rterm);
               if($rterm == null) $rterm = l;
               else { $rterm = DynaTerm.create(",", $rterm, l); }
              })*
         t=termBody
-        { DynaTerm l = DynaTerm.create("\$define_term", DynaTerm.create_arr($a.t, $p.args), $agg.t, $t.rterm);
+        { DynaTerm l = DynaTerm.create("\$define_term", DynaTerm.create_arr($a.t, $p.args), $dbase_rterm, $agg.t, $t.rterm);
               if($rterm == null) $rterm = l;
               else { $rterm = DynaTerm.create(",", $rterm, l);  }
         }
-    |
-        (dbase=expression '.'  {$dbase_rterm = $dbase.rterm;  assert(false);})?
+    | (dbase=expression '.'  {$dbase_rterm = $dbase.rterm;})?
         a=atom
       p=parameters
       {
             // writing `a(1,2,3).` is just a short hand for `a(1,2,3) :- true.`
-            $rterm = DynaTerm.create("\$define_term", DynaTerm.create_arr($a.t, $p.args), ":-", DynaTerm.create("\$constant", true));
+            $rterm = DynaTerm.create("\$define_term", DynaTerm.create_arr($a.t, $p.args), $dbase_rterm, ":-", DynaTerm.create("\$constant", true));
       }
+    | ':-' ce=compilerExpression EndTerm { $rterm = $ce.rterm; }
     ;
 
 // there should be a term which is at the
@@ -321,8 +335,8 @@ forExpr returns [DynaTerm rterm=null]
 
 parameters returns [ArrayList<DynaTerm> args]
     :/* empty */ { $args = new ArrayList<>(); }
+    //| '(' ')' { $args = new ArrayList<>(); }
     | '(' p=arguments ')' { $args = $p.args; }
-    | '(' ')' { $args = new ArrayList<>(); }
     ;
 
 methodName returns [String name]
@@ -330,17 +344,18 @@ methodName returns [String name]
     ;
 
 methodCall returns [String name, ArrayList<DynaTerm> args]
-    : m=methodName '(' a=arguments ')'
+    : m=methodName p=parameters
     {
        $name = $m.name;
-       $args = $a.args;
-    }
-    | m=methodName
-    {
-      $name = $m.name;
-      $args = new ArrayList<>();
+       $args = $p.args;
     }
     ;
+        // | m=methodName
+    // {
+    //   $name = $m.name;
+    //   $args = new ArrayList<>();
+    // }
+    // ;
 
 
 // we could have something like $atoms will just quote their arguments so it
@@ -356,6 +371,7 @@ methodCall returns [String name, ArrayList<DynaTerm> args]
 
 arguments returns [ArrayList<DynaTerm> args = new ArrayList<>();]
     : (e=expression Comma {$args.add($e.rterm);})* e=expression {$args.add($e.rterm);}
+    | // zero arguments
     ;
 
 array returns [DynaTerm rterm] locals []
@@ -467,7 +483,7 @@ inlineAggregated returns [DynaTerm value]
         ')'
     ;
 
-inlineAnnonFunction returns [DynaTerm value]
+inlineAnonFunction returns [DynaTerm value]
 locals [ArrayList<String> varlist = new ArrayList<>()]
     : '(' (v=Variable Comma {$varlist.add($v.getText());} )* v=Variable {$varlist.add($v.getText());} '~>'
     {
@@ -476,7 +492,7 @@ locals [ArrayList<String> varlist = new ArrayList<>()]
     termBody
 {
     assert(false);
-    // this wants to get a reference to the annon function, not call it immediately.
+    // this wants to get a reference to the anon function, not call it immediately.
     // so this should construct what the name for the item is, but not identify which of the arguments
 }
 ')'
@@ -498,7 +514,7 @@ expressionRoot returns [DynaTerm rterm]
         }
     | v=Variable {
             if($v.getText().equals("_")) {
-                $rterm = DynaTerm.create("\$annon_variable");  // these are variables which can not be referenced in more than once place by name
+                $rterm = DynaTerm.create("\$anon_variable");  // these are variables which can not be referenced in more than once place by name
             } else {
                 $rterm = DynaTerm.create("\$variable", $v.getText());
             }
@@ -512,7 +528,7 @@ expressionRoot returns [DynaTerm rterm]
     | '(' e=expression ')' { $rterm = $e.rterm; }
     | a=array { $rterm = $a.rterm; }
     | ':' m=methodCall {  // for supporthing things like f(:int) => f(_:int)
-            $rterm = DynaTerm.create("\$varible", DynaTerm.gensym_variable_name());
+            $rterm = DynaTerm.create("\$variable", DynaTerm.gensym_variable_name());
             $m.args.add($rterm);
             $rterm = DynaTerm.create(",", DynaTerm.create($m.name, $m.args), $rterm); }
     | mp=assocativeMap { $rterm=$mp.rterm; }
@@ -525,18 +541,11 @@ expressionRoot returns [DynaTerm rterm]
         }
     ;
 
-expressionTyped returns [DynaTerm rterm]
-    : a=expressionRoot {$rterm=$a.rterm;}
-    | a=expressionRoot ':' b=methodCall {
-            $b.args.add($a.rterm);
-            $rterm = DynaTerm.create(",", DynaTerm.create_arr($b.name, $b.args), $a.rterm);
-      } // this is going to ahve to add some method call to the value of the statement
-    ;
 
 
 // this should probably be higher priority than the type
 expressionDynabaseAccess returns[DynaTerm rterm]
-    : a=expressionTyped {$rterm=$a.rterm;} ('.' m=methodCall {$rterm = DynaTerm.create("\$dynabase_call", $rterm, DynaTerm.create_arr($m.name, $m.args));})*
+    : a=expressionRoot {$rterm=$a.rterm;} ('.' m=methodCall {$rterm = DynaTerm.create("\$dynabase_call", $rterm, DynaTerm.create_arr($m.name, $m.args));})*
     ;
 
 expressionUnqualitiedAddBrakcetsCall returns [DynaTerm rterm]
@@ -547,18 +556,30 @@ locals [DynaTerm add_arg=null]
         | nm=assocativeMapInnerBrackets {$add_arg=$nm.rterm;})
         '}'
         {
+            $rterm = $a.rterm;
+            assert($add_arg != null);
             if($rterm.name.equals("\$dynabase_call")) {
-                assert(false); // this has to rebuild the dynabase call object with adding in the additional argument to the expression
+                // have to put the argument onto the dynabase call element,
+                $rterm = DynaTerm.create("\$dynabase_call", $rterm.get(0), ((DynaTerm)$rterm.get(1)).extend_args($add_arg));
             } else {
                 $rterm = $rterm.extend_args($add_arg);
             }
         }
     ;
 
+expressionTyped returns [DynaTerm rterm]
+    : a=expressionUnqualitiedAddBrakcetsCall {$rterm=$a.rterm;}
+    | a=expressionUnqualitiedAddBrakcetsCall ':' b=methodCall {
+            // this should also make a new temporary variable, as the expression would like to avoid calling something twice
+            $b.args.add($a.rterm); // this does not have the dynabase access allowed here?  Should this allow for the dot syntax?
+            $rterm = DynaTerm.create(",", DynaTerm.create_arr($b.name, $b.args), $a.rterm);
+      } // this is going to ahve to add some method call to the value of the statement
+    ;
+
 
 expressionUnaryMinus returns [DynaTerm rterm]
-    : b=expressionDynabaseAccess {$rterm = $b.rterm;}
-    | '-' b=expressionDynabaseAccess {$rterm = DynaTerm.create("\$unary_-", $b.rterm);}
+    : b=expressionTyped {$rterm = $b.rterm;}
+    | '-' b=expressionTyped {$rterm = DynaTerm.create("\$unary_-", $b.rterm);}
     ;
 
 expressionExponent returns [DynaTerm rterm]
@@ -578,12 +599,21 @@ expressionAdditive returns [DynaTerm rterm]
 
 expressionRelationCompare returns [DynaTerm rterm]
 locals[DynaTerm last_expression]
-    : a=expressionAdditive {$rterm = $a.rterm; $last_expression=$a.rterm;}
+    :   a=expressionAdditive {$rterm = $a.rterm;}
+    |   a=expressionAdditive {$rterm = null; $last_expression=$a.rterm;}
         (op=('>'|'<'|'<='|'>=') b=expressionAdditive
             { // this enables multiple of these expressions to get chained together like 0 < A < 10, like in python
-                $rterm = DynaTerm.create($op.getText(), $last_expression, $b.rterm);
+                // this is not making intermediate variables for these
+                // expressions, Otherwise we are going to have the same
+                // operation called more than once.  I suppose that there could
+                // be another compiler pass to find common sub expressions, but
+                // that is more work for the system to perform later that we can
+                // avoid up front
+                DynaTerm n = DynaTerm.create($op.getText(), $last_expression, $b.rterm);
+                if($rterm == null) $rterm = n;
+                else $rterm = DynaTerm.create(",", $rterm, n);
                 $last_expression = $b.rterm;
-            })*
+            })+
     ;
     // : b=expressionAdditive {$rterm = $b.rterm;}
     // | a=expressionAdditive op=('>'|'<'|'<='|'>=') b=expressionAdditive
@@ -614,6 +644,7 @@ expression returns [DynaTerm rterm]
 
 compilerExpression returns [DynaTerm rterm]
     : a=atom p=parameters {$rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create_arr($a.t, $p.args));}
+    | a=atom b=atom p=parameters. {$rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create($a.t, DynaTerm.create_arr($b.t, $p.args)));}
     | a=atom m=methodId { $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create($a.t, DynaTerm.create("/", $m.name, $m.n))); }
     ;
 
