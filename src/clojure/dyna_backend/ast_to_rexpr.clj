@@ -2,8 +2,11 @@
   (:require [dyna-backend.utils :refer :all])
   (:require [dyna-backend.rexpr :refer :all])
   (:require [dyna-backend.rexpr-dynabase :refer :all])
+  (:require [dyna-backend.system :as system])
+  (:require [dyna-backend.user-defined-terms :refer [add-to-user-term update-user-term def-user-term]])
   (:require [clojure.set :refer [union]])
   (:require [clojure.string :refer [join]])
+  (:require [clojure.java.io :refer [resource]])
   (:import [org.antlr.v4.runtime CharStream CharStreams UnbufferedTokenStream])
   (:import [org.antlr.v4.runtime.misc Interval])
   (:import [dyna_backend DynaTerm])
@@ -34,6 +37,16 @@
 ;; it would just be calling the evaluate statement to get to the next step
 (def-base-rexpr ast-from-string [:var out
                                  :var string])
+
+;; some method which takes an AST and returns a string
+(def-user-term "$ast" 1 (make-ast-from-string v1 v0))
+
+
+;; these have to be defined below, as they are going to want to have references to the current file and the current variables which are in scope
+;; (def-user-term "$eval" 1 ...)
+;; (def-user-term "$eval_from_ast" 1)
+
+
 
 ;; by having macros, this can make some operations more efficient, like map
 ;; elements where there are constant values could be constructed in a single
@@ -68,13 +81,16 @@
   ;; this is going to need something custom for the variable-name-mapping so that it is able to get the values for the variables when it comes
   )
 
+(declare import-file)
+
+
 
 (def empty-ast-context
   {:variables {}  ;; a map from variable string names to some R-expr object
    :filename nil ;; object which is hash-able and equals-able to identify where this function comes from, what name-space this exists in
    })
 
-;; there needs to be some queue of
+
 
 (def true-constant-dterm (DynaTerm. "$constant" true))
 
@@ -110,6 +126,15 @@
     ;; this is something else, like maybe the inside of a constant or something
     #{}))
 
+(defn find-term-variables [ast]
+  (if (instance? DynaTerm ast)
+    (let [name (.name ^DynaTerm ast)]
+      (case name
+        "$variable" #{(get ast 0)}
+        "$dynabase_create" #{}  ;; do not look through a dynabase create
+        "$inline_aggregate" #{}  ;; do not look through an inline aggregator
+        (apply union (map find-term-variables (.arguments ^DynaTerm ast)))))))
+
 
 (defn convert-from-ast [^DynaTerm ast out-variable variable-name-mapping source-file]
   (let [project-out-vars (transient {})
@@ -125,16 +150,49 @@
 
     (let [constructed-rexpr
           (case (.name ast)
-            "$compiler_expression" (case (.name (get ast 0))
-                                     "import" (???) ;; import some file, or some symbols from another file
-                                     "export" (???) ;; list some symbols as getting exported
-                                     "dispose" (???) ;; some of the arugments to a function should get escaped escaped, or quoted
-                                     "macro" (???) ;; mark a function as being a macro, meaning that it gets its argument's AST and will return an AST which should get evaluated
-                                     "memoize_unk" (???)  ;; mark some function as being memoized
-                                     "memoize_null" (???)
+            "$compiler_expression" (let [arg1 ^DynaTerm (get ast 1)]
+                                     (case (.name (get ast 0))
+                                       "import" (???) ;; import some file, or some symbols from another file
 
-                                     "import_csv" (???) ;; import some CSV file as a term
-                                     "export_csv" (???) ;; export a CSV file for a term after the program is done running
+                                       ;; use like `:- export name/arity`.
+                                       ;; we will have a set of symbols which are exported from a given file.  Those symbols can then be imported using an import statement.  But if the file isn't processed at the time that the import statement is handled, how is that going to work?  I suppose that there can just be a function which is called by import to do the importing of a function in place.  That will
+                                       "export" (swap! system/user-exported-terms
+                                                       (fn [o]
+                                                         (assoc o source-file (conj [(get arg1 0) (get arg1 1)] (get o source-file #{})))))
+
+                                        ;(???) ;; list some symbols as getting exported
+
+                                       ;; some of the arugments to a function should get escaped escaped, or quoted
+                                       ;; used like `:- dispose foo(quote1,eval).`
+                                       "dispose" (update-user-term {:name (.name arg1)
+                                                                    :arity (.arity arg1)
+                                                                    :source-file source-file}
+                                                                   (fn [o]
+                                                                     (assoc o :dispose-arguments (.arguments arg1))))
+
+                                       ;; mark a function as being a macro, meaning that it gets its argument's AST and will return an AST which should get evaluated
+                                       ;; used like `:- macro foo/3.`
+                                       "macro" (update-user-term {:name (get arg1 0)
+                                                                  :arity (get arg1 1)
+                                                                  :source-file source-file}
+                                                                 (fn [o]
+                                                                   (assoc o :is-macro true)))
+
+                                       ;; make a term global so that it can be referenced form every file
+                                       ;; I suppose that there should be some global list of terms which will get resolved at every possible point
+                                       ;; use like `:- make_global_term foo/3.`
+                                       "make_global_term" (???)
+
+
+                                       "memoize_unk" (???) ;; mark some function as being memoized
+                                       "memoize_null" (???)
+
+                                       "import_csv" (???) ;; import some CSV file as a term
+                                       "export_csv" (???) ;; export a CSV file for a term after the program is done running
+
+                                       (???) ;; there should be some invalid parse expression or something in the case that this fails at this point
+                                       )
+                                     (make-unify out-variable (make-constant true)) ;; just return that we processed this correctly?  I suppose that in
                                      )
 
             "$define_term" (let [[head dynabase aggregator body] (.arguments ast)
@@ -156,7 +214,7 @@
                                                      new-body])]
                              (make-eval-from-ast out-variable new-ast {} source-file))
             "$define_term_normalized" (let [[functor-name functor-arity source-file dynabase aggregator ast] (.arguments ast)
-                                            all-variables (find-all-variables ast)
+                                            all-variables (find-term-variables ast)
                                             project-variables (filter #(not (re-matcher #"\$self|\$[0-9]+" %) all-variables))
                                             project-variables-map (into {} (for [v project-variables]
                                                                             [v (make-variable v)]
@@ -170,7 +228,7 @@
                                                                                                        ast
                                                                                                        project-variables-map
                                                                                                        source-file)))]
-                                        (user-add-to-user-expression source-file dynabase functor-name functor-arity rexpr))
+                                        (add-to-user-term source-file dynabase functor-name functor-arity rexpr))
             ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
             ;; $define_term is the standard define term expression, this not have some dynabase additional reference or anything else yet
@@ -185,7 +243,7 @@
                                                     (.from_file ast)
                                                     new-body)]
                              (make-eval-from-ast out-variable new-ast variable-name-mapping source-file))
-            "$define_term_dynabase" (let [[head aggregator dynabase-ref body] (.arguments ast)
+            "$define_term_dynabase_junk" (let [[head aggregator dynabase-ref body] (.arguments ast)
                                           db-unify (DynaTerm. "$unify" [dynabase-ref (DynaTerm. "$variable" "$self")])
                                           new-ast (DynaTerm. "$define_term"
                                                              (.dynabase ast)
@@ -193,7 +251,7 @@
                                                              [head aggregator (DynaTerm. "," [db-unify body])])]
                                       ;; this should probably not get called in this case? or should this
                                       (make-eval-from-ast out-variable new-ast variable-name-mapping source-file))
-            "$define_term_dynabase_added" (let [[head aggregator body] (.arguments ast)
+            "$define_term_dynabase_added_junk" (let [[head aggregator body] (.arguments ast)
                                                 name (.name head)
                                                 arity (.arity head)
                                                 head-args (.arguments head)
@@ -226,7 +284,7 @@
                                         ;; the system.  This will then want to have some expression for which
                                         (make-unify (make-constant true) out-variable))
 
-            "$dynabase_create" (let [[parent-variable & body] (.arguments ast)
+            "$dynabase_create_junk" (let [[parent-variable & body] (.arguments ast)
                                      ;; the first thing this needs to do is figure out which variables this needs to track for the expression
                                      ;; the variables $0,....,$n are required as those are the head variables, so those expressions should be unique
                                      ;; but then there are any other variables which are referenced in the expression which might be useful
@@ -240,7 +298,7 @@
                                  (assert false) ;;
                                  )
 
-            "$dynabase_access" (let [[name dynabase-variable & args] (.arguments ast)
+            "$dynabase_access_junk" (let [[name dynabase-variable & args] (.arguments ast)
                                      db-var (get-variable dynabase-variable)
                                      ]
                                  ;; this is going to have to be added to all of the ast function nodes in the program.  This will have that those expressions
@@ -248,7 +306,7 @@
                                  (make-dynabase-access name )
                                  )
 
-            "$dynabase_access_file" (let [[dynabase-variable] (.arguments ast)
+            "$dynabase_access_file_junk" (let [[dynabase-variable] (.arguments ast)
                                           db-var (get-variable dynabase-variable)]
                                       ;; this means that the dynabase variable is just something that is contained in the top level file
                                       ;; so we are going to need to look up the file name to identify which expression contains this
@@ -410,19 +468,72 @@
   (let [char-stream (CharStreams/fromString ^String (str s "\n% end of string\n"))]
     (run-parser char-stream)))
 
+(defn parse-stream [istream]
+  (let [stream (java.io.BufferedInputStream istream 4096)
+        cstream (java.io.SequenceInputStream stream
+                                             (java.io.ByteArrayInputStream.
+                                              (.getBytes (str "\n\n%end of file\n\n"))))
+        astream (dyna_backend.ParserUnbufferedInputStream. cstream 1024)]
+    (run-parser astream)))
+
 
 (defn parse-file [file-url]
   ;; this is going to want to take a java url object, and then parse that into something
   (let [url (if (string? (URL. file-url))
               (do (assert (instance? URL file-url))
-                  file-url))
-        stream (java.io.BufferedInputStream (.openStream url) 4096)
-        cstream (java.io.SequenceInputStream stream
-                                             (java.io.ByteArrayInputStream.
-                                              (.getBytes (str "\n\n%end of file\n\n"))))
-        astream (dyna_backend.ParserUnbufferedInputStream. cstream 1024)
-        ]
-    (run-parser astream)))
+                  file-url))]
+    (parse-stream (.openStream url))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+(defn import-parse [file-url ast]
+  ;; this needs to construct the evaluate AST object, and then pass it to simplify to make sure that it gets entirely evaluated
+  ;; into something that can be usedl
+  (let [rexpr (make-eval-from-ast (make-constant true)
+                                  (make-constant ast)
+                                  {}
+                                  file-url)]
+    (simplify-top rexpr)))
+
+(defn import-file-url [url]
+  (let [do-import (atom false)]
+    (swap! system/imported-files
+           (fn [o]
+             (if (contains? url)
+               (do (reset! do-import false)
+                   o)
+               (do
+                 (reset! do-import true)
+                 (conj o url)))))
+    (if @do-import
+      ;; then we have to be the one to import this file
+      (let [parse (parse-file url)]
+
+        )
+      (assert false)
+      )))
+
+;; (defn import-file [from-file name]
+;;   (import-file-url
+;;    (if (instance? URL name) name
+;;        ;; we need to conver this to a URL
+;;        (let [rurl (URL. from-file name)
+;;              rstream (try (.openStream rurl)
+;;                           (catch java.io.FileNotFoundException e nil))]
+;;          (if (nil? rstream)
+;;            (let [res (resource (str "dyna_backend/builtin_libraries/" name ".dyna"))]
+;;              (if res
+;;                (parse-stream))
+;;              )
+;;            )
+;;          )
+;;        (assert false)
+;;        )))
+
+(defn import-file [from-file name]
+  (assert false))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

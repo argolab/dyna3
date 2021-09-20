@@ -1,0 +1,150 @@
+
+
+gradient_add(A, B) = {
+    value = A.value + B.value.
+    %gradient += 0.  % want the gradient to be null by default.  That way it will not get instantated until something downstream causes it to get instantated
+}.
+
+all_gradient_numbers(&add(A,B)) = gradient_add(A,B).  % track that this object has been created, and give it the name of &add
+
+all_gradient_numbers(N).gradient += gradient_add(N,_).gradient. % anytime that there is a gradient which has been added to "us", it gets propagated back into anything which we came from.  Essentially, this is going to have to determine that there are some valus which correspond with the gradient information
+all_gradient_numbers(N).gradient += gradient_add(_,N).gradient.
+
+gradient_mul(A, B) = {
+    value = A.value * B.value.
+    %gradient += 0.
+}.
+
+
+% how efficient will this be when finding which of the expressions are going to match.  This would require searching through all of the declared values.
+% also if there are gradient operations, then this would find which of the expressions.  How will this handle which of the operations correspond
+all_gradient_numbers(&mul(A,B)) = gradient_mul(A,B).
+all_gradient_numbers(A).gradient += gradient_mul(A,B).gradient / B.value.
+all_gradient_numbers(B).gradient += gradient_mul(A,B).gradient / A.value.
+
+
+% if someone sets a loss on one of the numbers, then that is going to propagate into all of the gradient information
+
+X.gradient += wrapped(X).loss.
+
+
+wrapper(X) = {
+    % wrapper adds the methods such that the above declaritive operaitons can identify which of the objects are going to be created as a result of the computiton
+    %
+    value = X.value.
+    wrapped = X.
+    gradient += 0; X.gradient.  % the gradient is always zero unless something else is defined for it
+
+
+% something like once the add operation runs, it can call with ggf, for
+% ground-ground-free.  If that isn't defined, then this would just null out, so
+% it is the same result in the end anyways.  Which dynabase is called on could
+% be non-deterministic, so something like just one of the ground dynabases might
+% want the dynabsae to somehow mark that it allows for the operator overloading,
+% otherwise this will probably just be better as an error?
+%
+% Ideally, there would be some approach to dispatching the types of an
+% expression, but that would require knowing which of the arguments are going to
+% be ground and in what order, if we are passing in that information to which
+% function gets called.
+%
+% The alternate is to just do something like `add(A,B,C) :- foo.`, but then that
+% means that the idea of something that looks like a function behaves like a
+% function is broken as those operations could now return multiple values for
+% the return result.
+%
+% Also, at least in the case of dispatching to the calls of some expression, this would require
+
+
+    operator_add_ggf(A,B) = wrapper(gradient_add(A.wrapped, B.wrapped)).
+    operator_add_gfg(A,B) = wrapper(gradient_sub(A.wrapped, B.wrapped)).
+    operator_add_gff(A,B) = wrapper(gradient_sub(A.wrapped, B.wrapped)).
+
+    operator_times_ggf(A,B) = A*B.
+
+    operator_min_ggf(A,B) min= A;B.
+
+    operator_max_ggf(A,B) min= A;B.
+
+    operator_pow_ggf(A,B) = A ** B.
+
+    operator_exp_gf(A) = exp(A).
+
+    operator_lessthan_ggf(A,B) = A < B.
+
+    operator_lessthaneq_ggf(A,B) = A <= B.
+
+    operator_equals_ggf(A,B) = A == B.
+
+    operator_notequals_ggf(A,B) = A != B.
+
+    operator_land_ggf(A,B) = A & B.
+
+    operator_lor_ggf(A, B) = A | B.
+
+    operator_not_gf(A) = not(A).
+
+    operator_sin_gf(A) = sin(A).
+
+    operator_cos_gf(A) = cos(A).
+
+    operator_tan_gf(A) = tan(A).
+
+    operator_sinh_gf(A) = sin(A).
+
+    operator_cosh_gf(A) = cos(A).
+
+    operator_tanh_gf(A) = tan(A).
+
+}.
+
+% the loss expression might want to be some macro?  In which case it would want to expand this expression.  But then how would it work in the case
+loss.wrapped.gradient += 1.
+
+
+$loss(AST) = &$dynabase_call(&$dynabase_call(AST, &wrapped), &gradient).
+:- macro $loss/1.
+
+%$loss(Node) += 1.  This is somehow defined in another module.  So I suppose
+% that this would become something that is made "global".  Thus the expressions
+% can somehow still be defined for it?  But if there are expressions with this
+% taking which of the operations would correspond with the different operations
+
+% I suppose that the loss could be something that the gradient is taken WRT, so
+% that it would be the parameter to some gradient method, but then that would
+% mean that it is performing a lot of "calls" which are not going to be lazy as a result
+
+$parameter(Name) = wrapper {
+    value = 0.
+    %gradient += 0.
+}.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+gradient_number(P) = {
+   add(A,B,C) :- C = A + B.  % this would still not let this known which of the expressions are ground.  I suppose that we would have to have some impure grounding expression or something.
+
+   add(A,B,C) :- $impure_know_grounding(&add(A,B,C)).
+
+  % this isn't declaritive either, as it requires that make_add only has the values which are actually insantiated.  Though if we asusmpe that the gradient value would be zero by default, then this might be "ok".  In which case, it would only require which values are currently present as most of the values would just be the identity
+  gradient += make_add(Self, _).gradient.
+  gradient += make_add(_, Self).gradient.
+}.
+
+% if this knows the grounding of the expressions, then it could represent which of the expressions ....
+add("++-", A, B, C) :- C = A+B.  % then this would have to come back to the gradient number.  The value of B&C would have to somehow know that it
+add("+-+",
+
+make_add(A, B) = {
+  %% A.gradient += Self.gradient.  % this is not possible, as this allows for non-declaritive operations to be performed as a result.
+  %% B.gradient += Self.gradient.
+  value = A.value + B.value;
+}.
+
+
+
+$pramater(Name) = {
+   value += 0.
+   gradient += 0.
+}.

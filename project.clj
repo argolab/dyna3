@@ -22,6 +22,6 @@
   :antlr-src-dir "src/antlr"
   :antlr-dest-dir "target/gen-src"
   :aliases {"compile" ["do" ["antlr"] ["javac"] "compile"]
-            "uberjar" ["do" ["antlr"] ["javac"] ["compile"] "uberjar"]}
+            "uberjar" ["do" ["compile"] "uberjar"]}
   :main dyna_backend.DynaMain
   )

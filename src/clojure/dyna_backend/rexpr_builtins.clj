@@ -57,7 +57,20 @@
     ))
 
 
-
+;; maybe the builtin R-exprs should have some approach which allows for a
+;; dynabase call to be used inplace of the builtin call it would be something
+;; like if one of the arguments is a dynabase, then it could replace the
+;; argument with whatever is the approperate expression.
+;;
+;; this would require waiting until there is at least one of the arguments
+;; ground.  Also, what the arguments look like for a particular expression how
+;; would those arguments work with a given expression?  I suppose that the names
+;; would somehow have to indcate the mode of what is getting called, as these
+;; expressions have to support different modes.
+;;
+;; This would mean that the gradient stuff could be implemented in "pure dyna,"
+;; though operations like `max` which might be implemented in the runtime would
+;; have to consider which of the expression
 (defmacro def-builtin-rexpr [name nargs & rewrites]
   ;(print "hello this is here\n")
   ;; (doall (for [rr rewrites]
@@ -118,7 +131,7 @@
   (v1 (/ (java.lang.Math/log v0) (java.lang.Math/log v2)))
   (v0 (java.lang.Math/pow v2 (/ 1 v1))))
 
-(def-user-term ["pow" "^"] 2 (make-pow v0 v1 v2))
+(def-user-term ["pow" "**"] 2 (make-pow v0 v1 v2))
 (def-user-term "sqrt" 1 (make-pow v0 (make-constant 0.5) v1))
 
 (def-builtin-rexpr exp 2
@@ -339,7 +352,7 @@
 (def-user-term "$unify" 2 (make-unify-with-return v0 v1 v2))
 
 
-(def-user-term "$make_with_key" 2 (make-multiplicity 1))  ;; TODO: should construct some structured term
+;; (def-user-term "$make_with_key" 2 (make-multiplicity 1))  ;; TODO: should construct some structured term
 
 (def-user-term "$value" 1 (make-multiplicity 1)) ;; TODO: should return the value for some pair which might have the withkey construct
 (def-user-term "$arg" 1 (make-multiplicity 1)) ;; TODO: should return the argument which is associated with the withkey construct
@@ -394,6 +407,10 @@
         (make-unify resulting_map (make-constant (DynaMap. r)))))))
 
 
+;; there should not be any reason to make this into something custom, I suppose that there could be some additional rules defined for
+;; the different expressions in the case that an identity element has been identified.  Then it would allow for it to rewrite a rule as just a unification
+;; or something.  Though that might allow for strange behavior where there is something like &foo+0=&foo.  So I suppose that this should just keep the values
+;; defined using the existing operators
 (def-user-term "$unary_-" 1 (make-add v0 v1 (make-constant 0)))
 
 

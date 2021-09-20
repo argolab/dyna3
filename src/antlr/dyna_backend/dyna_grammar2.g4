@@ -298,8 +298,13 @@ termBody returns[DynaTerm rterm]
                 $rterm = $e2.rterm;
             }
 }
+      (fe=forExpr {
+            // the for expression is something that would be the same as just placing it first in the common expression
+                $rterm = DynaTerm.create(",", $fe.rterm, $rterm);
+            })?
       (withKey {$with_key = $withKey.rterm;})?
         (fe=forExpr {
+                // have the for expression twice as we don't specify if it comes before or after the with_key expression
             // the for expression is something that would be the same as just placing it first in the common expression
                 $rterm = DynaTerm.create(",", $fe.rterm, $rterm);
             })?
@@ -458,7 +463,8 @@ dynabaseInnerBracket returns[DynaTerm rterm]
     locals [ArrayList<DynaTerm> terms = new ArrayList<>(), DynaTerm dterms = null]
     : (t=term {$dterms = ($dterms == null ? $t.rterm : DynaTerm.create(",", $dterms, $t.rterm));})*
            t2=term_unended '.' {$dterms = ($dterms == null ? $t2.rterm : DynaTerm.create(",", $dterms, $t2.rterm));}
-        {$rterm = DynaTerm.create("\$dynabase_create", DynaTerm.null_term, $dterms == null ? DynaTerm.null_term : $dterms);}
+        {assert($dterms != null);
+            $rterm = DynaTerm.create("\$dynabase_create", DynaTerm.null_term, $dterms);}
     ;
 
 
@@ -475,27 +481,42 @@ dynabaseInnerBracket returns[DynaTerm rterm]
 //     ;
 
 
-inlineAggregated returns [DynaTerm value]
+inlineAggregated returns [DynaTerm rterm]
+locals [ArrayList<DynaTerm> bodies = new ArrayList<>()]
     : '(' agg=aggregatorName
-        {assert(false);}
-        (termBody ';')*
-        termBody
+        (t=termBody ';' { $bodies.add($t.rterm); })*
+        termBody {$bodies.add($t.rterm);}
         ')'
+        {$rterm = DynaTerm.create("\$inline_aggregated_function", $agg.t, DynaTerm.make_list($bodies));}
     ;
 
-inlineAnonFunction returns [DynaTerm value]
+
+// is there any use for having an inline function syntax.  I suppose that this can't hurt it too bad...
+// expressing something like a general list sort using a function call would be interesting.
+// so the calling expressions would correspond with
+
+// could also use a keyword lambda like in python, so the expression could be lambda X,Y,Z: what is going to go here???
+// having the () wrap the expression makes it a bit nicer
+inlineAnonFunction returns [DynaTerm rterm]
 locals [ArrayList<String> varlist = new ArrayList<>()]
     : '(' (v=Variable Comma {$varlist.add($v.getText());} )* v=Variable {$varlist.add($v.getText());} '~>'
-    {
-    assert(false);
-    }
-    termBody
+    // {
+    // assert(false);
+    // }
+    t=termBody
 {
-    assert(false);
+
+            // (X,Y,Z ~> X+Y+Z+V)
+            // because this should require that the expression unifies, does it make since to allow a comma expression here?  Should this just be a single expression?  But someone could always sneak into the expression something with commas.  Maybe this should really just be some short hand for expressing functions wihch represent different operations
+
+            // this is going to have to convert this into some new dummy term where anything that is captured gets added into some term
+            // then any additional variables will have that the expression should correspond with which of the operators will
+    $rterm = DynaTerm.create("\$inline_function", DynaTerm.make_list($varlist), $t.rterm);
     // this wants to get a reference to the anon function, not call it immediately.
     // so this should construct what the name for the item is, but not identify which of the arguments
 }
 ')'
+    | v=Variable '~>' e=expression
     ;
 
 
@@ -520,7 +541,7 @@ expressionRoot returns [DynaTerm rterm]
             }
       }
     | primitive { $rterm = DynaTerm.create("\$constant", $primitive.v); }
-    | inlineAggregated { assert(false); }
+    | ia=inlineAggregated { $rterm = $ia.rterm; }
         // | '(' agg=aggregatorName ia=inlineAggregatedBodies')'
     //   {
     //     $trm = new InlinedAggregatedExpression($agg.t, $ia.bodies);
@@ -543,7 +564,6 @@ expressionRoot returns [DynaTerm rterm]
 
 
 
-// this should probably be higher priority than the type
 expressionDynabaseAccess returns[DynaTerm rterm]
     : a=expressionRoot {$rterm=$a.rterm;} ('.' m=methodCall {$rterm = DynaTerm.create("\$dynabase_call", $rterm, DynaTerm.create_arr($m.name, $m.args));})*
     ;

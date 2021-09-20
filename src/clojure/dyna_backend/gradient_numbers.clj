@@ -69,9 +69,6 @@
 
 
 
-
-
-
 (defn-gradient-op grad-add [a b]
                   (+ a b)
                   (do (add-to-gradient a queue grad)
@@ -118,10 +115,17 @@
                   (do (add-to-gradient x queue (* grad e (Math/pow x (- e 1))))
                       (add-to-gradient e queue 99999999)))
 
+(defn grad-max [a b]
+  (if (> (get-value a) (get-value b))
+    a b))
+
+(defn grad-min [a b]
+  (if (> (get-value a) (get-value b))
+    b a))
+
 ;; operations which do not directly influence the numerical values, do not need gradients, as those will
 ;; change the shape of the graph.  So this would have that there are some of which
 
 (defn set-loss-compute-grad [num]
   (if (instance? TracedNumber num)
     (TracedNumber/runBackprop num)))
-
