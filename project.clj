@@ -24,4 +24,7 @@
   :aliases {"compile" ["do" ["antlr"] ["javac"] "compile"]
             "uberjar" ["do" ["compile"] "uberjar"]}
   :main dyna_backend.DynaMain
+  :global-vars {;*warn-on-reflection* true  ;; useful for identifying where it uses clojure's reflection which is slow...
+                ;*unchecked-math* :warn-on-boxed ;; boxed math is slow
+                }
   )

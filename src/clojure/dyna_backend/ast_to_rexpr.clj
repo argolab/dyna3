@@ -59,6 +59,8 @@
 ;; keep around the original ASTs of the program, in addition to the R-exprs.
 
 
+;; I suppose that this is having to resolve the calls for an expression.  This means that it is attempting to find
+
 
 ;; this takes an AST which is represented as Dyna Terms, and rewrites itself as a R-expr.
 (def-base-rexpr eval-from-ast [:var out-variable ;; the ast is structured such that everything returns some value.  This is the variable which is returned
@@ -151,7 +153,7 @@
     (let [constructed-rexpr
           (case (.name ast)
             "$compiler_expression" (let [arg1 ^DynaTerm (get ast 1)]
-                                     (case (.name (get ast 0))
+                                     (case (.name ^DynaTerm (get ast 0))
                                        "import" (???) ;; import some file, or some symbols from another file
 
                                        ;; use like `:- export name/arity`.
@@ -164,11 +166,11 @@
 
                                        ;; some of the arugments to a function should get escaped escaped, or quoted
                                        ;; used like `:- dispose foo(quote1,eval).`
-                                       "dispose" (update-user-term {:name (.name arg1)
-                                                                    :arity (.arity arg1)
+                                       "dispose" (update-user-term {:name (.name ^DynaTerm arg1)
+                                                                    :arity (.arity ^DynaTerm arg1)
                                                                     :source-file source-file}
                                                                    (fn [o]
-                                                                     (assoc o :dispose-arguments (.arguments arg1))))
+                                                                     (assoc o :dispose-arguments (.arguments ^DynaTerm arg1))))
 
                                        ;; mark a function as being a macro, meaning that it gets its argument's AST and will return an AST which should get evaluated
                                        ;; used like `:- macro foo/3.`
@@ -195,9 +197,9 @@
                                      (make-unify out-variable (make-constant true)) ;; just return that we processed this correctly?  I suppose that in
                                      )
 
-            "$define_term" (let [[head dynabase aggregator body] (.arguments ast)
+            "$define_term" (let [[head dynabase aggregator body] (.arguments ^DynaTerm ast)
                                  new-body (make-comma-conjunct
-                                           (apply make-comma-conjunct (for [[arg idx] (zipmap (.arguments head) (range))]
+                                           (apply make-comma-conjunct (for [[arg idx] (zipmap (.arguments ^DynaTerm head) (range))]
                                                                         (DynaTerm. "$unify" [(DynaTerm. "$variable" [(str "$" idx)])
                                                                                              arg])))
                                            body
@@ -206,14 +208,14 @@
                                                                   (DynaTerm. "$dynabase_access" [dynabase])])
                                              ))
                                  new-ast (DynaTerm. "$define_term_normalized"
-                                                    [(.name head)
-                                                     (- (.arity head) 1)
+                                                    [(.name ^DynaTerm head)
+                                                     (- (.arity ^DynaTerm head) 1)
                                                      source-file
                                                      dynabase
                                                      aggregator
                                                      new-body])]
                              (make-eval-from-ast out-variable new-ast {} source-file))
-            "$define_term_normalized" (let [[functor-name functor-arity source-file dynabase aggregator ast] (.arguments ast)
+            "$define_term_normalized" (let [[functor-name functor-arity source-file dynabase aggregator ast] (.arguments ^DynaTerm ast)
                                             all-variables (find-term-variables ast)
                                             project-variables (filter #(not (re-matcher #"\$self|\$[0-9]+" %) all-variables))
                                             project-variables-map (into {} (for [v project-variables]
@@ -232,7 +234,7 @@
             ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
             ;; $define_term is the standard define term expression, this not have some dynabase additional reference or anything else yet
-            "$define_term_junk" (let [[head aggregator body] (.arguments ast)
+            "$define_term_junk" (let [[head aggregator body] (.arguments ^DynaTerm ast)
                                  new-body (make-comma-conjunct
                                            (DynaTerm. "$unify" [(DynaTerm. "$variable" "$self")
                                                                 (DynaTerm. "$variable" "$dynabase")])
@@ -243,7 +245,7 @@
                                                     (.from_file ast)
                                                     new-body)]
                              (make-eval-from-ast out-variable new-ast variable-name-mapping source-file))
-            "$define_term_dynabase_junk" (let [[head aggregator dynabase-ref body] (.arguments ast)
+            "$define_term_dynabase_junk" (let [[head aggregator dynabase-ref body] (.arguments ^DynaTerm ast)
                                           db-unify (DynaTerm. "$unify" [dynabase-ref (DynaTerm. "$variable" "$self")])
                                           new-ast (DynaTerm. "$define_term"
                                                              (.dynabase ast)
@@ -251,10 +253,10 @@
                                                              [head aggregator (DynaTerm. "," [db-unify body])])]
                                       ;; this should probably not get called in this case? or should this
                                       (make-eval-from-ast out-variable new-ast variable-name-mapping source-file))
-            "$define_term_dynabase_added_junk" (let [[head aggregator body] (.arguments ast)
-                                                name (.name head)
-                                                arity (.arity head)
-                                                head-args (.arguments head)
+            "$define_term_dynabase_added_junk" (let [[head aggregator body] (.arguments ^DynaTerm ast)
+                                                name (.name ^DynaTerm head)
+                                                arity (.arity ^DynaTerm head)
+                                                head-args (.arguments ^DynaTerm head)
                                                 head-unifies (map (fn [i v]
                                                                     (DynaTerm. "$unify" [(DynaTerm. "$variable" (str "$" i))
                                                                                          v])
@@ -267,7 +269,7 @@
                                                                    [name arity aggregator new-body])]
                                             ;; this returns a new ast element as we have not fully constructed this object yet
                                             (make-eval-from-ast out-variable new-ast variable-name-mapping source-file))
-            "$define_term_normalized_junk" (let [[name arity aggregator body] (.arguments ast)
+            "$define_term_normalized_junk" (let [[name arity aggregator body] (.arguments ^DynaTerm ast)
                                             agg-in-var (make-variable "$result")
                                             agg-out-var (make-variable (str "$" arity))
                                             variables (assoc
@@ -284,7 +286,7 @@
                                         ;; the system.  This will then want to have some expression for which
                                         (make-unify (make-constant true) out-variable))
 
-            "$dynabase_create_junk" (let [[parent-variable & body] (.arguments ast)
+            "$dynabase_create_junk" (let [[parent-variable & body] (.arguments ^DynaTerm ast)
                                      ;; the first thing this needs to do is figure out which variables this needs to track for the expression
                                      ;; the variables $0,....,$n are required as those are the head variables, so those expressions should be unique
                                      ;; but then there are any other variables which are referenced in the expression which might be useful
@@ -298,7 +300,7 @@
                                  (assert false) ;;
                                  )
 
-            "$dynabase_access_junk" (let [[name dynabase-variable & args] (.arguments ast)
+            "$dynabase_access_junk" (let [[name dynabase-variable & args] (.arguments ^DynaTerm ast)
                                      db-var (get-variable dynabase-variable)
                                      ]
                                  ;; this is going to have to be added to all of the ast function nodes in the program.  This will have that those expressions
@@ -306,7 +308,7 @@
                                  (make-dynabase-access name )
                                  )
 
-            "$dynabase_access_file_junk" (let [[dynabase-variable] (.arguments ast)
+            "$dynabase_access_file_junk" (let [[dynabase-variable] (.arguments ^DynaTerm ast)
                                           db-var (get-variable dynabase-variable)]
                                       ;; this means that the dynabase variable is just something that is contained in the top level file
                                       ;; so we are going to need to look up the file name to identify which expression contains this
@@ -315,12 +317,12 @@
 
             ;; default constructor which is just going to construct a user call
             (let [name (.name ast)
-                  args (.arguments ast)
+                  args (.arguments ^DynaTerm ast)
                   other-conjunct-rexprs (transient []) ;; other R-exprs which are now conjunctive with this expression
                   new-variables (transient {})
                   args-values (map (fn [^DynaTerm v]
                                      (case (.name v)
-                                       "$variable" (let [[name] (.arguments v)]
+                                       "$variable" (let [[name] (.arguments ^DynaTerm v)]
                                                      (if (contains? variable-name-mapping name)
                                                        (get variable-name-mapping name)
                                                        (if (contains? new-variables name)
@@ -328,7 +330,7 @@
                                                          (let [nv (make-variable name)]
                                                            (assoc! new-variables name nv)
                                                            nv))))
-                                       "$constant" (let [[val] (.arguments v)]
+                                       "$constant" (let [[val] (.arguments ^DynaTerm v)]
                                                      (make-constant val))
                                        "$annon_variable" (let [tmp-name (gensym)
                                                                tmp-var (make-variable tmp-name)]

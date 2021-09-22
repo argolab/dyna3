@@ -384,15 +384,14 @@
   (let [pm (get-value resulting_map)]
     (if (not (instance? DynaMap pm))
       (make-multiplicity 0)
-      (let [m (.map-elements  pm)
+      (let [m (.map-elements ^DynaMap pm)
             k (get-value Key)
             r (get m k)]
         (if (nil? r)
           (make-multiplicity 0)
           (make-conjunct [(make-unify Value (make-constant r))
                           ;; remove the key from the map
-                          (make-unify previous_map (make-constant (DynaMap. (dissoc m k))))])))
-      )))
+                          (make-unify previous_map (make-constant (DynaMap. (dissoc m k))))]))))))
 
 (def-rewrite
   :match (map-element-access (:ground Key) (:ground Value) (:ground previous_map) (:any resulting_map))
@@ -400,7 +399,7 @@
   (let [pm (get-value previous_map)]
     (if (not (instance? DynaMap pm))
       (make-multiplicity 0)
-      (let [m (.map-elements  pm)
+      (let [m (.map-elements ^DynaMap pm)
             k (get-value Key)
             v (get-value Value)
             r (assoc m k v)]

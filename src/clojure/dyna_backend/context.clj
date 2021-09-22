@@ -82,7 +82,7 @@
   (context. *context* rexpr #{rexpr} {}))
 
 (defmethod print-method context [this ^java.io.Writer w]
-  (.write w (.toString this)))
+  (.write w (.toString ^Object this)))
 
 (defmacro bind-context [val & args]
   `(binding [*context* ~val]

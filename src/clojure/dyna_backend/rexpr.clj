@@ -18,7 +18,8 @@
 
 
 ;; maybe this should recurse through the structure and make a nice print out of the term objets
-(defmethod print-method DynaTerm [this ^java.io.Writer w] (.write w (.toString this)))
+(defmethod print-method DynaTerm [^DynaTerm this ^java.io.Writer w]
+  (.write w (.toString this)))
 
 ;(defn simplify-construct [r] r)
 
@@ -82,7 +83,7 @@
          ;; might be better if there was some case and switch statement for get-argument
          ;; constructing the vector is likely going to be slow.  Would be nice if there was some array representation or something
          (~'get-argument ~'[this n] ;; trying to add a type hit to this makes it such that the interface will not get cast correctly
-          (case ~'n
+          (case (unchecked-int ~'n)
             ~@(apply concat (for [[var idx] (zipmap vargroup (range))]
                               `(~idx ~(cdar var))))
             (throw (RuntimeException. "invalid index for get-argument"))))
@@ -148,14 +149,15 @@
          {:rexpr-constructor (quote ~name)
           :rexpr-constructor-type ~(symbol rname)}
          ~(vec (map cdar vargroup))
-         ~@(map (fn [x] `(if (not (~(resolve (symbol (str "check-argument-" (symbol (car x))))) ~(cdar x)))
-                           (do (.printStackTrace (Throwable. (str "Argument value check failed: " ~(car x) ~(cdar x))) System/err)
-                               (debug-repl ~(str "check argument " (car x)))
-                               (assert false)))) vargroup)
+         ~@(when system/check-rexpr-arguments
+             (map (fn [x] `(if (not (~(resolve (symbol (str "check-argument-" (symbol (car x))))) ~(cdar x)))
+                             (do (.printStackTrace (Throwable. (str "Argument value check failed: " ~(car x) ~(cdar x))) System/err)
+                                 (debug-repl ~(str "check argument " (car x)))
+                                 (assert false)))) vargroup))
          (~(symbol (str rname "."))
           ;; this hash implementation needs to match the one below....
           (unchecked-int (+ ~(hash rname) ~@(for [[var idx] (zipmap vargroup (range))]
-                                              `(* (hash ~(cdar var)) ~(+ 3 idx)))))
+                                              `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
 
           nil                           ; the cached unique variables
           ~@(map cdar vargroup))
@@ -165,16 +167,17 @@
          {:rexpr-constructor (quote ~name)
           :rexpr-constructor-type ~(symbol rname)}
          ~(vec (map cdar vargroup))
-         ~@(map (fn [x] `(if (not (~(resolve (symbol (str "check-argument-" (symbol (car x))))) ~(cdar x)))
-                           (do (debug-repl ~(str "check argument " (car x)))
-                               (assert false)))) vargroup)
+         ~@(when system/check-rexpr-arguments
+            (map (fn [x] `(if (not (~(resolve (symbol (str "check-argument-" (symbol (car x))))) ~(cdar x)))
+                            (do (debug-repl ~(str "check argument " (car x)))
+                                (assert false)))) vargroup))
 
          (simplify-construct (~(symbol (str rname "."))
                               ;; this might do the computation as a big value, would be nice if this could be forced to use a small int value
                               ;; I suppose that we could write this in java and call out to some static function if that really became necessary
                               ;; this hash implementation needs to match the one above....
                               (unchecked-int (+ ~(hash rname) ~@(for [[var idx] (zipmap vargroup (range))]
-                                                                  `(* (hash ~(cdar var)) ~(+ 3 idx)))))
+                                                                  `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
 
                               nil       ; the cached unique variables
                               ~@(map cdar vargroup))))
@@ -278,7 +281,7 @@
   (structured-rexpr. name arguments))
 
 (defmethod print-method structured-rexpr [^structured-rexpr this ^java.io.Writer w]
-  (.write w (.toString this)))
+  (.write w (.toString ^Object this)))
 
 (defn make-structured-value [name values]
   (assert (every? (partial satisfies? RexprValue) values))
@@ -295,11 +298,15 @@
        (not (or (variable? rexpr) (is-constant? rexpr)))))
 
 
+;; these are checks which are something that we might want to allow ourselves to turn off
 (defn check-argument-mult [x] (or (and (int? x) (>= x 0)) (= ##Inf x)))
 (defn check-argument-rexpr [x] (rexpr? x))
 (defn check-argument-rexpr-list [x] (every? rexpr? x))
 (defn check-argument-var [x] (or (variable? x) (is-constant? x))) ;; a variable or constant of a single value.  Might want to remove is-constant? from this
-(defn check-argument-var-list [x] (every? variable? x))
+(defn check-argument-var-list [x] (and (seqable? x) (every? variable? x)))
+(defn check-argument-var-map [x] (and (map? x) (every? (fn [[a b]] (and (check-argument-var a)
+                                                                        (check-argument-var b)))
+                                                       x)))
 (defn check-argument-value [x] (satisfies? RexprValue x)) ;; something that has a get-value method (possibly a structure)
 (defn check-argument-hidden-var [x] (check-argument-var x))
 (defn check-argument-str [x] (string? x))
@@ -405,13 +412,28 @@
                                           ;; with $self on the other end.  In
                                           ;; the case that this is calling
                                           ;; something that is "primitive" or a
-                                          ;; builtin, then the $self parameter can be ignored in those cases.
+                           ;; builtin, then the $self parameter can be ignored in those cases.
+
+
+                           ;; this should be a dictonary map of which variables map to other variables
+                           ;; that dictonary can include variables like $self which would be the dynabase, and $file which is the file that is making the call
+                           ;; there can then be some more optimized versions of this
                            :var-list args  ;; the arguments which are passed
                                            ;; through via positions.  This will
                                            ;; be $0, $1, ....  The last variale
                                            ;; will be the returned value by
                                            ;; convention.
                            :unchecked call-depth])
+
+(def-base-rexpr user-call2 [:unchecked name  ;; the name for this call object.  Will include the name, arity and file for which this call is being performed from
+                            ;; :str name ;; the name for this call represented as a string
+                            ;; :int arity  ;; the arity for this call
+                            ;; :var from-file
+                            :var-map args-map ;; the arguments which are present for this call
+                            :unchecked call-depth]
+  (get-variables [this] (into #{} (vals args-map)))
+  ()
+  )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -672,7 +694,7 @@
   (if (and (variable? var-name) (is-variable-set? var-name))
     (get-variable-value var-name)
     (if (is-constant? var-name)
-      (.value var-name))))
+      (boolean (.value ^constant-value-rexpr var-name)))))
 
 (def-rewrite-matcher :ground [var-name]
                                         ; this should be redfined such that it will return the ground value for the variable
@@ -822,7 +844,7 @@
                                           (swap! mult * (get-argument x 0))
                                           (swap! num-mults inc)
                                           nil)
-                                      x)) children))]
+                                        x)) children))]
     (case @mult
       0 (make-multiplicity 0)
       1 (if (empty? others)
@@ -1076,3 +1098,11 @@
       ;; here we can just replace the expression with the variable names
       (let [vmap (zipmap (map #(make-variable (str "$" %)) (range)) args)]
         (remap-variables s vmap)))))
+
+(def-rewrite
+  :match (user-call2 (:unchecked name) (:unchecked var-map) (:unchecked call-depth))
+  :run-at :construction
+  (let [n [(:name name) (:arity name)]
+        s (get @system/system-defined-user-term name n)]
+    (when (not (nil? s))
+      (remap-variables s var-map))))

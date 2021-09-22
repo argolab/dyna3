@@ -41,5 +41,16 @@
 
 
 (defn main [args]
+  (loop [i 0]
+    (when (< i (count args))
+      (case (get args i)
+        "--import" (let [fname (get args (+ i 1))]
+                     (println "importing file " fname)
+                     (recur (+ i 2)))
+        "--csv-import" (recur (+ i 3))
+        "--csv-export" (recur (+ i 3))
+        (print "argument ???" (get args i)))))
+
+  (println "math mode" *unchecked-math*)
   (repl)
   (println "this is the main function for dyna"))

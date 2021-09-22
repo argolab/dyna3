@@ -5,8 +5,13 @@ self="$0"
 help() {
     echo "Dyna implemented using R-exprs"
     echo ""
-    echo "     --help       Print this message"
-    echo "     --memory=1G  Set the amount of memory for the JVM"
+    echo "     --help                Print this message"
+    echo "     --memory=1G           Set the amount of memory for the JVM"
+    echo "     --import [file name]  Import some a file into the REPL from the command line"
+    echo "     --csv-import [term name] [file name]"
+    echo "     --csv-export [term name] [file name]"
+    echo "     --time                Time the different parts of the runtime report when the program exits"
+    echo "     --fast-math           Do not check the math for overflow"
     echo ""
     echo "Useage: $self [args] [file to start]"
     echo ""
@@ -66,6 +71,7 @@ echo ""
 }
 
 dyna_args=""
+import_args=""
 jvm_args=""
 memory="2G"
 
@@ -73,6 +79,10 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --memory=*)
             memory="${1#*=}"
+            [[ $memory =~ ^[0-9]+[gGmMkK]$ ]] || {
+                echo "--memory argument was unexpected, expected number and suffix E.g. --memory=10g"
+                exit 2
+            }
             ;;
         --help)
             help
@@ -81,15 +91,48 @@ while [ $# -gt 0 ]; do
         -agentlib*|-D*|-XX*)
             jvm_args+="$1 "
             ;;
+        --time)
+            jvm_args+="-Ddyna.time_running=true "
+            ;;
+
+
+        --fast-math)
+            # this will turn off overflow checking on the math operators, which will make the runtime faster
+            jvm_args+="-Ddyna.unchecked_math=true "
+            ;;
+        --fast)
+            jvm_arg+="-Ddyna.check_rexprs_args=false "
+            ;;
+
+
+        --import)
+            [[ -f "$2" ]] || {
+                echo "File $2 not found"
+                exit 2
+            }
+            import_args+="$1 $2 "  # this could go into a different array for just the import statements?
+            shift
+            ;;
+        --csv-import|--csv-export)
+            [[ "$2" =~ ^[a-z][a-zA-Z0-9]*\/[0-9]+$ ]] || {
+                echo "term '$2' did not match expected 'name/arity'"
+                exit 2
+            }
+            import_args+="$1 \"$2\" \"$3\" "
+            shift
+            shift
+            exit 1  # TODO implement this
+            ;;
 
         install-python)
+            exit 1  # TODO, will need the python package included into the jar
             echo "Install the dyna runtime package to the current python environment"
             install_python
             exit 0
             ;;
 
         *)
-            dyna_args+="$1 "
+            dyna_args+="\"$1\" "
             ;;
     esac
     shift
@@ -102,7 +145,7 @@ if [ -z "$dyna_args" ]; then
 fi
 
 
-exec java $jvm_args -Ddyna.runtimejar=$self -jar "$self"  $dyna_args
+exec java $jvm_args -Ddyna.runtimejar=$self -jar "$self" $import_args $dyna_args
 exit 0
 
 # what follows is the dyna implementation compiled into a jar

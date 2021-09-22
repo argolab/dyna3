@@ -1,5 +1,12 @@
 (ns dyna-backend.system)
 
+;; variables which control how the system runs
+
+(def check-rexpr-arguments
+  (not= "false" (System/getProperty "dyna.check_rexprs_args")))
+
+
+
 ;; terms which are included by the system.  These will get automattically replaced once the objects are created in the first place
 ;; these should not be recursive statements or anything
 (def system-defined-user-term (atom {}))
