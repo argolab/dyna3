@@ -9,7 +9,9 @@
   (:require [dyna-backend.context :as context])
   (:require [dyna-backend.rexpr-dynabase])
                                         ;(:require [dyna-backend.parser_interface :refer [parse-string]])
-  (:require [dyna-backend.ast-to-rexpr :refer [parse-string parse-file]])
+  (:require [dyna-backend.ast-to-rexpr :refer [parse-string
+                                               parse-file
+                                               eval-string]])
 
   (:require [dyna-backend.repl :refer [repl]])
   )

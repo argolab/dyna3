@@ -156,8 +156,10 @@
                                  (assert false)))) vargroup))
          (~(symbol (str rname "."))
           ;; this hash implementation needs to match the one below....
-          (unchecked-int (+ ~(hash rname) ~@(for [[var idx] (zipmap vargroup (range))]
-                                              `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
+          (unchecked-int ~(reduce (fn [a b] `(unchecked-add-int ~a ~b))
+                                  (hash rname)
+                                  (for [[var idx] (zipmap vargroup (range))]
+                                    `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
 
           nil                           ; the cached unique variables
           ~@(map cdar vargroup))
@@ -176,9 +178,10 @@
                               ;; this might do the computation as a big value, would be nice if this could be forced to use a small int value
                               ;; I suppose that we could write this in java and call out to some static function if that really became necessary
                               ;; this hash implementation needs to match the one above....
-                              (unchecked-int (+ ~(hash rname) ~@(for [[var idx] (zipmap vargroup (range))]
-                                                                  `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
-
+                              (unchecked-int ~(reduce (fn [a b] `(unchecked-add-int ~a ~b))
+                                  (hash rname)
+                                  (for [[var idx] (zipmap vargroup (range))]
+                                    `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
                               nil       ; the cached unique variables
                               ~@(map cdar vargroup))))
        (swap! rexpr-constructors assoc ~(str name) ~(symbol (str "make-" name)))
@@ -301,7 +304,7 @@
 ;; these are checks which are something that we might want to allow ourselves to turn off
 (defn check-argument-mult [x] (or (and (int? x) (>= x 0)) (= ##Inf x)))
 (defn check-argument-rexpr [x] (rexpr? x))
-(defn check-argument-rexpr-list [x] (every? rexpr? x))
+(defn check-argument-rexpr-list [x] (and (seqable? x) (every? rexpr? x)))
 (defn check-argument-var [x] (or (variable? x) (is-constant? x))) ;; a variable or constant of a single value.  Might want to remove is-constant? from this
 (defn check-argument-var-list [x] (and (seqable? x) (every? variable? x)))
 (defn check-argument-var-map [x] (and (map? x) (every? (fn [[a b]] (and (check-argument-var a)
@@ -396,44 +399,42 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; the user call object will figure out which information is getting called, this also will resolve
-(def-base-rexpr user-call [:str name
-                           :var from-file ;; which file is this call from.
-                                          ;; There might be import statements
-                                          ;; that we have to resolve.  This will
-                                          ;; control what something is going to
-                                          ;; be resolved as.  So collecing the
-                                          ;; resulting R-expr can be done when
-                                          ;; the user-call is resolved rather
-                                          ;; than having this done ahead of
-                                          ;; time?
-                           :var dynabase  ;; have a variable which referneces
-                                          ;; what dynabase this call is being
-                                          ;; made from.  This will be unfied
-                                          ;; with $self on the other end.  In
-                                          ;; the case that this is calling
-                                          ;; something that is "primitive" or a
-                           ;; builtin, then the $self parameter can be ignored in those cases.
+;; (def-base-rexpr user-call [:str name
+;;                            :var from-file ;; which file is this call from.
+;;                                           ;; There might be import statements
+;;                                           ;; that we have to resolve.  This will
+;;                                           ;; control what something is going to
+;;                                           ;; be resolved as.  So collecing the
+;;                                           ;; resulting R-expr can be done when
+;;                                           ;; the user-call is resolved rather
+;;                                           ;; than having this done ahead of
+;;                                           ;; time?
+;;                            :var dynabase  ;; have a variable which referneces
+;;                                           ;; what dynabase this call is being
+;;                                           ;; made from.  This will be unfied
+;;                                           ;; with $self on the other end.  In
+;;                                           ;; the case that this is calling
+;;                                           ;; something that is "primitive" or a
+;;                            ;; builtin, then the $self parameter can be ignored in those cases.
 
 
-                           ;; this should be a dictonary map of which variables map to other variables
-                           ;; that dictonary can include variables like $self which would be the dynabase, and $file which is the file that is making the call
-                           ;; there can then be some more optimized versions of this
-                           :var-list args  ;; the arguments which are passed
-                                           ;; through via positions.  This will
-                                           ;; be $0, $1, ....  The last variale
-                                           ;; will be the returned value by
-                                           ;; convention.
-                           :unchecked call-depth])
+;;                            ;; this should be a dictonary map of which variables map to other variables
+;;                            ;; that dictonary can include variables like $self which would be the dynabase, and $file which is the file that is making the call
+;;                            ;; there can then be some more optimized versions of this
+;;                            :var-list args  ;; the arguments which are passed
+;;                                            ;; through via positions.  This will
+;;                                            ;; be $0, $1, ....  The last variale
+;;                                            ;; will be the returned value by
+;;                                            ;; convention.
+;;                            :unchecked call-depth])
 
-(def-base-rexpr user-call2 [:unchecked name  ;; the name for this call object.  Will include the name, arity and file for which this call is being performed from
+(def-base-rexpr user-call [:unchecked name  ;; the name for this call object.  Will include the name, arity and file for which this call is being performed from
                             ;; :str name ;; the name for this call represented as a string
                             ;; :int arity  ;; the arity for this call
                             ;; :var from-file
                             :var-map args-map ;; the arguments which are present for this call
                             :unchecked call-depth]
-  (get-variables [this] (into #{} (vals args-map)))
-  ()
-  )
+  (get-variables [this] (into #{} (vals args-map))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -475,7 +476,6 @@
   ;; have a list of disjuncts, as those can just be other disjunctive R-exprs in
   ;; the case that there is more than 1 thing
   (get-children [this] (let [depth (count disjunction-variables)]
-
                          (assert false))))
 
 
@@ -492,8 +492,10 @@
 ;;   )
 
 (defn make-proj-many [vars R]
-  (if (empty vars) R
-      (make-proj (first vars) (make-proj-many (rest vars) R))))
+  (if (empty? vars)
+    R
+    (make-proj (first vars)
+               (make-proj-many (rest vars) R))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -976,20 +978,23 @@
 
 ;; there neeeds to be a projection rewrite for moving expressions out which do not
 ;; depend on the variable which is getting projected
-(def-rewrite
-  :match (proj (:variable A) (is-conjunct? R))
-  :run-at :construction
-  (let [inner (transient [])
-        outer (transient [])]
-    (doseq [c (get-argument R 0)]
-      (if (contains? (exposed-variables c) A)
-        (conj! inner c)
-        (conj! outer c)))
-    (if (empty? outer)
-      nil ; then there is nothing for us to move out of the expression
-      (make-conjunct (cons outer (make-proj A inner))) ; make a new rexpr with the outer expressions moved out
-      )
-    ))
+;; (def-rewrite
+;;   :match (proj (:variable A) (is-conjunct? R))
+;;   :run-at :construction
+;;   (let [inner (transient [])
+;;         outer (transient [])]
+;;     (doseq [c (get-argument R 0)]
+;;       (if (contains? (exposed-variables c) A)
+;;         (conj! inner c)
+;;         (conj! outer c)))
+;;     (let [innerP (persistent! inner)
+;;           outerP (persistent! outer)]
+;;       (if (empty? outerP)
+;;         nil ; then there is nothing for us to move out of the expression
+;;         (make-conjunct (cons outer (make-proj A innerP))) ; make a new rexpr with the outer expressions moved out
+;;         ))
+;;     ))
+
 
 (def-rewrite
   :match (if (is-empty-rexpr? A) (:rexpr B) (:rexpr C))
@@ -1064,7 +1069,7 @@
 ;;                              (simplify R))]
 ;;     (if
 
-;;   (make-proj A (simplify B)))
+;;   (make-proj( A (simplify B)))
 
 ;;     )))))
 
@@ -1089,20 +1094,29 @@
 
 
 ;; this rewrite finds buitin expressions and replaces them once they are created.  There is no need to delay expanding these expressions
-(def-rewrite
-  :match (user-call (:unchecked name) (:unchecked from-file) (:unchecked dynabase) (:unchecked args) (:unchecked call-depth))
-  :run-at :construction
-  (let [n [name (- (count args) 1)]
-        s (get @system/system-defined-user-term n)]
-    (when (not (nil? s))
-      ;; here we can just replace the expression with the variable names
-      (let [vmap (zipmap (map #(make-variable (str "$" %)) (range)) args)]
-        (remap-variables s vmap)))))
+;; (def-rewrite
+;;   :match (user-call (:unchecked name) (:unchecked from-file) (:unchecked dynabase) (:unchecked args) (:unchecked call-depth))
+;;   :run-at :construction
+;;   (let [n [name (- (count args) 1)]
+;;         s (get @system/system-defined-user-term n)]
+;;     (when (not (nil? s))
+;;       ;; here we can just replace the expression with the variable names
+;;       (let [vmap (zipmap (map #(make-variable (str "$" %)) (range)) args)]
+;;         (remap-variables s vmap)))))
 
 (def-rewrite
-  :match (user-call2 (:unchecked name) (:unchecked var-map) (:unchecked call-depth))
+  :match (user-call (:unchecked name) (:unchecked var-map) (:unchecked call-depth))
   :run-at :construction
-  (let [n [(:name name) (:arity name)]
-        s (get @system/system-defined-user-term name n)]
-    (when (not (nil? s))
+  (let [n [(:name name) (:arity name)] ;; this is how the name for built-in R-exprs are represented.  There is no info about the file
+        s (get @system/system-defined-user-term n)]
+    (when s
       (remap-variables s var-map))))
+
+
+(comment
+  (def-rewrite
+    :match (user-call (:unchecked name) (:unchecked var-map) (#(< % @system/user-recursion-limit) call-depth))
+
+    ;; this needs to look up the relevant R-expr and replace with the expression
+    nil
+    ))

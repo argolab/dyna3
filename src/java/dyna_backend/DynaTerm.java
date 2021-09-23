@@ -146,8 +146,10 @@ public final class DynaTerm implements ILookup {
         return new DynaTerm(name, clojure_vec.invoke(args));
     }
 
-    public static Object gensym_variable_name() {
-        return clojure_gensym.invoke("$runtime_var_");
+    public static String gensym_variable_name() {
+        // this is used by the parser, not really something that "belongs" on
+        // the DynaTerm class, but it should be ok
+        return clojure_gensym.invoke("$anon_var__").toString();
     }
 
     public static DynaTerm make_list(Object arr) {

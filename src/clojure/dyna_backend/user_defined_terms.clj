@@ -65,7 +65,7 @@
     (swap! system/user-defined-terms (fn [old]
                                        (let [v (get old object-name)
                                              nv (if (nil? v)
-                                                  (let [e (empty-user-defined-term name arity)]
+                                                  (let [e (empty-user-defined-term)]
                                                     (assoc e :rexprs (conj (:rexprs e) value)))
                                                   (do
                                                     (invalidate! (:def-assumption v))

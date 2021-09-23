@@ -76,6 +76,10 @@ map_dict(Map, Function) =
 % additionaly, it should not automattically pull the value of the map
 % I suppose that the map_first_key entry might also want to allow for the differen tkeys to get pulled out of the map?
 
+% if this just returns the value once, then that is essentially making some
+% version of cut I suppose, but this could also make that kind of a cut using
+% one of the aggregators?  It would just have to represent the expression
+
 :- export in_list/2.
 :- make_global_term in_list/2.
 in_list([X|_], X).
@@ -84,3 +88,15 @@ in_list([_|Xs], X) :- in_list(Xs, X).
 :- export $with_key/2.
 :- make_global_term $with_key/2.
 $with_key(Value,Key) = &$with_key(Value,Key).
+
+
+
+
+% would be nice if we could continue to allow aggregators to be defined in dyna
+% code.  something like it would construct some macro or something so that the
+% aggregator -= would just be an alias for += where a unitary minus is added
+% into the expression
+
+:- define_aggregator "-=".
+'aggregator_-='(&$define_term(Head, DBase, "-=", Body)) = &$define_term(Head, DBase, "+=" &$unary_-(Boddy)).
+'aggregator_-=_combine'(A,B) = 123.

@@ -57,8 +57,10 @@ DollaredAtom
     : '$' [a-z][a-zA-Z0-9_]*
     ;
 
+// the escaped atoms and the string are somewhat similar in their representation
+// maybe we should have that the atoms
 EscapedAtom
-    : '\'' ~[']+ '\''
+    : '\'' ~['{}() \t\n\r]+
     ;
 // '
 
@@ -93,9 +95,18 @@ Variable
     : [A-Z_][a-zA-Z0-9_]*
     ;
 
+EscapedVariable
+    : '`' [A-Z_][a-zA-Z0-9_]*
+    ;
+
+// going to change this to only match the aggregators which are actually defined
 MergedAggregator
-    : [!@#$^&*\-+:|] '='
-    | [a-z][a-z!@#$^&*\-+:|]* '='
+    : [&*\-+:|] '='
+    | [a-z][a-z&*\-+:|]* '=' {
+    // there needs to be some method which checks if something is defined as an aggregator
+    // that can then conditionally enable this lexer rule
+    ("max=".equals(getText()) || "min=".equals(getText()) || "prob+=".equals(getText()))
+}?
     ;
 
 junk2: ;
@@ -131,12 +142,21 @@ StringConst2
     ;
 // ' stupid highlighting
 
+fragment StringConstBracketsrec
+    : '{' ( StringConstBracketsrec | ~[{}] )* '}'
+    ;
+
+StringConstBrackets
+    : '\'' StringConstBracketsrec
+    ;
+
 junk3: ;
 
 // if we want to support multilined strings in the future or something, we can just do that here
 stringConst returns[String t] locals [String vv]
     : a=StringConst { $vv = $a.getText(); $t = $vv.substring(1, $vv.length() - 1); }
     | a=StringConst2 { $vv = $a.getText(); $t = $vv.substring(1, $vv.length() - 1); }
+    | a=StringConstBrackets { $vv = $a.getText(); $t = $vv.substring(2, $vv.length() - 1); }
     // TODO: we need to handle string escapes etc
     ;
 
@@ -169,6 +189,11 @@ primitive returns[Object v]
     | '$false' { $v = java.lang.Boolean.valueOf(false); }
     // TODO: should have $null in this list
     ;
+
+escapedVariable returns [DynaTerm rterm]
+    : e=EscapedVariable { $rterm = DynaTerm.create("\$escaped_variable", $e.getText()); }
+    ;
+
 
 
 program returns[DynaTerm rterm = null]
@@ -212,6 +237,7 @@ program returns[DynaTerm rterm = null]
         // }
         // don't bother to null out children as there is only a single item so keeping it will make errors print out nicer
       }
+    //| termBody {$rterm = $termBody.rterm; }
     ;
 
 // this version can load the data via a callback rather than constructing a single large object
@@ -535,7 +561,8 @@ expressionRoot returns [DynaTerm rterm]
         }
     | v=Variable {
             if($v.getText().equals("_")) {
-                $rterm = DynaTerm.create("\$anon_variable");  // these are variables which can not be referenced in more than once place by name
+                // this is an anon variable that is not referenced from multiple places
+                $rterm = DynaTerm.create("\$variable", DynaTerm.gensym_variable_name());
             } else {
                 $rterm = DynaTerm.create("\$variable", $v.getText());
             }
@@ -560,6 +587,7 @@ expressionRoot returns [DynaTerm rterm]
             $arguments.args.add(0, DynaTerm.create("\$variable", $v.getText()));
             $rterm = DynaTerm.create_arr("\$call", $arguments.args);
         }
+    | ea=escapedVariable { $rterm = $ea.rterm; }
     ;
 
 
@@ -571,10 +599,17 @@ expressionDynabaseAccess returns[DynaTerm rterm]
 expressionUnqualitiedAddBrakcetsCall returns [DynaTerm rterm]
 locals [DynaTerm add_arg=null]
     : a=expressionDynabaseAccess  { $rterm = $a.rterm; }
-    | a=expressionDynabaseAccess '{'
+    | a=expressionDynabaseAccess ('{'
+        // this could get the current symbol at a given location, and then capture the string between two symbols
+        // that could allow for this expression to do "whatever it wants" between a block of {} stuff
         (db=dynabaseInnerBracket {$add_arg=$db.rterm;}
         | nm=assocativeMapInnerBrackets {$add_arg=$nm.rterm;})
         '}'
+    |   str=StringConstBrackets {
+                String lstr = $str.getText();
+                $add_arg = DynaTerm.create("\$constant", lstr.substring(2, lstr.length() - 1));
+                                  }
+    )
         {
             $rterm = $a.rterm;
             assert($add_arg != null);
@@ -590,10 +625,16 @@ locals [DynaTerm add_arg=null]
 expressionTyped returns [DynaTerm rterm]
     : a=expressionUnqualitiedAddBrakcetsCall {$rterm=$a.rterm;}
     | a=expressionUnqualitiedAddBrakcetsCall ':' b=methodCall {
-            // this should also make a new temporary variable, as the expression would like to avoid calling something twice
-            $b.args.add($a.rterm); // this does not have the dynabase access allowed here?  Should this allow for the dot syntax?
-            $rterm = DynaTerm.create(",", DynaTerm.create_arr($b.name, $b.args), $a.rterm);
-      } // this is going to ahve to add some method call to the value of the statement
+            // this creates a new intermediate variable to avoid evaluating an expression multiple times
+            DynaTerm result_variable = DynaTerm.create("\$variable", DynaTerm.gensym_variable_name());
+            $b.args.add(result_variable); // this does not have the dynabase access allowed here?  Should this allow for the dot syntax?
+            $rterm =
+              DynaTerm.create(",",
+                              DynaTerm.create("\$unify", result_variable, $a.rterm), // unify the expression with a new temp variable
+                              DynaTerm.create(",",
+                                              DynaTerm.create_arr($b.name, $b.args),  // the check on argument
+                                              result_variable)); // return the result variable
+      }
     ;
 
 

@@ -41,9 +41,8 @@ public interface DynaInterface {
     // in which case it would have that the iterator would represent which of the expressions could
     Iterator<Object[]> iterate_over_results(Object rexpr);
 
-
-
     public static DynaInterface create() {
+        DynaMain.initRuntime();
         return (DynaInterface)Clojure.var("dyna-backend.interface", "get-backend-interface").invoke();
     }
 }

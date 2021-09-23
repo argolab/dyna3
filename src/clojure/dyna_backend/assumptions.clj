@@ -20,8 +20,8 @@
     (if @valid
       (do
         (swap! valid false)
-        (doall (for [w @watchers]
-                 (notify-invalidated! w)))
+        (doseq [w @watchers]
+          (notify-invalidated! w))
         )))
   (is-valid? [this] @valid)
   (add-watcher! [this watcher]
@@ -29,7 +29,14 @@
 
   Watcher
   (notify-invalidated! [this] (invalidate! this))
+
+  Object
+  (toString [this] (str "[Assumption isvalid=" (is-valid? this) "watchers=" watchers "]"))
   )
+
+(defmethod print-method assumption [^assumption this ^java.io.Writer w]
+  (.write w (.toString this)))
+
 
 ;(defmulti print-method assumption [this ^java.io.Writer w]
 ;          (.write w (str "(assumption " (is-valid? this) ")")))

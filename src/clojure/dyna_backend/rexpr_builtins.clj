@@ -336,6 +336,24 @@
 (def-user-term "random" 1 (make-random v0 v1))
 
 
+(def-base-rexpr cast-to-string [:var Out
+                                :var-list Args])
+
+(def-rewrite
+  :match (cast-to-string (:any Out) (:ground-var-list Args))
+  (make-unify Out (make-constant (apply str (map get-value Args)))))
+
+;; this is going to cast the value to some expression
+(doseq [i (range 1 10)]
+    (let [vars (map #(symbol (str "v" %)) (range 1 (+ 1 i)))]
+      (eval `(def-user-term "tostr" ~i (make-cast-to-string ~(last vars) ~(vec (drop-last vars)))))))
+
+;; check that the argument is a string
+(def-builtin-rexpr isstring 2
+  (:allground (= v1 (string? v0)))
+  (v1 (string? v0)))
+
+(def-user-term "str" 1 (make-isstring v0 v1))
 
 (def-base-rexpr unify-with-return [:var A :var B :var Return])
 
@@ -345,7 +363,7 @@
   (make-unify Return (= (get-value A) (get-value B))))
 
 (def-rewrite
-  :match (unify-with-return (:any A) (:any B) (#(= true %) Return))
+  :match (unify-with-return (:any A) (:any B) (#(= (make-constant true) %) Return))
   :run-at :construction
   (make-unify A B))
 

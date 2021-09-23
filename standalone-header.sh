@@ -74,6 +74,7 @@ dyna_args=""
 import_args=""
 jvm_args=""
 memory="2G"
+perf_mode="safe"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -95,6 +96,13 @@ while [ $# -gt 0 ]; do
             jvm_args+="-Ddyna.time_running=true "
             ;;
 
+        # --fast)
+        #     perf_mode="fast"
+        #     ;;
+        # --fast-math)
+        #     perf_mode="fast-math"
+        #     ;;
+        # --
 
         --fast-math)
             # this will turn off overflow checking on the math operators, which will make the runtime faster
