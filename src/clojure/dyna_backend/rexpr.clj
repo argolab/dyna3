@@ -39,6 +39,7 @@
 
 
   (remap-variables [this variable-renaming-map])
+  (rewrite-rexpr-children [this remap-function])
   ;; (visit-rexpr-children [this remap-function]) ;; this will visit any nested R-exprs on the expression, and return a new expression of the same type with
   ;(visit-all-children [this remap-function]) ;; this will visit
   )
@@ -62,7 +63,7 @@
         opt (if (not (nil? optional)) (vec optional) [])]
     `(do
        (declare ~(symbol (str "make-" name))
-                ~(symbol (str "make-no-simp-" name))
+                ~(symbol (str "make-no-simp-" name)) ;; this should really be something that is "require context"
                 ~(symbol (str "is-" name "?")))
        (deftype-with-overrides ~(symbol rname) ~(vec (concat (quote [^int cached-hash-code ^:unsynchronized-mutable cached-exposed-variables])
                                                              (map cdar vargroup)))
@@ -121,6 +122,7 @@
                                        [(symbol (str "new-" (cdar v)))
                                         (case (car v)
                                           :var `(get ~'variable-map ~(cdar v) ~(cdar v))
+                                          :value `(get ~'variable-map ~(cdar v) ~(cdar v))
                                           :hidden-var `(get ~'variable-map ~(cdar v) ~(cdar v))
                                           :var-list `(map #(get ~'variable-map % %) ~(cdar v))
                                           :rexpr `(remap-variables ~(cdar v) ~'variable-map)
@@ -128,12 +130,32 @@
                                           (cdar v) ;; the default is that this is the same
                                           )])))
               (if (and ~@(for [v vargroup]
-                           `(= ~(cdar v) ~(symbol (str "new-" (cdar v))))
-                           ))
+                           `(= ~(cdar v) ~(symbol (str "new-" (cdar v))))))
                 ~'this ;; then there was no change, so we can just return ourself
                 ;; there was some change, so we are going to need to create a new object with the new values
-                (~(symbol (str "make-no-simp-" name)) ~@(for [v vargroup]
+                (~(symbol (str "make-" name)) ~@(for [v vargroup]
                                                           (symbol (str "new-" (cdar v)))))))))
+         (~'rewrite-rexpr-children ~'[this remap-function]
+          (let ~(vec (apply concat
+                            (for [v vargroup]
+                              (when (contains? #{:rexpr :rexpr-list} (car v))
+                                [(symbol (str "new-" (cdar v)))
+                                 (case (car v)
+                                   :rexpr `(~'remap-function ~(cdar v))
+                                   :rexpr-list `(map ~'remap-function ~(cdar v)))]
+                                ))))
+            (if (and ~@(for [v vargroup]
+                         (when (contains? #{:rexpr :rexpr-list} (car v))
+                           `(= ~(cdar v) ~(symbol (str "new-" (cdar v)))))))
+              ~'this ;; return unchanged
+              ;; this might want to use the simplification method on the returned result.  That will let it get the at construction
+              ;; time rewrites
+              (~(symbol (str "make-" name)) ~@(for [v vargroup]
+                                                        (if (contains? #{:rexpr :rexpr-list} (car v))
+                                                          (symbol (str "new-" (cdar v)))
+                                                          (cdar v))))
+              )))
+
          Object
          (equals ~'[this other]
            (or (identical? ~'this ~'other)
@@ -395,38 +417,13 @@
                     :rexpr false-branch])
 
 
+(defn set-variable [var value]
+  ;; would be nice if there was a bit more efficient approach to this method?
+  ;; this might be something where we can handle which of the expressions
+  (make-unify var (make-constant value)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; the user call object will figure out which information is getting called, this also will resolve
-;; (def-base-rexpr user-call [:str name
-;;                            :var from-file ;; which file is this call from.
-;;                                           ;; There might be import statements
-;;                                           ;; that we have to resolve.  This will
-;;                                           ;; control what something is going to
-;;                                           ;; be resolved as.  So collecing the
-;;                                           ;; resulting R-expr can be done when
-;;                                           ;; the user-call is resolved rather
-;;                                           ;; than having this done ahead of
-;;                                           ;; time?
-;;                            :var dynabase  ;; have a variable which referneces
-;;                                           ;; what dynabase this call is being
-;;                                           ;; made from.  This will be unfied
-;;                                           ;; with $self on the other end.  In
-;;                                           ;; the case that this is calling
-;;                                           ;; something that is "primitive" or a
-;;                            ;; builtin, then the $self parameter can be ignored in those cases.
-
-
-;;                            ;; this should be a dictonary map of which variables map to other variables
-;;                            ;; that dictonary can include variables like $self which would be the dynabase, and $file which is the file that is making the call
-;;                            ;; there can then be some more optimized versions of this
-;;                            :var-list args  ;; the arguments which are passed
-;;                                            ;; through via positions.  This will
-;;                                            ;; be $0, $1, ....  The last variale
-;;                                            ;; will be the returned value by
-;;                                            ;; convention.
-;;                            :unchecked call-depth])
 
 (def-base-rexpr user-call [:unchecked name  ;; the name for this call object.  Will include the name, arity and file for which this call is being performed from
                             ;; :str name ;; the name for this call represented as a string
@@ -447,6 +444,15 @@
 (def-base-rexpr aggregator-op-inner [:var incoming
                                      :var-list projected
                                      :rexpr body])
+
+
+;; would be nice if we knew which of the variables were required for an
+;; expression to be externally satasified I suppose that could just be all of
+;; the variables which are not projected out of an expression so it could go
+;; through and attempt to identify which of the expressions are more efficiently
+;; represented by some expression.  This will correspond with
+
+
 
 ;; multiple levels of matching variables should also be a thing that was
 ;; integrated into the aggregator before, or the disjunction included that it
@@ -475,21 +481,22 @@
   ;; which an expression corresponds with it.  I suppose that we do not need to
   ;; have a list of disjuncts, as those can just be other disjunctive R-exprs in
   ;; the case that there is more than 1 thing
-  (get-children [this] (let [depth (count disjunction-variables)]
-                         (assert false))))
+  (get-children [this] (recurse-values-depth rexprs (count disjunction-variables)))
 
+  (remap-variables
+   [this variable-renaming-map]
+   (if (empty? variable-renaming-map) this
+       (let [new-disjuncts (map #(get variable-renaming-map % %) disjunction-variables)]
+         ;; if one of the variables is a constant, then we can avoid keeping the entire structure
+         ;; also we might want to have some of the expressions
 
+         (assert false)
+         )
+       )
+   )
 
+  )
 
-;; (def-base-rexpr proj-all-except [:var-list exposed-vars
-;;                                     :rexpr R]
-;;   (exposed-variables [this] exposed-vars))
-
-;; this is going to project many of the variables in the expression
-;; (def-base-rexpr proj-many [:var-list projected-vars
-;;                               :rexpr R]
-;;   (exposed-variables [this] (different (exposed-variables R) projected-vars))
-;;   )
 
 (defn make-proj-many [vars R]
   (if (empty? vars)
@@ -542,13 +549,6 @@
                                (conj (get old functor-name #{}) rewriter)))))
 
 
-
-;; (defn- replace-with-matcher-functions [expr]
-;;   (map (fn [x] (if (contains? @rexpr-matchers x)
-;;                  (get @rexpr-matchers x)
-;;                  (if (list? x) (replace-with-matcher-functions x)
-;;                      x))) expr))
-
 (defn make-rewriter-function [matcher body]
   ;; this needs to go through and define something where the different functions
   ;; are invoked on the relvant parts of the expression.  Because the
@@ -588,11 +588,11 @@
     ;; todo: this needs to handle the other kinds of times when we want to do the rewrites
     `(save-defined-rewrite
        ~(case (:run-at kw-args :standard)
-          :standard 'rexpr-rewrites
-          :construction 'rexpr-rewrites-construct
-          :standard-and-construction 'rexpr-rewrites-construct ;; this should also run these when their variables become ground
+          :standard `(var-get #'rexpr-rewrites)
+          :construction `(var-get #'rexpr-rewrites-construct)
+          :standard-and-construction `(var-get #'rexpr-rewrites-construct) ;; this should also run these when their variables become ground
           :construction-and-grounding-change nil ;; this could run it when there is a new variable which is ground, which might be useful in avoiding running sutff too much?
-          :inference 'rexpr-rewrites-inference)
+          :inference `(var-get #'rexpr-rewrites-inference))
        ~(symbol (str functor-name "-rexpr"))
        ~rewriter-function)))
 
@@ -663,8 +663,6 @@
 
 
 ;; simplification which takes place a construction time
-;; (defn simplify-construct [rexpr]
-;;   rexpr)
 
 (defn simplify-top [rexpr]
   (let [ctx (context/make-empty-context rexpr)]
@@ -747,7 +745,13 @@
   (do (or (is-ground? x))
       (assert false)))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def-rewrite
+  :match (unify (:any A) (:any B))
+  :run-at :construction
+  (if (= A B) ;; these two structures are equal to each other, so we can just remove the expression
+    (make-multiplicity 1)))
 
 (def-rewrite
   :match (unify (:structured A) (:structured B))
@@ -814,13 +818,6 @@
       (make-conjunct (for [child children]
                        (do ;(debug-repl)
                            (simplify child))))))
-;
-;(def-rewrite
-;  :match (conjunct (:rexpr-list children))
-;  :run-at :construction
-;  (if (exists? (fn [x] (or (instance? conjunct-rexpr x) (instance? multiplicity-rexpr x))) children)
-;      ;; then this should flatten the children out such that
-;    ))
 
 (def-rewrite
   ; in the case that there is only 1 argument, this will just run that single argument
@@ -854,7 +851,7 @@
           (make-conjunct others))
       ;; this should not rerun the simplifications as this might get itself stuck into some loop
       ;; with trying to resimplify at construction this again
-      (if (not= num-mults 1) ;; if there is only 1 mult, then we should just keep the same expression
+      (when (not= @num-mults 1) ;; if there is only 1 mult, then we should just keep the same expression
         (make-conjunct (cons (make-multiplicity @mult) others))))))
 
 (def-rewrite
@@ -1116,6 +1113,8 @@
 (comment
   (def-rewrite
     :match (user-call (:unchecked name) (:unchecked var-map) (#(< % @system/user-recursion-limit) call-depth))
+
+    (let [d ])
 
     ;; this needs to look up the relevant R-expr and replace with the expression
     nil

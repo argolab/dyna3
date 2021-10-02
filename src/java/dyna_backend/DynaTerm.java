@@ -3,6 +3,7 @@ package dyna_backend;
 import clojure.java.api.Clojure;
 import clojure.lang.IFn;
 import clojure.lang.ILookup;
+import java.util.concurrent.atomic.AtomicLong;
 
 public final class DynaTerm implements ILookup {
 
@@ -31,8 +32,14 @@ public final class DynaTerm implements ILookup {
         this.arguments = arguments;
     }
 
+    public static boolean include_filename_in_print = false;
+
     public String toString() {
         StringBuilder b = new StringBuilder();
+        if(include_filename_in_print && from_file != null) {
+            b.append(from_file.toString());
+            b.append("/");
+        }
         b.append(name);
         if(arguments != null) {
             int count = arity();
@@ -137,6 +144,8 @@ public final class DynaTerm implements ILookup {
     public static DynaTerm create(String name, Object... args) {
         // if these are making these into a clojure vector, then that means that there is another wrapper around the array which serves as an indirection
         // but having this as a vector will ensure that this does not have the ability to modify the array internally
+        for(int i = 0; i < args.length; i++)
+            assert(args[i] != null);
         return new DynaTerm(name, clojure_vec.invoke(args));
     }
 
@@ -149,7 +158,18 @@ public final class DynaTerm implements ILookup {
     public static String gensym_variable_name() {
         // this is used by the parser, not really something that "belongs" on
         // the DynaTerm class, but it should be ok
+
+        // this should also get moved off the DynaTerm class to something which
         return clojure_gensym.invoke("$anon_var__").toString();
+    }
+
+    private static final AtomicLong colon_line_counter_ = new AtomicLong();
+    public static long colon_line_counter() {
+        // this returns the counter for the number of times that := rules have
+        // appeared in the program this really should not appear on the DynaTerm
+        // class as there is no point for it here, so it should get move din the
+        // future
+        return colon_line_counter_.getAndAdd(1);
     }
 
     public static DynaTerm make_list(Object arr) {

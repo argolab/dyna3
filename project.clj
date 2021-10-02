@@ -12,7 +12,8 @@
   :repl-options {:init-ns dyna-backend.core}
   ;; :aot [dyna-backend.interface
   ;;       dyna-backend.parser_interface]
-  ;:aot :all
+  ;;:aot :all
+  ;;:aot [dyna-backend.rexpr]
   :source-paths ["src/clojure"]
   :java-source-paths ["target/gen-src" "src/java"]
   :resource-paths ["src/resources"]

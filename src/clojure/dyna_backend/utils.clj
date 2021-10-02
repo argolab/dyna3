@@ -1,6 +1,6 @@
 (ns dyna-backend.utils
   (:require [aprint.core :refer [aprint]])
-  )
+  (:import [dyna_backend DynaTerm]))
 
 ;; make functions like car caar cdr etc
 
@@ -139,3 +139,9 @@
 ;;       (if (= (car o) name)
 ;;         (reset! ret o)))
 ;;     @ret))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+(defn dnil? [x] (or (nil? x) (= DynaTerm/null_term x)))

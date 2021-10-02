@@ -191,7 +191,7 @@ primitive returns[Object v]
     ;
 
 escapedVariable returns [DynaTerm rterm]
-    : e=EscapedVariable { $rterm = DynaTerm.create("\$escaped_variable", $e.getText()); }
+    : e=EscapedVariable { $rterm = DynaTerm.create("\$escaped_variable", $e.getText().substring(1)); }
     ;
 
 
@@ -227,17 +227,17 @@ program returns[DynaTerm rterm = null]
             }
         }
       })* EOF
-    | query EOF
-      {
-        // allow for a single entry without any suffix to be treated as a query (so a statement like `a` will be treated like `a?`
-        //   System.err.println(_input.getText($query.ctx.getSourceInterval()));
-        //    _syntaxErrors++;
-        // } else {
+    // | query EOF
+    //   {
+    //     // allow for a single entry without any suffix to be treated as a query (so a statement like `a` will be treated like `a?`
+    //     //   System.err.println(_input.getText($query.ctx.getSourceInterval()));
+    //     //    _syntaxErrors++;
+    //     // } else {
 
-        // }
-        // don't bother to null out children as there is only a single item so keeping it will make errors print out nicer
-      }
-    //| termBody {$rterm = $termBody.rterm; }
+    //     // }
+    //     // don't bother to null out children as there is only a single item so keeping it will make errors print out nicer
+    //   }
+        //| termBody {$rterm = $termBody.rterm; }
     ;
 
 // this version can load the data via a callback rather than constructing a single large object
@@ -253,9 +253,10 @@ program_LoadAsGo[clojure.lang.IFn callback_function]
 
 term returns[DynaTerm rterm = null]
     : term_unended EndTerm {$rterm=$term_unended.rterm;}
+    | ':-' ce=compilerExpression EndTerm { $rterm = $ce.rterm; }
         // queries
-    | query EndQuery {
-                      assert(false); // todo
+    | t=termBody["query="] EndQuery {
+            $rterm = DynaTerm.create("\$query", $t.rterm, _input.getText($t.ctx.getSourceInterval()));
         }
     // | ':-' a=atom p=parameters EndTerm
     //     {
@@ -263,31 +264,40 @@ term returns[DynaTerm rterm = null]
     //     }
 
         // compiler statements
-    | ':-' ce=compilerExpression EndTerm { $rterm = $ce.rterm; }
+
     // assert is something that if it fails, then it can report an error all of the way back to the user.  There should be no calling dynabase in this case
     | 'assert'
-        t=termBody EndTerm
+        t=termBody["assert="] EndTerm
         {
-            $rterm = DynaTerm.create("\$define_term", DynaTerm.create("\$assert"), "assert", $t.rterm);
+            //$rterm = DynaTerm.create("\$define_term", DynaTerm.create("\$assert"), "assert", $t.rterm);
+            String ttext = $t.ctx.start.getInputStream().getText(new Interval($t.ctx.start.getStartIndex(), $t.ctx.stop.getStopIndex()));
+            $rterm = DynaTerm.create("\$assert", $t.rterm, ttext, $t.ctx.getStart().getLine());
         }
 // there could be warnings if some library is used in a particular way.  This should somehow defer in the case that some dynabase has not been constructed, but this would want to have that the expression would later come into existence
-    | 'warning' '(' we=expression ')' t=termBody EndTerm
+    | 'warning' '(' we=expression ')' t=termBody["warning="] EndTerm
+        { // the warning stuff should somehow check something at runtime?
+            // Though this is going to need which of the values will correspond with something
+            // ideally, this should somehow allow for something to be conditional on some value
+
+            assert(false);
+
+        }
     ;
 
 
 // the un-ended term does not consume the EndTerm token at the end.  The EndTerm toekn requires a new line which would require that dynabases have a new line before the closing `}`
 term_unended returns[DynaTerm rterm = null]
-    locals [DynaTerm dbase_rterm = null]
+    locals [DynaTerm dbase_rterm = DynaTerm.null_term]
     : (dbase=expression '.' {$dbase_rterm = $dbase.rterm;})?
       a=atom
       p=parameters
       agg=aggregatorName
-      (t=termBody ';'
+      (t=termBody[$agg.t] ';'
             { DynaTerm l = DynaTerm.create("\$define_term", DynaTerm.create_arr($a.t, $p.args), $dbase_rterm, $agg.t, $t.rterm);
               if($rterm == null) $rterm = l;
               else { $rterm = DynaTerm.create(",", $rterm, l); }
              })*
-        t=termBody
+        t=termBody[$agg.t]
         { DynaTerm l = DynaTerm.create("\$define_term", DynaTerm.create_arr($a.t, $p.args), $dbase_rterm, $agg.t, $t.rterm);
               if($rterm == null) $rterm = l;
               else { $rterm = DynaTerm.create(",", $rterm, l);  }
@@ -307,7 +317,7 @@ term_unended returns[DynaTerm rterm = null]
 
 
 
-termBody returns[DynaTerm rterm]
+termBody[String aname] returns[DynaTerm rterm]
       locals [
          DynaTerm with_key=null
       ]
@@ -335,20 +345,31 @@ termBody returns[DynaTerm rterm]
                 $rterm = DynaTerm.create(",", $fe.rterm, $rterm);
             })?
       {
+
+        if(":-".equals($aname)) {
+            // then we want to make the final result be true regardless of what the expression represents
+            // this should go before with_key as it is possible that we want some witness to the reuslt
+            $rterm = DynaTerm.create(",", $rterm, DynaTerm.create("\$constant", true));
+        }
         if($with_key != null) {
             $rterm = DynaTerm.create("\$with_key", $rterm, $with_key);
+        }
+        if(":=".equals($aname)) {
+            $rterm = DynaTerm.create("\$quote1", DynaTerm.create("\$colon_line_tracking",
+                                                                 DynaTerm.create("\$constant", DynaTerm.colon_line_counter()),
+                                                                 $rterm));
         }
       }
     ;
 
-query returns []
-      locals [String dname=null, boolean streaming=false]
-    : // (name=readAtom (':::' 'streaming' {$streaming=true;})? ':::' {$dname=$name.t;})? e2=expression
-      // {
-      //   $trm = new QueryNode($e2.trm, $e2.ctx.getSourceInterval(), _input.getText($e2.ctx.getSourceInterval()), $dname, $streaming);
-      // }
-        'asdfasdfasdfasdf'
-    ;
+// query returns []
+//       locals [String dname=null, boolean streaming=false]
+//     : // (name=readAtom (':::' 'streaming' {$streaming=true;})? ':::' {$dname=$name.t;})? e2=expression
+//       // {
+//       //   $trm = new QueryNode($e2.trm, $e2.ctx.getSourceInterval(), _input.getText($e2.ctx.getSourceInterval()), $dname, $streaming);
+//       // }
+//         'asdfasdfasdfasdf'
+//     ;
 
 withKey returns [DynaTerm rterm]
     : 'arg' e=expression { $rterm = $e.rterm; }
@@ -510,8 +531,8 @@ dynabaseInnerBracket returns[DynaTerm rterm]
 inlineAggregated returns [DynaTerm rterm]
 locals [ArrayList<DynaTerm> bodies = new ArrayList<>()]
     : '(' agg=aggregatorName
-        (t=termBody ';' { $bodies.add($t.rterm); })*
-        termBody {$bodies.add($t.rterm);}
+        (t=termBody[$agg.t] ';' { $bodies.add($t.rterm); })*
+        termBody[$agg.t] {$bodies.add($t.rterm);}
         ')'
         {$rterm = DynaTerm.create("\$inline_aggregated_function", $agg.t, DynaTerm.make_list($bodies));}
     ;
@@ -524,12 +545,11 @@ locals [ArrayList<DynaTerm> bodies = new ArrayList<>()]
 // could also use a keyword lambda like in python, so the expression could be lambda X,Y,Z: what is going to go here???
 // having the () wrap the expression makes it a bit nicer
 inlineAnonFunction returns [DynaTerm rterm]
-locals [ArrayList<String> varlist = new ArrayList<>()]
+locals [ArrayList<String> varlist = new ArrayList<>(),
+ArrayList<DynaTerm> bodylist = new ArrayList<>()]
     : '(' (v=Variable Comma {$varlist.add($v.getText());} )* v=Variable {$varlist.add($v.getText());} '~>'
-    // {
-    // assert(false);
-    // }
-    t=termBody
+        (t=termBody["="] {$bodylist.add($t.rterm);} ';')*
+    t=termBody["="] {$bodylist.add($t.rterm);} ')'
 {
 
             // (X,Y,Z ~> X+Y+Z+V)
@@ -537,15 +557,26 @@ locals [ArrayList<String> varlist = new ArrayList<>()]
 
             // this is going to have to convert this into some new dummy term where anything that is captured gets added into some term
             // then any additional variables will have that the expression should correspond with which of the operators will
-    $rterm = DynaTerm.create("\$inline_function", DynaTerm.make_list($varlist), $t.rterm);
+    $rterm = DynaTerm.create("\$inline_function", DynaTerm.make_list($varlist), DynaTerm.make_list($bodylist));
     // this wants to get a reference to the anon function, not call it immediately.
     // so this should construct what the name for the item is, but not identify which of the arguments
 }
-')'
     | v=Variable '~>' e=expression
+      {$rterm = DynaTerm.create("\$inline_function", DynaTerm.make_list(new String[]{$v.getText()}), DynaTerm.make_list(new DynaTerm[]{$e.rterm}));}
     ;
 
 
+inlineFunction2 returns [DynaTerm rterm]
+locals [ArrayList<DynaTerm> argslist = null, ArrayList<DynaTerm> bodies = new ArrayList()]
+    : '(' ('(' {$argslist = new ArrayList<>();}
+              ((v=Variable Comma {$argslist.add(DynaTerm.create("\$variable", $v.getText()));})*
+                v=Variable Comma? {$argslist.add(DynaTerm.create("\$variable", $v.getText()));})? ')' )?
+          agg=aggregatorName
+         (t=termBody[$agg.t] ';' {$bodies.add($t.rterm);})*
+          t=termBody[$agg.t] {$bodies.add($t.rterm);} ')'
+      { $rterm = DynaTerm.create("\$inline_function", $argslist == null ? DynaTerm.null_term : DynaTerm.create_arr("x", $argslist),
+                                                     $agg.t, DynaTerm.make_list($bodies)); }
+    ;
 
 
 
@@ -568,7 +599,9 @@ expressionRoot returns [DynaTerm rterm]
             }
       }
     | primitive { $rterm = DynaTerm.create("\$constant", $primitive.v); }
-    | ia=inlineAggregated { $rterm = $ia.rterm; }
+    //| ia=inlineAggregated { $rterm = $ia.rterm; }
+    //| iaf=inlineAnonFunction {$rterm = $iaf.rterm; }
+    | ilf=inlineFunction2 { $rterm = $ilf.rterm; }
         // | '(' agg=aggregatorName ia=inlineAggregatedBodies')'
     //   {
     //     $trm = new InlinedAggregatedExpression($agg.t, $ia.bodies);
@@ -587,6 +620,10 @@ expressionRoot returns [DynaTerm rterm]
             $arguments.args.add(0, DynaTerm.create("\$variable", $v.getText()));
             $rterm = DynaTerm.create_arr("\$call", $arguments.args);
         }
+    | '*' '(' e=expression ')' '(' arguments ')' {
+        $arguments.args.add(0, $e.rterm);
+        $rterm = DynaTerm.create_arr("\$call", $arguments.args);
+    }
     | ea=escapedVariable { $rterm = $ea.rterm; }
     ;
 

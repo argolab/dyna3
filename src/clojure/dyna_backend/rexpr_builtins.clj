@@ -367,6 +367,17 @@
   :run-at :construction
   (make-unify A B))
 
+;; this should check if the arguments are the same variable, in which case this
+;; can just unify the result with true?  but if there is an expression like
+;; `X=X` is that suppose to be considered "inf" instead of just 1, as there are
+;; infinite number of values for which that expression is true for assuming that
+;; there isn't multiple places in which the variable X appears.  I suppose that
+;; this will just get rewritten as proj(X, 1) which will have the right semantic
+;; meaning, as it will construct the proj statement when it converts from the
+;; parser, and then when it converts the unify statement, it will eventially
+;; identify the return value as true so it will not identify which of the
+;; expressions
+
 (def-user-term "$unify" 2 (make-unify-with-return v0 v1 v2))
 
 

@@ -1,11 +1,9 @@
 (ns dyna-backend.assumptions
-  (:require [dyna-backend.system :as system])
-  )
+  (:require [dyna-backend.system :as system]))
 
 
 (defprotocol Watcher
-  (notify-invalidated! [this])
-  )
+  (notify-invalidated! [this watching]))
 
 (defprotocol Assumption
   (invalidate! [this])
@@ -17,22 +15,19 @@
    valid]
   Assumption
   (invalidate! [this]
-    (if @valid
-      (do
-        (swap! valid false)
+    (let [[old new] (swap-vals! valid (constantly false))]
+      (when (= false old)
         (doseq [w @watchers]
-          (notify-invalidated! w))
-        )))
+          (notify-invalidated! w this)))))
   (is-valid? [this] @valid)
   (add-watcher! [this watcher]
     (swap! watcher conj watcher))
 
   Watcher
-  (notify-invalidated! [this] (invalidate! this))
+  (notify-invalidated! [this from-watcher] (invalidate! this))
 
   Object
-  (toString [this] (str "[Assumption isvalid=" (is-valid? this) "watchers=" watchers "]"))
-  )
+  (toString [this] (str "[Assumption isvalid=" (is-valid? this) " watchers=" @watchers "]")))
 
 (defmethod print-method assumption [^assumption this ^java.io.Writer w]
   (.write w (.toString this)))

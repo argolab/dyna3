@@ -19,3 +19,8 @@
     (parse-string "a = m {}.")
     (parse-string "a = m { foo(X) = baz. }.")
     (parse-string "a = m { 123 -> 456, 789 -> 111, \"another\" -> \"what\" }.")))
+
+(deftest inline-aggregator
+  (do
+    (parse-string "foo(X) = (min= X;Y).")
+    (parse-string "foo2(X,Y) = Func=((Z)min=X,Z), *Func(Y).")))
