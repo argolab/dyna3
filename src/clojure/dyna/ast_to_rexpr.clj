@@ -311,7 +311,7 @@
                                                                      #(not (re-matches #"\$[0-9]+" %))) all-variables)
                                                 project-variables-map (into {} (for [v project-variables]
                                                                                  [v (make-variable v)]))
-                                                incoming-variable (make-variable (gensym "$incoming_variable_"))
+                                                incoming-variable (make-variable (str (gensym "$incoming_variable_")))
                                                 body-rexpr (convert-from-ast body
                                                                              incoming-variable
                                                                              (merge project-variables-map

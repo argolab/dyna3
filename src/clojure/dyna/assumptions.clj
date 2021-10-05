@@ -1,6 +1,8 @@
 (ns dyna.assumptions
   (:require [dyna.system :as system]))
 
+;; any assumption which the current expression depends
+(def ^:dynamic *current-watcher*)
 
 (defprotocol Watcher
   (notify-invalidated! [this watching]))
@@ -40,6 +42,17 @@
   (assumption. (atom #{})                                   ; downstream dependents
                (atom true)                                  ; is still valid, maybe could be atomic boolean?
                ))
+
+(defn depend-on-assumption [assumption & {:keys [hard] :or {hard true}}]
+  ;; in this case, we are stating that the current computation would need to get
+  ;; redone if the current assumption becomes invalid
+  (when (bound? #'*current-watcher*)
+    (add-watcher! assumption *current-watcher*)
+    ;; check the assumption after adding it might get invalidated inbetween
+    (when (not (is-valid? assumption))
+      ;; there should be some exception to restart the computation or something
+      ;; it would allow for the runtime to check which of the expressions
+      (throw (RuntimeException. "attempting to use invalid assumption")))))
 
 
 ;; there should be some original R-expr which is the thing that the assumption

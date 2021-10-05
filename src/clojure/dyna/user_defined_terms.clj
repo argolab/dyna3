@@ -2,7 +2,7 @@
   (:require [dyna.utils :refer :all])
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.system :as system])
-  (:require [dyna.assumptions :refer [invalidate! make-assumption]])
+  (:require [dyna.assumptions :refer [invalidate! make-assumption depend-on-assumption]])
   (:import [dyna.rexpr user-call-rexpr]))
 
 
@@ -94,9 +94,20 @@
 
 (def-rewrite
   :match (user-call (:unchecked name) (:unchecked var-map) (#(< % @system/user-recursion-limit) call-depth))
-  (when false
-    (let [ut (get-user-term name)]
-      (assert false) ;; this needs to make a "composit" R-expr
-      ;; this also needs to increase the depth of the nested R-exprs which are embedded to be larger than what our current call-depth is
-      (when ut
-        (remap-variables ut var-map)))))
+  (let [ut (get-user-term name)]
+    (when ut  ;; this should really be a warning or something in the case that it can't be found. Though we might also need to create some assumption that nothing is defined...
+      (let [rexprs (:rexprs ut)
+            rexpr (do
+                    (assert (= (count rexprs) 1)) ;; todo, this is going to need to combine the R-exprs in the case that there are multiple.  This means that the user expression will have possibly many aggregators, as well as
+                    (:rexpr (first rexprs)))
+            rewrite-user-call-depth (fn rucd [rexpr]
+                                      (when-not (rexpr? rexpr)
+                                        (debug-repl))
+                                      (if (is-user-call? rexpr)
+                                        (do
+                                          (debug-repl))
+                                        (rewrite-rexpr-children rexpr rucd)))
+            call-depth-rr (rewrite-user-call-depth rexpr)
+            variable-map-rr (remap-variables call-depth-rr var-map)]
+        (depend-on-assumption (:def-assumption ut))  ;; this should depend on the representational assumption or something.  Like there can be a composit R-expr, but getting optimized does not have to invalidate everything, so there can be a "soft" depend or something
+        variable-map-rr))))
