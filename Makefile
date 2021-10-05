@@ -3,7 +3,7 @@ LEIN := $(shell which lein 2>/dev/null > /dev/null && echo lein || { if [ ! -f .
 VERSION=0.1.0
 
 SOURCE=$(wildcard src/*/*/*.clj) $(wildcard src/*/*/*.java)
-JAR_TARGET=target/dyna_backend-$(VERSION)-SNAPSHOT-standalone.jar
+JAR_TARGET=target/dyna-$(VERSION)-SNAPSHOT-standalone.jar
 TARGET=dyna-standalone-$(VERSION)
 
 .PHONY: clean all repl test

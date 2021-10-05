@@ -1,5 +1,5 @@
-(defproject dyna_backend "0.1.0-SNAPSHOT"
-  :description "Backend runtime for Dyna built on R-exprs"
+(defproject dyna "0.1.0-SNAPSHOT"
+  :description "Dyna built on R-exprs"
   :url "https://github.com/matthewfl/dyna-R"
   :license {:name "LGPL-3.0-or-later WITH Classpath-exception"}
   :dependencies [[org.clojure/clojure "1.10.3"]
@@ -9,11 +9,11 @@
                  [com.clojure-goes-fast/clj-java-decompiler "0.3.0"]
                  [org.antlr/antlr4-runtime "4.7.2"]
                  [org.jline/jline "3.20.0"]]
-  :repl-options {:init-ns dyna-backend.core}
-  ;; :aot [dyna-backend.interface
-  ;;       dyna-backend.parser_interface]
+  :repl-options {:init-ns dyna.core}
+  ;; :aot [dyna.interface
+  ;;       dyna.parser_interface]
   ;;:aot :all
-  ;;:aot [dyna-backend.rexpr]
+  ;;:aot [dyna.rexpr]
   :source-paths ["src/clojure"]
   :java-source-paths ["target/gen-src" "src/java"]
   :resource-paths ["src/resources"]
@@ -24,7 +24,7 @@
   :antlr-dest-dir "target/gen-src"
   :aliases {"compile" ["do" ["antlr"] ["javac"] "compile"]
             "uberjar" ["do" ["compile"] "uberjar"]}
-  :main dyna_backend.DynaMain
+  :main dyna.DynaMain
   :global-vars {;*warn-on-reflection* true  ;; useful for identifying where it uses clojure's reflection which is slow...
                 ;*unchecked-math* :warn-on-boxed ;; boxed math is slow9
                 }
