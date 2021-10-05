@@ -43,6 +43,7 @@
 
 
 (defn main [args]
+  (println args)
   (loop [i 0]
     (when (< i (count args))
       (case (get args i)
@@ -51,8 +52,11 @@
                      (recur (+ i 2)))
         "--csv-import" (recur (+ i 3))
         "--csv-export" (recur (+ i 3))
-        (print "argument ???" (get args i)))))
+        (println "argument ???" (get args i)))))
 
   (println "math mode" *unchecked-math*)
   (repl)
   (println "this is the main function for dyna"))
+
+(defn main2 [& args]
+  (main (vec args)))

@@ -83,6 +83,9 @@
   ;; this is going to need something custom for the variable-name-mapping so that it is able to get the values for the variables when it comes
   )
 
+;;(def-user-term "$eval_toplevel_ast" 1 (eval-from-ast v1 v0 {} "EVAL"))
+
+
 (declare import-file)
 
 
@@ -108,8 +111,8 @@
                                                                                    (conj proj-out-vars ufv))
                                      self-var (disj (get nested-unifies ufv) ufv)
                                      ret-rexpr (if (not (empty? self-var))
-                                       ;; then there is some variable that we can use to replace this statement
-                                       ;; if it is a constant, then we can do the replacement such that it will avoid
+                                                 ;; then there is some variable that we can use to replace this statement
+                                                 ;; if it is a constant, then we can do the replacement such that it will avoid
                                                  (let [const (some is-constant? self-var)
                                                        replace-with (if const (first (filter is-constant? self-var)) (first self-var))]
                                                    (remap-variables nested-rexpr {ufv replace-with}))
@@ -125,9 +128,9 @@
                                      (assoc! var-unifies k (union (get var-unifies k) (disj v ufv)))))
                                  ret-rexpr)
               (is-unify? rexpr) (let [[a b] (get-arguments rexpr)]
-                                              (assoc! var-unifies a (conj (get var-unifies a #{}) b))
-                                              (assoc! var-unifies b (conj (get var-unifies b #{}) a))
-                                              rexpr) ;; there is no change to the expression here
+                                  (assoc! var-unifies a (conj (get var-unifies a #{}) b))
+                                  (assoc! var-unifies b (conj (get var-unifies b #{}) a))
+                                  rexpr) ;; there is no change to the expression here
               (is-disjunct? rexpr) rexpr ;; we do not evaluate disjunctions for variables which might get unified together
               :else ;; otherwise we should check all of the children of the expression to see if there is some structure
               (rewrite-rexpr-children rexpr
@@ -218,265 +221,254 @@
                          (map get-value args))
         ]
     (let [constructed-rexpr
-          (case (.name ast) ;; this should match on name and arity
-            "$compiler_expression" (let [^DynaTerm arg1 (get ast 1)]
-                                     (case (.name ^DynaTerm (get ast 0))
-                                       "import" (???) ;; import some file, or some symbols from another file
+          (case [(.name ast) (.arity ast)] ;; this should match on name and arity
+            ["$compiler_expression" 1] (let [^DynaTerm arg1 (get ast 1)]
+                                         (case (.name ^DynaTerm (get ast 0))
+                                           "import" (???) ;; import some file, or some symbols from another file
 
-                                       ;; use like `:- export name/arity`.  we
-                                       ;; will have a set of symbols which are
-                                       ;; exported from a given file.  Those
-                                       ;; symbols can then be imported using an
-                                       ;; import statement.  But if the file
-                                       ;; isn't processed at the time that the
-                                       ;; import statement is handled, how is
-                                       ;; that going to work?  I suppose that
-                                       ;; there can just be a function which is
-                                       ;; called by import to do the importing
-                                       ;; of a function in place.  That will
-                                       "export" (swap! system/user-exported-terms
-                                                       (fn [o]
-                                                         (assoc o source-file (conj [(get arg1 0) (get arg1 1)] (get o source-file #{})))))
+                                           ;; use like `:- export name/arity`.  we
+                                           ;; will have a set of symbols which are
+                                           ;; exported from a given file.  Those
+                                           ;; symbols can then be imported using an
+                                           ;; import statement.  But if the file
+                                           ;; isn't processed at the time that the
+                                           ;; import statement is handled, how is
+                                           ;; that going to work?  I suppose that
+                                           ;; there can just be a function which is
+                                           ;; called by import to do the importing
+                                           ;; of a function in place.  That will
+                                           "export" (swap! system/user-exported-terms
+                                                           (fn [o]
+                                                             (assoc o source-file (conj [(get arg1 0) (get arg1 1)] (get o source-file #{})))))
 
                                         ;(???) ;; list some symbols as getting exported
 
-                                       ;; some of the arugments to a function should get escaped escaped, or quoted
-                                       ;; used like `:- dispose foo(quote1,eval).`
-                                       "dispose" (update-user-term {:name (.name ^DynaTerm arg1)
-                                                                    :arity (.arity ^DynaTerm arg1)
-                                                                    :source-file source-file}
-                                                                   (fn [o]
-                                                                     (assoc o :dispose-arguments (.arguments ^DynaTerm arg1))))
+                                           ;; some of the arugments to a function should get escaped escaped, or quoted
+                                           ;; used like `:- dispose foo(quote1,eval).`
+                                           "dispose" (update-user-term {:name (.name ^DynaTerm arg1)
+                                                                        :arity (.arity ^DynaTerm arg1)
+                                                                        :source-file source-file}
+                                                                       (fn [o]
+                                                                         (assoc o :dispose-arguments (.arguments ^DynaTerm arg1))))
 
-                                       ;; mark a function as being a macro, meaning that it gets its argument's AST and will return an AST which should get evaluated
-                                       ;; used like `:- macro foo/3.`
-                                       "macro" (update-user-term {:name (get arg1 0)
-                                                                  :arity (get arg1 1)
-                                                                  :source-file source-file}
-                                                                 (fn [o]
-                                                                   (assoc o :is-macro true)))
+                                           ;; mark a function as being a macro, meaning that it gets its argument's AST and will return an AST which should get evaluated
+                                           ;; used like `:- macro foo/3.`
+                                           "macro" (update-user-term {:name (get arg1 0)
+                                                                      :arity (get arg1 1)
+                                                                      :source-file source-file}
+                                                                     (fn [o]
+                                                                       (assoc o :is-macro true)))
 
-                                       ;; make a term global so that it can be referenced form every file
-                                       ;; I suppose that there should be some global list of terms which will get resolved at every possible point
-                                       ;; use like `:- make_global_term foo/3.`
-                                       "make_global_term" (???)
+                                           ;; make a term global so that it can be referenced form every file
+                                           ;; I suppose that there should be some global list of terms which will get resolved at every possible point
+                                           ;; use like `:- make_global_term foo/3.`
+                                           "make_global_term" (???)
 
 
-                                       "memoize_unk" (???) ;; mark some function as being memoized
-                                       "memoize_null" (???)
+                                           "memoize_unk" (???) ;; mark some function as being memoized
+                                           "memoize_null" (???)
 
-                                       "import_csv" (???) ;; import some CSV file as a term
-                                       "export_csv" (???) ;; export a CSV file for a term after the program is done running
+                                           "import_csv" (???) ;; import some CSV file as a term
+                                           "export_csv" (???) ;; export a CSV file for a term after the program is done running
 
-                                       (???) ;; there should be some invalid parse expression or something in the case that this fails at this point
-                                       )
-                                     (make-unify out-variable (make-constant true)) ;; just return that we processed this correctly?  I suppose that in
-                                     )
+                                           (???) ;; there should be some invalid parse expression or something in the case that this fails at this point
+                                           )
+                                         (make-unify out-variable (make-constant true)) ;; just return that we processed this correctly?  I suppose that in
+                                         )
 
-            "$define_term" (let [[head dynabase aggregator body] (.arguments ^DynaTerm ast)
-                                 new-body (make-comma-conjunct
-                                           (apply make-comma-conjunct (for [[arg idx] (zipmap (.arguments ^DynaTerm head) (range))]
-                                                                        (DynaTerm. "$unify" [(DynaTerm. "$variable" [(str "$" idx)])
-                                                                                             arg])))
-                                           (DynaTerm. "$unify" [(DynaTerm. "$variable" ["$self"])
-                                                                ;; if this is unified with a constant, then it can get removed via project?
-                                                                ;; but $self isn't projected out...., so it doesn't get removed
-                                                                (if (not (dnil? dynabase))
-                                                                  (DynaTerm. "$dynabase_access" [dynabase])
-                                                                  (DynaTerm. "$constant" [DynaTerm/null_term]))])
-                                           body)
-                                 new-ast (DynaTerm. "$define_term_normalized"
-                                                    [(.name ^DynaTerm head)
-                                                     (.arity ^DynaTerm head)
-                                                     source-file
-                                                     dynabase
-                                                     aggregator
-                                                     new-body])]
-                             (make-eval-from-ast out-variable (make-constant new-ast) {} source-file))
-            "$define_term_normalized" (let [[functor-name functor-arity source-file dynabase aggregator body] (.arguments ^DynaTerm ast)
-                                            all-variables (find-term-variables body)
-                                            aggregator-result-variable (make-variable (str "$" functor-arity))
-                                            argument-variables (merge  ;; these are the variables which are arguments to this
-                                                                (into {} (for [i (range functor-arity)]
-                                                                           [(str "$" i) (make-variable (str "$" i))]))
-                                                                (when dynabase
-                                                                  {"$self" (make-variable "$self")}))
-                                            ;; anything which matches these patterns should not be the variables which are present
-                                            project-variables (filter
-                                                               (if (not (dnil? dynabase))
-                                                                 #(not (re-matches #"\$self|\$[0-9]+" %)) ;; if dynabase, then self is also a parameter
-                                                                 #(not (re-matches #"\$[0-9]+" %))) all-variables)
-                                            project-variables-map (into {} (for [v project-variables]
-                                                                            [v (make-variable v)]))
-                                            incoming-variable (make-variable (gensym "$incoming_variable_"))
-                                            body-rexpr (convert-from-ast body
-                                                                         incoming-variable
-                                                                         (merge project-variables-map
-                                                                                argument-variables)
-                                                                         source-file)
-                                            rexpr (make-aggregator aggregator
-                                                                   aggregator-result-variable
-                                                                   incoming-variable
-                                                                   (make-proj-many (vals project-variables-map)
-                                                                                   body-rexpr))]
-                                        (add-to-user-term source-file dynabase functor-name functor-arity
-                                                          (optimize-rexpr rexpr))
-                                        ;; the result from the expression should just be to unify the out variable with true
-                                        ;; ideally, this would check if the expression corresponds with
-                                        (make-unify out-variable (make-constant true)))
+            ["$define_term" 4] (let [[head dynabase aggregator body] (.arguments ^DynaTerm ast)
+                                     new-body (make-comma-conjunct
+                                               (apply make-comma-conjunct (for [[arg idx] (zipmap (.arguments ^DynaTerm head) (range))]
+                                                                            (DynaTerm. "$unify" [(DynaTerm. "$variable" [(str "$" idx)])
+                                                                                                 arg])))
+                                               (DynaTerm. "$unify" [(DynaTerm. "$variable" ["$self"])
+                                                                    ;; if this is unified with a constant, then it can get removed via project?
+                                                                    ;; but $self isn't projected out...., so it doesn't get removed
+                                                                    (if (not (dnil? dynabase))
+                                                                      (DynaTerm. "$dynabase_access" [dynabase])
+                                                                      (DynaTerm. "$constant" [DynaTerm/null_term]))])
+                                               body)
+                                     new-ast (DynaTerm. "$define_term_normalized"
+                                                        [(.name ^DynaTerm head)
+                                                         (.arity ^DynaTerm head)
+                                                         source-file
+                                                         dynabase
+                                                         aggregator
+                                                         new-body])]
+                                 (make-eval-from-ast out-variable (make-constant new-ast) {} source-file))
+            ["$define_term_normalized" 6] (let [[functor-name functor-arity source-file dynabase aggregator body] (.arguments ^DynaTerm ast)
+                                                all-variables (find-term-variables body)
+                                                aggregator-result-variable (make-variable (str "$" functor-arity))
+                                                argument-variables (merge ;; these are the variables which are arguments to this
+                                                                    (into {} (for [i (range functor-arity)]
+                                                                               [(str "$" i) (make-variable (str "$" i))]))
+                                                                    (when dynabase
+                                                                      {"$self" (make-variable "$self")}))
+                                                ;; anything which matches these patterns should not be the variables which are present
+                                                project-variables (filter
+                                                                   (if (not (dnil? dynabase))
+                                                                     #(not (re-matches #"\$self|\$[0-9]+" %)) ;; if dynabase, then self is also a parameter
+                                                                     #(not (re-matches #"\$[0-9]+" %))) all-variables)
+                                                project-variables-map (into {} (for [v project-variables]
+                                                                                 [v (make-variable v)]))
+                                                incoming-variable (make-variable (gensym "$incoming_variable_"))
+                                                body-rexpr (convert-from-ast body
+                                                                             incoming-variable
+                                                                             (merge project-variables-map
+                                                                                    argument-variables)
+                                                                             source-file)
+                                                rexpr (make-aggregator aggregator
+                                                                       aggregator-result-variable
+                                                                       incoming-variable
+                                                                       (make-proj-many (vals project-variables-map)
+                                                                                       body-rexpr))]
+                                            (add-to-user-term source-file dynabase functor-name functor-arity
+                                                              (optimize-rexpr rexpr))
+                                            ;; the result from the expression should just be to unify the out variable with true
+                                            ;; ideally, this would check if the expression corresponds with
+                                            (make-unify out-variable (make-constant true)))
 
-            ;; "$inline_aggregated_function" (let [[agg-name disjuncts] (.arguments ast)
-            ;;                                     disjuncts-v (.list_to_vec ^DynaTerm disjuncts)
-            ;;                                     all-c-vars (apply union (map find-all-variables disjuncts-v))
-            ;;                                     ;; these are the variables which should get passed to the function
-            ;;                                     ;; we are going to use vec to just select some ordering of these variables
-            ;;                                     passed-vars (vec (intersection all-c-vars (into #{} (keys variable-name-mapping))))
-            ;;                                     generated-name (str (gensym "$anon_function_"))
-            ;;                                     new-head (DynaTerm. generated-name (vec (map (fn [x] (DynaTerm. "$variable" [x]))
-            ;;                                                                                  passed-vars)))]
-            ;;                                 (doseq [d disjuncts-v]
-            ;;                                   (let [r (convert-from-ast (DynaTerm. "$define_term" [new-head
-            ;;                                                                                        DynaTerm/null_term
-            ;;                                                                                        agg-name
-            ;;                                                                                        d])
-            ;;                                                            (make-constant true)
-            ;;                                                            {} source-file)]
-            ;;                                     (assert (= r (make-multiplicity 1))))) ;; this should just construct all of the new inline terms
-            ;;                                 ;; this should make a call to the new function that we just created
-            ;;                                 (convert-from-ast new-head
-            ;;                                                   out-variable
-            ;;                                                   variable-name-mapping
-            ;;                                                   source-file))
-
-            ;; "$inline_function" (let [[var-list-term disjuncts] (.arguments ast)
-            ;;                          var-list (.list_to_vec ^DynaTerm var-list-term)  ;; this should just make a dummy term like x(v1,v2,v3), instead of a list
-            ;;                          disjunct-v (.list_to_vec ^DynaTerm disjuncts)
-            ;;                          all-c-vars (apply union (map find-all-variables disjunct-v))
-            ;;                          pass-ctx-vars (vec (intersection all-c-vars (into #{} (keys variable-name-mapping))))
-            ;;                          arg-vars (concat pass-ctx-vars var-list)
-            ;;                          generated-name (str (gensym "$anon_function_"))
-            ;;                          new-head (DynaTerm. generated-name (vec (map #(DynaTerm. "$variable" %) arg-vars)))]
-            ;;                      (doseq [d disjunct-v]
-            ;;                        (let [r (convert-from-ast (DynaTerm. "$define_term" [new-head
-            ;;                                                                             DynaTerm/null_term
-            ;;                                                                             "="
-            ;;                                                                             d])
-            ;;                                                  (make-constant true)
-            ;;                                                  {} source-file)]
-            ;;                          (assert (= r (make-multiplicity 1)))))
-            ;;                      ;; additional context variables need to get added to this expression
-            ;;                      (convert-from-ast (DynaTerm. "$quote1" [(DynaTerm. generated-name pass-ctx-vars)])
-            ;;                                        out-variable
-            ;;                                        variable-name-mapping
-            ;;                                        source-file))
-
-            "$inline_function" (let [[extra-head-args agg disjuncts] (.arguments ast)
-                                     has-extra-args (not= DynaTerm/null_term extra-head-args)
-                                     extra-var-list (if has-extra-args (.arguments ^DynaTerm extra-head-args))
-                                     disjunct-v (.list_to_vec ^DynaTerm disjuncts)
-                                     all-c-vars (apply union (map find-all-variables disjunct-v))
-                                     pass-ctx-vars (vec (difference
-                                                         (intersection all-c-vars (into #{} (keys variable-name-mapping)))
-                                                         (into #{} extra-var-list)))
-                                     arg-vars (concat pass-ctx-vars (map #(get % 0) extra-var-list))
-                                     generated-name (str (gensym "$anon_function_"))
-                                     new-head (DynaTerm. generated-name (vec (map #(DynaTerm. "$variable" [%]) arg-vars)))
-                                     call-ast (DynaTerm. generated-name (vec (map #(DynaTerm. "$variable" [%]) pass-ctx-vars)))]
-                                 (doseq [d disjunct-v]
-                                   (let [r (convert-from-ast (DynaTerm. "$define_term" [new-head
-                                                                                        DynaTerm/null_term
-                                                                                        agg
-                                                                                        d])
-                                                             (make-constant true)
-                                                             {} source-file)]
-                                     (assert (= r (make-multiplicity 1)))))
-                                 ;; if () is present for the arguments, then that will make the expression quote the reference to the anon function
-                                 ;; rather than just evaluate it in place
-                                 (convert-from-ast (if has-extra-args (DynaTerm. "$quote1" [call-ast]) call-ast)
-                                                   out-variable
-                                                   variable-name-mapping
-                                                   source-file))
+            ["$inline_function" 3] (let [[extra-head-args agg disjuncts] (.arguments ast)
+                                         has-extra-args (not= DynaTerm/null_term extra-head-args)
+                                         extra-var-list (if has-extra-args (.arguments ^DynaTerm extra-head-args))
+                                         disjunct-v (.list_to_vec ^DynaTerm disjuncts)
+                                         all-c-vars (apply union (map find-all-variables disjunct-v))
+                                         pass-ctx-vars (vec (difference
+                                                             (intersection all-c-vars (into #{} (keys variable-name-mapping)))
+                                                             (into #{} extra-var-list)))
+                                         arg-vars (concat pass-ctx-vars (map #(get % 0) extra-var-list))
+                                         generated-name (str (gensym "$anon_function_"))
+                                         new-head (DynaTerm. generated-name (vec (map #(DynaTerm. "$variable" [%]) arg-vars)))
+                                         call-ast (DynaTerm. generated-name (vec (map #(DynaTerm. "$variable" [%]) pass-ctx-vars)))]
+                                     (doseq [d disjunct-v]
+                                       (let [r (convert-from-ast (DynaTerm. "$define_term" [new-head
+                                                                                            DynaTerm/null_term
+                                                                                            agg
+                                                                                            d])
+                                                                 (make-constant true)
+                                                                 {} source-file)]
+                                         (assert (= r (make-multiplicity 1)))))
+                                     ;; if () is present for the arguments, then that will make the expression quote the reference to the anon function
+                                     ;; rather than just evaluate it in place
+                                     (convert-from-ast (if has-extra-args (DynaTerm. "$quote1" [call-ast]) call-ast)
+                                                       out-variable
+                                                       variable-name-mapping
+                                                       source-file))
 
             ;; it is possible to just write something like `X,123`, but that is odd....
             ;; I suppose that we might as well suppot this here, but I don't think this will actually get used
-            "$constant" (let [[value] (.arguments ast)]
-                          (make-unify (make-constant value) out-variable))
+            ["$constant" 1] (let [[value] (.arguments ast)]
+                              (make-unify (make-constant value) out-variable))
 
-            "$variable" (let [[name] (.arguments ast)
-                              var (get variable-name-mapping name)]
-                          (assert (not (nil? var)))
-                          (assert (string? name))  ;; we should not be allowing variables to take on the names of structures
-                          (make-unify var out-variable))
+            ["$variable" 1] (let [[name] (.arguments ast)
+                                  var (get variable-name-mapping name)]
+                              (assert (not (nil? var)))
+                              (assert (string? name)) ;; we should not be allowing variables to take on the names of structures
+                              (make-unify var out-variable))
 
-            "$quote1" (let [[^DynaTerm quoted-structure] (.arguments ast)
-                            name (.name quoted-structure)
-                            vals (get-arg-values (.arguments quoted-structure))
-                            ;; in the case that something comes from a top level
-                            dynabase (if (contains? variable-name-mapping "$self")
-                                       (get variable-name-mapping "$self")
-                                       (make-constant nil))
-                            structure (make-unify-structure out-variable
-                                                            dynabase
-                                                            (.name quoted-structure)  ;; the name of the structure
-                                                            vals)]
-                        structure)
+            ["$quote1" 1] (let [[^DynaTerm quoted-structure] (.arguments ast)
+                                name (.name quoted-structure)
+                                vals (get-arg-values (.arguments quoted-structure))
+                                ;; in the case that something comes from a top level
+                                dynabase (if (contains? variable-name-mapping "$self")
+                                           (get variable-name-mapping "$self")
+                                           (make-constant nil))
+                                structure (make-unify-structure out-variable
+                                                                dynabase
+                                                                (.name quoted-structure) ;; the name of the structure
+                                                                vals)]
+                            structure)
 
-           "$quote" (let [[^DynaTerm quoted-structure] (.arguments ast)]
-                       (make-unify out-variable (make-constant quoted-structure)))
+            ["$quote" 1] (let [[^DynaTerm quoted-structure] (.arguments ast)]
+                           (make-unify out-variable (make-constant quoted-structure)))
 
-            "$dynabase_call"  (let [[dynabase-var call-term] (.arguments ast)
-                                    dynabase-val (get-value dynabase-var)
-                                    call-vals (get-arg-values (.arguments call-term))
-                                    arity (count call-vals)
-                                    call-name {:name (.name call-term)   ;; the name arity.  When a dynabase is called, there is no filename on the name qualifier, as it requires that it can be exported across files etc
-                                  :arity arity}]
-                                (make-user-call
-                                 call-name
-                                 (merge
-                                  {(make-variable "$self") dynabase-val
-                                   (make-variable (str "$" arity)) out-variable}
-                                  (into {} (for [[v i] (zipmap call-vals (range))]
-                                             [(make-variable (str "$" i)) v]))))
-                                0 ;; the call depth
-                                )
+            ["$dynabase_call" 2] (let [[dynabase-var call-term] (.arguments ast)
+                                       dynabase-val (get-value dynabase-var)
+                                       call-vals (get-arg-values (.arguments call-term))
+                                       arity (count call-vals)
+                                       call-name {:name (.name call-term) ;; the name arity.  When a dynabase is called, there is no filename on the name qualifier, as it requires that it can be exported across files etc
+                                                  :arity arity}]
+                                   (make-user-call
+                                    call-name
+                                    (merge
+                                     {(make-variable "$self") dynabase-val
+                                      (make-variable (str "$" arity)) out-variable}
+                                     (into {} (for [[v i] (zipmap call-vals (range))]
+                                                [(make-variable (str "$" i)) v]))))
+                                   0 ;; the call depth
+                                   )
 
             ;; the assert can run inline, so it will check some statement before everything has been parsed
             ;; this will make writing tests for something easy
-            "$assert" (let [[expression text-rep line-number] (.arguments ast)
-                            all-variable-names (find-term-variables expression)
-                            ;; this should construct some assert= aggregator, which will check some expression for "all" of the values
-                            ;; which would mean that it identifies which of the expressions
-                            rexpr (convert-from-ast expression (make-constant true) {} source-file)
-                            result (simplify-top rexpr)]
-                        (when-not (= result (make-multiplicity 1))
-                          (throw (RuntimeException. (str "assert on line " line-number " failed:\n\t" text-rep))))
-                        (make-unify out-variable (make-constant true))) ;; if the assert fails, then it will throw some exception
+            ["$assert" 3] (let [[expression text-rep line-number] (.arguments ast)
+                                all-variable-names (find-term-variables expression)
+                                ;; this should construct some assert= aggregator, which will check some expression for "all" of the values
+                                ;; which would mean that it identifies which of the expressions
+                                rexpr (convert-from-ast expression (make-constant true) {} source-file)
+                                result (simplify-top rexpr)]
+                            (when-not (= result (make-multiplicity 1))
+                              (throw (RuntimeException. (str "assert on line " line-number " failed:\n\t" text-rep))))
+                            (make-unify out-variable (make-constant true))) ;; if the assert fails, then it will throw some exception
 
-            "$query" (let [[expression text-rep] (.arguments ast)
-                           all-variables-names (find-term-variables expression)
-                           result-var (make-variable "$query_result_var")
-                           zzz (assert false)
-                           rexpr (convert-from-ast expression result-var {} source-file)]
-                       ;; this is going to want to make all of the variables into something, there is no "aggregation" here
-                       ;; if this somehow wraps this expression in something which will represent the result
+            ["$query" 2] (let [[expression text-rep] (.arguments ast)
+                               all-variables-names (find-term-variables expression)
+                               result-var (make-variable "$query_result_var")
+                               zzz (assert false)
+                               rexpr (convert-from-ast expression result-var {} source-file)]
+                           ;; this is going to want to make all of the variables into something, there is no "aggregation" here
+                           ;; if this somehow wraps this expression in something which will represent the result
 
-                       ;; there might also be some special "out" channel which we can have where the results of the query should go
-                       ;; realistically, the query processing shouldn't happen in this file
-                       nil)
+                           ;; there might also be some special "out" channel which we can have where the results of the query should go
+                           ;; realistically, the query processing shouldn't happen in this file
+                           nil)
 
 
             ;; we special case the ,/2 operator as this allows us to pass the info that the first expression will get unified with a constant true earlier
             ;; this should make some generation steps more efficient
-            ","  (let [[a b] (.arguments ast)]
-                   ;;(println "A:" a "\nB:" b)
-                   (make-conjunct [(convert-from-ast a
-                                                     (make-constant true)
-                                                     variable-name-mapping
-                                                     source-file)
-                                   (convert-from-ast b
-                                                     out-variable
-                                                     variable-name-mapping
-                                                     source-file)]))
+            ["," 2]  (let [[a b] (.arguments ast)]
+                       ;;(println "A:" a "\nB:" b)
+                       (make-conjunct [(convert-from-ast a
+                                                         (make-constant true)
+                                                         variable-name-mapping
+                                                         source-file)
+                                       (convert-from-ast b
+                                                         out-variable
+                                                         variable-name-mapping
+                                                         source-file)]))
+
+            ;; the evaluate statements need to have additional context such as the variables from the local context
+            ;; or the reference to the current file
+            ["$eval" 1] (let [[string-arg] (.arguments ast)
+                              arg-val (get-value string-arg)
+                              ast-var (make-intermediate-var)]
+                          (make-conjunct [(make-ast-from-string ast-var arg-val)
+                                          (make-eval-from-ast out-variable
+                                                              ast-var
+                                                              variable-name-mapping
+                                                              source-file)]))
+            ["$eval_ast" 1] (let [[ast-arg] (.arguments ast)
+                                  ast-var (get-value ast-arg)]
+                              (make-eval-from-ast out-variable
+                                                  ast-var
+                                                  variable-name-mapping
+                                                  source-file))
+            ["$eval_toplevel" 1] (let [[string-arg] (.arguments ast)
+                                       arg-val (get-value string-arg)
+                                       ast-var (make-intermediate-var)]
+                                   (make-conjunct [(make-ast-from-string ast-var arg-val)
+                                                   (make-eval-from-ast out-variable
+                                                                       ast-var
+                                                                       {}
+                                                                       source-file)]))
+            ["$eval_toplevel_ast" 1] (let [[ast-arg] (.arguments ast)
+                                           ast-var (get-value ast-arg)]
+                                       (make-eval-from-ast out-variable
+                                                           ast-var
+                                                           {}
+                                                           source-file))
+            ["$file" 0] (make-unify out-variable (make-constant source-file))
+
+
 
             ;; call without any qualification on it.  Just generate the user term
             (let [arity (.arity ast)
@@ -508,7 +500,6 @@
                                call-rexpr)]
               full-rexpr)
             )]
-
       ;; add the R-expr that we constructed to the conjunctive R-exprs
       (conj! other-conjunctive-rexprs constructed-rexpr)
       ;; project out all of the variables which were added as intermediate expressions along the way
@@ -540,7 +531,7 @@
                                         ;(debug-repl)
       (println "==========> report failed predicate" exception))
     (reportInputMismatch [recognizer exception]
-      ;(debug-repl)
+                                        ;(debug-repl)
       (println "==========> report input missmatch" exception))
     (reportNoViableAlternative [recognizer exception]
       (let [token (.getStartToken exception)
@@ -564,24 +555,26 @@
     ))
 
 
-(defn run-parser [^CharStream stream]
+(defn run-parser [^CharStream stream & {:keys [fragment-allowed] :or {fragment-allowed false}}]
   (let [lexer (dyna_backend.dyna_grammar2Lexer. ^CharStream stream)
         token-stream (UnbufferedTokenStream. lexer)
         parser (dyna_backend.dyna_grammar2Parser. token-stream)]
     (comment
       (if run-parser-fast ;; there needs to be some way in which this can be
-                          ;; configured or something.  I suppose that this could
-                          ;; happen via flags or for large inputs
+        ;; configured or something.  I suppose that this could
+        ;; happen via flags or for large inputs
         (.setErrorHandler parser (BailErrorStrategy.))))
     (.setErrorHandler parser parse-error-handler)
-    (let [r (.program parser)
+    (let [r (if fragment-allowed
+              (.eval_entry parser)
+              (.program parser))
           e (.getNumberOfSyntaxErrors parser)]
       (if (not= e 0)
         (throw (RuntimeException. "syntax error")) ;; this would be nice if
-                                                   ;; there was more of an error
-                                                   ;; message, but this should
-                                                   ;; get printed out by the
-                                                   ;; parser I suppose
+        ;; there was more of an error
+        ;; message, but this should
+        ;; get printed out by the
+        ;; parser I suppose
         (.rterm r)))))
 
 
@@ -589,7 +582,7 @@
 
 (defn parse-string [^String s]
   (let [char-stream (CharStreams/fromString ^String (str s "\n% end of string\n"))]
-    (run-parser char-stream)))
+    (run-parser char-stream :fragment-allowed true)))
 
 (defn parse-stream [istream]
   (let [stream (java.io.BufferedInputStream istream 4096)
@@ -684,7 +677,7 @@
 (def-rewrite
   :match (eval-from-ast (:any out-variable) (:ground ast) (:unchecked variable-name-mapping) (:unchecked source-file))
   :run-at :construction ;; this should run at both standard time and construction
-  ;:run-at :standard-and-construction ;; this should run when it is constructed and when it might have a ground variable
+                                        ;:run-at :standard-and-construction ;; this should run when it is constructed and when it might have a ground variable
   (let [a (get-value ast)]
     (convert-from-ast a out-variable variable-name-mapping source-file)))
 

@@ -1,4 +1,5 @@
-(ns dyna-backend.prefix-trie)
+(ns dyna-backend.prefix-trie
+  (:import [dyna_backend IPrefixTrie]))
 
 
 ;; (gen-interface

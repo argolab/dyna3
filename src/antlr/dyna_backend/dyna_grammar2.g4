@@ -195,7 +195,7 @@ escapedVariable returns [DynaTerm rterm]
     ;
 
 
-
+// the entry point for parsing a file
 program returns[DynaTerm rterm = null]
     : (t=term
        {
@@ -240,6 +240,14 @@ program returns[DynaTerm rterm = null]
         //| termBody {$rterm = $termBody.rterm; }
     ;
 
+// entry point for something that is being evaluated inline, as there might just be some value rather than a defined rule
+eval_entry returns [DynaTerm rterm=null]
+    : program { $rterm = $program.rterm; }
+    | (e=expression Comma {$rterm = $rterm == null ? $e.rterm : DynaTerm.create(",", $rterm, $e.rterm);} )*
+       e=expression       {$rterm = $rterm == null ? $e.rterm : DynaTerm.create(",", $rterm, $e.rterm);}
+       EOF
+    ;
+
 // this version can load the data via a callback rather than constructing a single large object
 // this will want for
 program_LoadAsGo[clojure.lang.IFn callback_function]
@@ -253,7 +261,7 @@ program_LoadAsGo[clojure.lang.IFn callback_function]
 
 term returns[DynaTerm rterm = null]
     : term_unended EndTerm {$rterm=$term_unended.rterm;}
-    | ':-' ce=compilerExpression EndTerm { $rterm = $ce.rterm; }
+    //| ':-' ce=compilerExpression EndTerm { $rterm = $ce.rterm; }
         // queries
     | t=termBody["query="] EndQuery {
             $rterm = DynaTerm.create("\$query", $t.rterm, _input.getText($t.ctx.getSourceInterval()));
@@ -269,7 +277,6 @@ term returns[DynaTerm rterm = null]
     | 'assert'
         t=termBody["assert="] EndTerm
         {
-            //$rterm = DynaTerm.create("\$define_term", DynaTerm.create("\$assert"), "assert", $t.rterm);
             String ttext = $t.ctx.start.getInputStream().getText(new Interval($t.ctx.start.getStartIndex(), $t.ctx.stop.getStopIndex()));
             $rterm = DynaTerm.create("\$assert", $t.rterm, ttext, $t.ctx.getStart().getLine());
         }
@@ -309,7 +316,7 @@ term_unended returns[DynaTerm rterm = null]
             // writing `a(1,2,3).` is just a short hand for `a(1,2,3) :- true.`
             $rterm = DynaTerm.create("\$define_term", DynaTerm.create_arr($a.t, $p.args), $dbase_rterm, ":-", DynaTerm.create("\$constant", true));
       }
-    | ':-' ce=compilerExpression EndTerm { $rterm = $ce.rterm; }
+    | ':-' ce=compilerExpression { $rterm = $ce.rterm; }
     ;
 
 // there should be a term which is at the
@@ -348,7 +355,7 @@ termBody[String aname] returns[DynaTerm rterm]
 
         if(":-".equals($aname)) {
             // then we want to make the final result be true regardless of what the expression represents
-            // this should go before with_key as it is possible that we want some witness to the reuslt
+            // this should go before with_key as it is possible that we want some witness to the result
             $rterm = DynaTerm.create(",", $rterm, DynaTerm.create("\$constant", true));
         }
         if($with_key != null) {
@@ -633,7 +640,7 @@ expressionDynabaseAccess returns[DynaTerm rterm]
     : a=expressionRoot {$rterm=$a.rterm;} ('.' m=methodCall {$rterm = DynaTerm.create("\$dynabase_call", $rterm, DynaTerm.create_arr($m.name, $m.args));})*
     ;
 
-expressionUnqualitiedAddBrakcetsCall returns [DynaTerm rterm]
+expressionAddBrakcetsCall returns [DynaTerm rterm]
 locals [DynaTerm add_arg=null]
     : a=expressionDynabaseAccess  { $rterm = $a.rterm; }
     | a=expressionDynabaseAccess ('{'
@@ -660,18 +667,28 @@ locals [DynaTerm add_arg=null]
     ;
 
 expressionTyped returns [DynaTerm rterm]
-    : a=expressionUnqualitiedAddBrakcetsCall {$rterm=$a.rterm;}
-    | a=expressionUnqualitiedAddBrakcetsCall ':' b=methodCall {
-            // this creates a new intermediate variable to avoid evaluating an expression multiple times
-            DynaTerm result_variable = DynaTerm.create("\$variable", DynaTerm.gensym_variable_name());
-            $b.args.add(result_variable); // this does not have the dynabase access allowed here?  Should this allow for the dot syntax?
-            $rterm =
-              DynaTerm.create(",",
-                              DynaTerm.create("\$unify", result_variable, $a.rterm), // unify the expression with a new temp variable
-                              DynaTerm.create(",",
-                                              DynaTerm.create_arr($b.name, $b.args),  // the check on argument
-                                              result_variable)); // return the result variable
-      }
+locals [DynaTerm result_variable]
+    : a=expressionAddBrakcetsCall {$rterm=$a.rterm;}
+    | a=expressionAddBrakcetsCall {
+            $result_variable = DynaTerm.create("\$variable", DynaTerm.gensym_variable_name());
+            $rterm = DynaTerm.create("\$unify", $result_variable, $a.rterm);
+        }
+        (':' b=methodCall {
+                $b.args.add($result_variable); // this does not have the dynabase access allowed here?  Should this allow for the dot syntax?
+                $rterm = DynaTerm.create(",", $rterm, DynaTerm.create_arr($b.name, $b.args));
+            })+
+        {$rterm = DynaTerm.create(",", $rterm, $result_variable);}
+// ':' b=methodCall {
+//             // this creates a new intermediate variable to avoid evaluating an expression multiple times
+//             DynaTerm result_variable = DynaTerm.create("\$variable", DynaTerm.gensym_variable_name());
+//             $b.args.add(result_variable); // this does not have the dynabase access allowed here?  Should this allow for the dot syntax?
+//             $rterm =
+//               DynaTerm.create(",",
+//                               DynaTerm.create("\$unify", result_variable, $a.rterm), // unify the expression with a new temp variable
+//                               DynaTerm.create(",",
+//                                               DynaTerm.create_arr($b.name, $b.args),  // the check on argument
+//                                               result_variable)); // return the result variable
+//       }
     ;
 
 
@@ -685,38 +702,48 @@ expressionExponent returns [DynaTerm rterm]
     | a=expressionUnaryMinus '**' b=expressionUnaryMinus {$rterm = DynaTerm.create("**", $a.rterm, $b.rterm);}
     ;
 
-expressionMulicative returns [DynaTerm rterm]
+expressionMultiplicative returns [DynaTerm rterm]
     : a=expressionExponent {$rterm = $a.rterm;} (op=('*'|'/'|'//') b=expressionExponent
                 {$rterm = DynaTerm.create($op.getText(), $rterm, $b.rterm);})*
     ;
 
 expressionAdditive returns [DynaTerm rterm]
-    : a=expressionMulicative {$rterm = $a.rterm;} (op=('+'|'-') b=expressionMulicative
+    : a=expressionMultiplicative {$rterm = $a.rterm;} (op=('+'|'-') b=expressionMultiplicative
             {$rterm = DynaTerm.create($op.getText(), $rterm, $b.rterm);})*
     ;
 
 expressionRelationCompare returns [DynaTerm rterm]
-locals[DynaTerm last_expression]
+locals[ArrayList<DynaTerm> expressions, ArrayList<String> ops]
     :   a=expressionAdditive {$rterm = $a.rterm;}
-    |   a=expressionAdditive {$rterm = null; $last_expression=$a.rterm;}
+    |   a=expressionAdditive {
+            $expressions = new ArrayList<>();
+            $ops = new ArrayList<>();
+            $expressions.add($a.rterm);
+        }
         (op=('>'|'<'|'<='|'>=') b=expressionAdditive
-            { // this enables multiple of these expressions to get chained together like 0 < A < 10, like in python
-                // this is not making intermediate variables for these
-                // expressions, Otherwise we are going to have the same
-                // operation called more than once.  I suppose that there could
-                // be another compiler pass to find common sub expressions, but
-                // that is more work for the system to perform later that we can
-                // avoid up front
-                DynaTerm n = DynaTerm.create($op.getText(), $last_expression, $b.rterm);
-                if($rterm == null) $rterm = n;
-                else $rterm = DynaTerm.create(",", $rterm, n);
-                $last_expression = $b.rterm;
+            { $ops.add($op.getText());
+              $expressions.add($b.rterm);
             })+
-    ;
-    // : b=expressionAdditive {$rterm = $b.rterm;}
-    // | a=expressionAdditive op=('>'|'<'|'<='|'>=') b=expressionAdditive
-    //     {$rterm= DynaTerm.create($op.getText(), $a.rterm, $b.rterm);}
-    // ;
+        {
+            // this creates tmp vars for all of the values used more than once, but they are now evaluated out of order?
+            // given the declaritive nature of the program, that shouldn't be a "problem" per say
+            $rterm = null;
+            for(int i = 1; i < $expressions.size() - 1; i++) {
+                // this isn't needed in the case that the nested expression is a variable or constant
+                // those can just get duplicated
+                if(!("\$variable".equals($expressions.get(i).name) || "\$constant".equals($expressions.get(i).name))) {
+                    DynaTerm tmp_var = DynaTerm.create("\$variable", DynaTerm.gensym_variable_name());
+                    DynaTerm uf = DynaTerm.create("\$unify", tmp_var, $expressions.get(i));
+                    $rterm = $rterm == null ? uf : DynaTerm.create(",", $rterm, uf);
+                    $expressions.set(i, tmp_var);
+                }
+            }
+            for(int i = 0; i < $ops.size(); i++) {
+                DynaTerm o = DynaTerm.create($ops.get(i), $expressions.get(i), $expressions.get(i+1));
+                $rterm = $rterm == null ? o : DynaTerm.create(",", $rterm, o);
+            }
+        }
+        ;
 
 expressionEqualsCompare returns [DynaTerm rterm]
     : a=expressionRelationCompare {$rterm = $a.rterm;}

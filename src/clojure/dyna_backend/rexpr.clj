@@ -238,10 +238,10 @@
 
 (defrecord variable-rexpr [varname]
   RexprValue
-  (get-value [this] (context/get-value context/*context* this))
+  (get-value [this] (context/get-value (context/get-context) this))
   (set-value! [this value]
-    (context/set-value! context/*context* this value))
-  (is-bound? [this]  (context/need-context (context/is-bound? context/*context* this)))
+    (context/set-value! (context/get-context) this value))
+  (is-bound? [this]  (context/need-context (context/is-bound? (context/get-context) this)))
   (all-variables [this] #{this})
   Object
   (toString [this] (str "(variable " varname ")")))
@@ -625,7 +625,7 @@
 (defn is-variable-set? [variable]
   (or (instance? constant-value-rexpr variable)
       (context/need-context
-        (context/is-bound? context/*context* variable))))
+       (context/is-bound? (context/get-context) variable))))
 
 (defn is-constant? [variable]
   (instance? constant-value-rexpr variable))
@@ -633,7 +633,7 @@
 (defn get-variable-value [variable]
   (if (instance? constant-value-rexpr variable)
     (.value ^constant-value-rexpr variable)
-    (context/get-value context/*context* variable)))
+    (context/get-value (context/get-context) variable)))
 
 
 (defn simplify
@@ -918,14 +918,14 @@
             ;; then this should just return this single item, there is no need to keep the disjunct aronud in this case
             ;; this will have to move the context info up
             (let [[ctx r] (get found 0)]
-              (context/add-context! context/*context* ctx)
+              (context/add-context! (context/get-context) ctx)
               r)
             (assert false))
         (do
           ;; then there are two or more values, so this needs to intersect all of the contexts and
           (let [same-context (reduce context/intersect (map car found))]
             ;; the new intersection is going to be added to the global context
-            (context/add-context! context/*context* same-context)
+            (context/add-context! (context/get-context) same-context)
             (make-disjunct (doall (for [[ctx r] found]
                                     ;; this is going to have to make an r-expr for the stuff that this wants to save behind
                                     ;; in the case that there are bindings to a value, then this should
@@ -959,19 +959,23 @@
 (def-rewrite
   :match (proj (:variable A) (:rexpr R))
   :run-at :standard
-  (do
-    (let [ctx (context/make-nested-context-introduce-variable R A)
-          nR (context/bind-context ctx (simplify R))]
-      (if (context/is-bound? ctx A)
-        ;; then this could just replace the value in the remainder of the expression
-        ;; otherwise this can just return the value back
-        (do (???))
-        (do (make-proj A nR))
-        )
-      )
 
-    nil
-    ))
+  (let [ctx (context/make-nested-context-introduce-variable R A)
+        nR (context/bind-context ctx
+                                 (simplify R))]
+    (if (context/is-bound? ctx A)
+      ;; if there is some unified expression, it would be nice if we could also attempt to identify if some expression is unified together
+      ;; in which case we can remove the proj using the expression of
+      (let [var-val (context/get-value ctx A)
+            replaced-R (remap-variables nR {A (make-constant var-val)}) ;; this is a bit annoying as it is going through and doing replacements
+            ;; vvv (context/get-inner-values ctx)
+            ;; all-bindings (context/get-all-bindings ctx)
+            ]
+          ;(debug-repl) ;; this is going to have to propagate the value of the new variable into the body
+          ;; this is either already done via the context?  Or this is going to be slow if we have a large expression where we have to do lots of
+          ;; replacements of the variables
+          replaced-R)
+        (make-proj A nR))))
 
 ;; there neeeds to be a projection rewrite for moving expressions out which do not
 ;; depend on the variable which is getting projected
