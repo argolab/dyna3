@@ -10,51 +10,49 @@
   (:require [dyna.rexpr-dynabase])
                                         ;(:require [dyna.parser_interface :refer [parse-string]])
   (:require [dyna.ast-to-rexpr :refer [parse-string
-                                               parse-file
-                                               eval-string]])
+                                       import-file-url
+                                       eval-string
+                                       eval-ast]])
 
   (:require [dyna.repl :refer [repl]])
+  (:require [clojure.java.io :refer [resource]])
+  (:import [dyna DynaTerm])
   )
-
-;; (defn parse-string [str]
-;;   (require 'dyna.parser_interface)
-;;   ((resolve 'dyna.parser_interface 'parse-string) str))
-
-
-;; (defn parse-string [str]
-;;   (require 'dyna.parser_interface)
-;;   (dyna.parser_interface/parse-string str))
-
-
-;; (require '[])
-;;(use 'aprint.core)
-
-
-
-;(def ^:dynamic *current-rewrites* nil)  ;; dynamic means that this can be set using (binding ...), and this will be local to the current thread
-;(def ^:dynamic *current-context* nil)
-
-
-;; (defn repl []
-;;   (let [console (System/console)]
-;;     (loop [])
-;;     )
-;;   )
 
 
 (defn main [args]
-  (println args)
+  ;; (println args)
+
+  ;; load the prelude file into the runtime before we start loading stuff
+  ;;(import-file-url (resource "dyna/prelude.dyna"))
+
   (loop [i 0]
     (when (< i (count args))
+      ;; the command line arguments can just be special shortcuts for commands that could have been run via the repl
       (case (get args i)
         "--import" (let [fname (get args (+ i 1))]
                      (println "importing file " fname)
+                     (eval-ast (make-term ("$compiler_expression" ("import" fname))))
                      (recur (+ i 2)))
-        "--csv-import" (recur (+ i 3))
-        "--csv-export" (recur (+ i 3))
+        "--csv-import" (let [term (get args (+ i 1))
+                             file-name (get args (+ i 2))
+                             [_ term-name term-arity] (re-matches #"(.+)/([0-9]+)" term)]
+                         (if (nil? term-name)
+                           (print "csv-import did not match the expected argument")
+                           (assert false))
+                         (eval-ast (make-term ("$compiler_expression" ("import_csv" term-name (int term-arity) file-name))))
+                         (recur (+ i 3)))
+        "--csv-export" (let [term (get args (+ i 1))
+                             file-name (get args (+ i 2))
+                             [_ term-name term-arity] (re-matches #"(.+)/([0-9]+)" term)]
+                         (eval-ast (make-term ("$compiler_expression" ("save_csv" term-name (int term-arity) file-name))))
+                         (recur (+ i 3)))
         (println "argument ???" (get args i)))))
 
-  (println "math mode" *unchecked-math*)
+  ;; (eval-ast (make-term ("$define_term" ("$command_line_args") DynaTerm/null_term "=" ("$constant" (DynaTerm/make_list args)))))
+  ;; (eval-ast (make-term ("$compiler_expression" ("make_system_term" "$command_line_args" 0))))
+
+  ;; (println "math mode" *unchecked-math*)
   (repl)
   (println "this is the main function for dyna"))
 

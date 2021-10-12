@@ -6,7 +6,7 @@
 %:- macro key/1.  % declare that the key expression is a macro.  This will be something that should take the AST for something, but what is the name that is going to be used by this expression then?  Are we just going to quote escape its arguments.  Are we going to give it the entire AST for its arguments including
 
 :- dispose key(quote1).
-:- make_global_term key/1.
+:- make_system_term key/1.
 key(QuotedName) = $reflect(QuotedName, Dynabase, Name, _),
                   $get_key_for_expression(Dynabase, Name, QuotedName).
 
@@ -18,14 +18,14 @@ key(QuotedName) = $reflect(QuotedName, Dynabase, Name, _),
 
 
 :- export list/1.
-:- make_global_term list/1.
+:- make_system_term list/1.
 % for annotation that somethign is a list.  This will match against all list types
 list([]).
 list([_|A]) :- list(A).
 
 :- export list/2.
 :- dispose list(quote1, eval).
-:- make_global_term list/2.
+:- make_system_term list/2.
 % allows for type annotation against something.  This
 list(Type, []).
 list(Type, [X|A]) :- *Type(X), list(Type, A).
@@ -36,18 +36,18 @@ list(Type, [X|A]) :- *Type(X), list(Type, A).
 
 
 :- export list_length/1.
-:- make_global_term list_length/1.
+:- make_system_term list_length/1.
 list_length([]) = 0.
 list_length([X|A]) = list_length(A) + 1.
 
 
 :- export append/3.
-:- make_global_term append/3.
+:- make_system_term append/3.
 append([], A, A).
 append([X|Y], A, [X|B]) :- append(Y, A, B).
 
 map_list([], F) = [].
-map_list([X|A], Function) = [*Function(X)|A].
+map_list([X|A], Function) = [*Function(X)|map_list(A, Function)].
 
 % do remap the values in a map, it would require that there is some cut
 % operator, such that it does not rebind the balues multiple times?  I suppose
@@ -81,12 +81,12 @@ map_dict(Map, Function) =
 % one of the aggregators?  It would just have to represent the expression
 
 :- export in_list/2.
-:- make_global_term in_list/2.
+:- make_system_term in_list/2.
 in_list([X|_], X).
 in_list([_|Xs], X) :- in_list(Xs, X).
 
 :- export $with_key/2.
-:- make_global_term $with_key/2.
+:- make_system_term $with_key/2.
 $with_key(Value,Key) = &$with_key(Value,Key).
 
 
@@ -100,3 +100,7 @@ $with_key(Value,Key) = &$with_key(Value,Key).
 :- define_aggregator "-=".
 'aggregator_-='(&$define_term(Head, DBase, "-=", Body)) = &$define_term(Head, DBase, "+=" &$unary_-(Boddy)).
 'aggregator_-=_combine'(A,B) = 123.
+
+:- make_system_term $union_type/3.
+$union_type(A, B, Value) |= *A(Value).
+$union_type(A, B, Value) |= *B(Value).

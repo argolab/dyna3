@@ -39,7 +39,9 @@
 
    :dynabases #{} ;; a set of which dynabases appear on this term.  We might be able to use this to perform some kind of type inference between expressions
 
-   :imported-from-another-file nil ;; the reference to another file if this came from somewhere else.  This should be the qualified name of the object so it can go looking for whatever it is attempting to call.  This will not then have its own R-exprs defined, as it will require that there is some extension or something rather than adding additional information
+   ;; if this is imported from somewhere else, then this is the entire name of that other declared object
+   ;; this will then have to recurse in finding the other thing
+   :imported-from-another-file nil
 
    ;; would be nice if there was some kind of return value type information as
    ;; well.  This would have to be something which is cached information I
@@ -88,7 +90,7 @@
               (get @system/user-defined-terms name))
         another-file (:imported-from-another-file r)]
     (if another-file
-      (recur (assoc name :source-file another-file))
+      (recur another-file)
       r)))
 
 

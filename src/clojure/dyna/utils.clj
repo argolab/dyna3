@@ -145,3 +145,13 @@
 
 
 (defn dnil? [x] (or (nil? x) (= DynaTerm/null_term x)))
+
+(defn make-list [& x] (DynaTerm/make_list x))
+
+(defn- make-term-fn [x]
+  (if (and (seqable? x) (string? (first x)))
+    `(DynaTerm/create_arr ~(first x) [~@(map make-term-fn (rest x))])
+    x))
+
+(defmacro make-term [x]
+  (make-term-fn x))

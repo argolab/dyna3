@@ -52,6 +52,9 @@
 ;; how many times a user-defined function can be expanded before we stop expanding
 (def ^:dynamic user-recursion-limit (atom 20))
 
+;; if a query is made, where it should get printed to
+(def ^:dynamic query-output println)
+
 ;; (defn make-new-system-state []
 ;;   {:user-expressions (atom {})
 ;;    :memoized-expressions (atom {})

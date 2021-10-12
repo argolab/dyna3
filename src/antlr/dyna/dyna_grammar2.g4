@@ -227,7 +227,7 @@ program returns[DynaTerm rterm = null]
             }
         }
       })* EOF
-    // | query EOF
+        // | query EOF
     //   {
     //     // allow for a single entry without any suffix to be treated as a query (so a statement like `a` will be treated like `a?`
     //     //   System.err.println(_input.getText($query.ctx.getSourceInterval()));
@@ -261,19 +261,10 @@ program_LoadAsGo[clojure.lang.IFn callback_function]
 
 term returns[DynaTerm rterm = null]
     : term_unended EndTerm {$rterm=$term_unended.rterm;}
-    //| ':-' ce=compilerExpression EndTerm { $rterm = $ce.rterm; }
-        // queries
     | t=termBody["query="] EndQuery {
-            $rterm = DynaTerm.create("\$query", $t.rterm, _input.getText($t.ctx.getSourceInterval()));
+            String ttext = $t.ctx.start.getInputStream().getText(new Interval($t.ctx.start.getStartIndex(), $t.ctx.stop.getStopIndex()));
+            $rterm = DynaTerm.create("\$query", $t.rterm, ttext);
         }
-    // | ':-' a=atom p=parameters EndTerm
-    //     {
-    //         $rterm = DynaTerm.create("\$compiler_pragm", DynaTerm.create_arr($a.t, $p.args));
-    //     }
-
-        // compiler statements
-
-    // assert is something that if it fails, then it can report an error all of the way back to the user.  There should be no calling dynabase in this case
     | 'assert'
         t=termBody["assert="] EndTerm
         {
@@ -287,7 +278,6 @@ term returns[DynaTerm rterm = null]
             // ideally, this should somehow allow for something to be conditional on some value
 
             assert(false);
-
         }
     ;
 
@@ -369,15 +359,6 @@ termBody[String aname] returns[DynaTerm rterm]
       }
     ;
 
-// query returns []
-//       locals [String dname=null, boolean streaming=false]
-//     : // (name=readAtom (':::' 'streaming' {$streaming=true;})? ':::' {$dname=$name.t;})? e2=expression
-//       // {
-//       //   $trm = new QueryNode($e2.trm, $e2.ctx.getSourceInterval(), _input.getText($e2.ctx.getSourceInterval()), $dname, $streaming);
-//       // }
-//         'asdfasdfasdfasdf'
-//     ;
-
 withKey returns [DynaTerm rterm]
     : 'arg' e=expression { $rterm = $e.rterm; }
     ;
@@ -409,12 +390,6 @@ methodCall returns [String name, ArrayList<DynaTerm> args]
        $args = $p.args;
     }
     ;
-        // | m=methodName
-    // {
-    //   $name = $m.name;
-    //   $args = new ArrayList<>();
-    // }
-    // ;
 
 
 // we could have something like $atoms will just quote their arguments so it
@@ -458,17 +433,6 @@ arrayElements returns [ArrayList<DynaTerm> elems = new ArrayList<>(); ]
 assocativeMap returns[DynaTerm rterm] locals []
     : '{' a=assocativeMapInnerBrackets '}' {$rterm=$a.rterm;}
     ;
-    // : '{' '}'   { $rterm = DynaTerm.create("\$map_empty"); }
-    // | '{' a=assocativeMapElements '}'
-    //     {
-    //         $rterm = DynaTerm.create("\$map_empty");
-    //         for(SimplePair<Object,Object> p : $a.elements) {
-    //             $rterm = DynaTerm.create("\$map_element", p.a, p.b, $rterm);
-    //         }
-    //     }
-    // | '{' a=assocativeMapElements '|' b=expression '}'
-
-    // ;
 
 assocativeMapInnerBrackets returns[DynaTerm rterm]
     : { $rterm = DynaTerm.create("\$map_empty"); }
@@ -489,8 +453,8 @@ assocativeMapInnerBrackets returns[DynaTerm rterm]
     ;
 
 assocativeMapElements returns[ArrayList<SimplePair<DynaTerm,DynaTerm>> elements = new ArrayList<>();]
-    : (a=assocativeMapElement Comma {$elements.add(new SimplePair($a.key, $a.value));} )*
-        a=assocativeMapElement {$elements.add(new SimplePair($a.key, $a.value));} Comma?
+    : (a=assocativeMapElement Comma  {$elements.add(new SimplePair($a.key, $a.value));} )*
+       a=assocativeMapElement Comma? {$elements.add(new SimplePair($a.key, $a.value));}
     ;
 
 assocativeMapElement returns[DynaTerm key, DynaTerm value]
@@ -608,12 +572,12 @@ expressionRoot returns [DynaTerm rterm]
     | primitive { $rterm = DynaTerm.create("\$constant", $primitive.v); }
     //| ia=inlineAggregated { $rterm = $ia.rterm; }
     //| iaf=inlineAnonFunction {$rterm = $iaf.rterm; }
+    | '(' e=expression ')' { $rterm = $e.rterm; }
     | ilf=inlineFunction2 { $rterm = $ilf.rterm; }
         // | '(' agg=aggregatorName ia=inlineAggregatedBodies')'
     //   {
     //     $trm = new InlinedAggregatedExpression($agg.t, $ia.bodies);
     //   }
-    | '(' e=expression ')' { $rterm = $e.rterm; }
     | a=array { $rterm = $a.rterm; }
     | ':' m=methodCall {  // for supporthing things like f(:int) => f(_:int)
             $rterm = DynaTerm.create("\$variable", DynaTerm.gensym_variable_name());
@@ -666,6 +630,15 @@ locals [DynaTerm add_arg=null]
         }
     ;
 
+expressionTypedUnioned returns [DynaTerm rterm]
+    : b=methodCall {$rterm = DynaTerm.create_arr($b.name, $b.args);}
+        ('|' b=methodCall {
+                $rterm = DynaTerm.create("\$union_type",
+                                         DynaTerm.create("\$quote1", $rterm),
+                                         DynaTerm.create("\$quote1", DynaTerm.create_arr($b.name, $b.args)));
+            })*
+    ;
+
 expressionTyped returns [DynaTerm rterm]
 locals [DynaTerm result_variable]
     : a=expressionAddBrakcetsCall {$rterm=$a.rterm;}
@@ -673,22 +646,10 @@ locals [DynaTerm result_variable]
             $result_variable = DynaTerm.create("\$variable", DynaTerm.gensym_variable_name());
             $rterm = DynaTerm.create("\$unify", $result_variable, $a.rterm);
         }
-        (':' b=methodCall {
-                $b.args.add($result_variable); // this does not have the dynabase access allowed here?  Should this allow for the dot syntax?
-                $rterm = DynaTerm.create(",", $rterm, DynaTerm.create_arr($b.name, $b.args));
+        (':' b=expressionTypedUnioned {
+                $rterm = DynaTerm.create(",", $rterm, $b.rterm.extend_args($result_variable));
             })+
         {$rterm = DynaTerm.create(",", $rterm, $result_variable);}
-// ':' b=methodCall {
-//             // this creates a new intermediate variable to avoid evaluating an expression multiple times
-//             DynaTerm result_variable = DynaTerm.create("\$variable", DynaTerm.gensym_variable_name());
-//             $b.args.add(result_variable); // this does not have the dynabase access allowed here?  Should this allow for the dot syntax?
-//             $rterm =
-//               DynaTerm.create(",",
-//                               DynaTerm.create("\$unify", result_variable, $a.rterm), // unify the expression with a new temp variable
-//                               DynaTerm.create(",",
-//                                               DynaTerm.create_arr($b.name, $b.args),  // the check on argument
-//                                               result_variable)); // return the result variable
-//       }
     ;
 
 
@@ -767,10 +728,25 @@ expression returns [DynaTerm rterm]
     : a=expressionIs { $rterm = $a.rterm; }
     ;
 
+
+compilerExpressionParams returns [ArrayList<Object> args = new ArrayList<>()]
+    : /* empty */ {}
+    | '(' ')'
+    | '(' (p=primitive { $args.add($p.v); } Comma)*
+           p=primitive { $args.add($p.v); } Comma? ')'
+    ;
+
 compilerExpression returns [DynaTerm rterm]
-    : a=atom p=parameters {$rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create_arr($a.t, $p.args));}
-    | a=atom b=atom p=parameters. {$rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create($a.t, DynaTerm.create_arr($b.t, $p.args)));}
-    | a=atom m=methodId { $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create($a.t, DynaTerm.create("/", $m.name, $m.n))); }
+locals [ArrayList<Object> args]
+    : 'import'  {$args = new ArrayList<>();}
+        (m=methodId Comma  {$args.add($m.rterm);})*
+         m=methodId Comma? {$args.add($m.rterm);}
+      'from' name=primitive {
+         $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create("import", DynaTerm.make_list($args), $name.v));
+      }
+    | a=atom p=compilerExpressionParams {$rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create_arr($a.t, $p.args));}
+    | a=atom b=atom p=compilerExpressionParams {$rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create($a.t, DynaTerm.create_arr($b.t, $p.args)));}
+    | a=atom m=methodId { $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create($a.t, $m.rterm)); }
     ;
 
 // // expressions which change how the parser behaves or how the runtime works for given expression
@@ -811,7 +787,7 @@ compilerExpression returns [DynaTerm rterm]
 //     | 'off' { $t = false; }
 //     ;
 
-methodId returns [String name, int n]
-    : a=atom '/' b=NumberInt { $name = $a.t; $n = java.lang.Integer.valueOf($b.getText()); }
-    | a=atom { $name = $a.t; $n = 0; }
+methodId returns [DynaTerm rterm]
+    : a=atom '/' b=NumberInt { $rterm = DynaTerm.create("/", $a.t, java.lang.Long.valueOf($b.getText())); }
+    | a=atom { $rterm = DynaTerm.create("/", $a.t, 0L); }
     ;

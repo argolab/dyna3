@@ -40,5 +40,5 @@ class ParserUnbufferedInputStream extends UnbufferedCharStream {
         return new String(cpy, 0, cpy.length);
     }
 
-    static final int bufferSize = Integer.valueOf(System.getProperty("dyna.parser.bufferSize", "51200"));
+    static final int bufferSize = Integer.valueOf(System.getProperty("dyna.parser.bufferSize", "512000"));
 }

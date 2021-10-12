@@ -73,7 +73,7 @@
          (~'get-variables ~'[this]
           (filter variable?
                   (union #{~@(map cdar (filter #(contains?  #{:var :value} (car %1)) vargroup))}
-                         ~@(map cdar (filter #(= :var-list `(set ~(car %1))) vargroup))
+                         ~@(map (fn [x] `(set ~(cdar x))) (filter #(= :var-list (car %1)) vargroup))
                          )))
 
          (~'get-children ~'[this]
@@ -665,12 +665,6 @@
 
 ;; simplification which takes place a construction time
 
-(defn simplify-top [rexpr]
-  (let [ctx (context/make-empty-context rexpr)]
-    (context/bind-context ctx
-                          (simplify rexpr))))
-
-
 ;; the context is assumed to be already constructed outside of this function
 ;; this will need for something which needs for the given functionq
 (defn simplify-fully [rexpr]
@@ -680,6 +674,20 @@
       (reset! prev @cr)
       (swap! cr simplify))
     @cr))
+
+(defn simplify-top [rexpr]
+  (let [ctx (context/make-empty-context rexpr)]
+    (context/bind-context ctx
+                          (simplify-fully rexpr))))
+
+(defn simplify-rexpr-query [query-id rexpr]
+  ;; TODO: we might want to make this construct some table for the expression.  So what representation would come back from the expression
+  (let [ctx (context/make-empty-context rexpr)
+        res (context/bind-context ctx
+                                  (simplify-fully rexpr))]
+    ;; there needs to be a better way to get the bindigns to variables rather than doing this "hack" to get the map
+    (system/query-output query-id (get (context/get-inner-values ctx) 3) res)))
+
 
 (defn find-iterators [rexpr]
   (let [typ (type rexpr)
@@ -815,10 +823,7 @@
 (def-rewrite
   :match (conjunct (:rexpr-list children))  ;; the conjuncts and the disjuncts are going to have to have some expression wihch
   :run-at :standard
-  (do ;(debug-repl "conj")
-      (make-conjunct (for [child children]
-                       (do ;(debug-repl)
-                           (simplify child))))))
+  (make-conjunct (doall (map simplify children))))
 
 (def-rewrite
   ; in the case that there is only 1 argument, this will just run that single argument
@@ -869,22 +874,6 @@
   :match (conjunct (:rexpr-list children))
   (apply union (map find-iterators children)))
 
-
-;; (def-rewrite
-;;   :match (disjunct (:rexpr-list children))
-;;   :run-at :standard
-;;   (make-disjunct (for [child children]
-;;                    (let [ctx (context/make-nested-context child)]
-;;                      (context/bind-context ctx (simplify child))))))
-
-;; this needs to have some additional combining of the rules.  In the case that there is some
-
-;; (def-rewrite
-;;   :match (disjunct (:rexpr-list children))
-;;   (case (count children)
-;;     0 (make-multiplicity 0)
-;;     1 (car children)
-;;     :else rexpr))
 
 (def-rewrite
   :match (disjunct ((fn [x] (= 1 (count x))) children))
@@ -978,25 +967,6 @@
           replaced-R)
         (make-proj A nR))))
 
-;; there neeeds to be a projection rewrite for moving expressions out which do not
-;; depend on the variable which is getting projected
-;; (def-rewrite
-;;   :match (proj (:variable A) (is-conjunct? R))
-;;   :run-at :construction
-;;   (let [inner (transient [])
-;;         outer (transient [])]
-;;     (doseq [c (get-argument R 0)]
-;;       (if (contains? (exposed-variables c) A)
-;;         (conj! inner c)
-;;         (conj! outer c)))
-;;     (let [innerP (persistent! inner)
-;;           outerP (persistent! outer)]
-;;       (if (empty? outerP)
-;;         nil ; then there is nothing for us to move out of the expression
-;;         (make-conjunct (cons outer (make-proj A innerP))) ; make a new rexpr with the outer expressions moved out
-;;         ))
-;;     ))
-
 
 (def-rewrite
   :match (if (is-empty-rexpr? A) (:rexpr B) (:rexpr C))
@@ -1015,97 +985,6 @@
              (context/bind-context ctx (simplify A)))
            B C))
 
-
-;
-;(def-rewrite
-;  :match (proj (:variable A) (:rexpr R))
-;  (if (context/has-context)
-;    (context/bind-context (context/make-nested-context))
-;    )
-;  (do
-;    (context/make-nested-context-introduce-variable)))
-
-
-;; this should either return nil which means that there is no match
-;; or this should match which expression has some
-
-;; (def-rewrite
-;;   :match (if (:rexpr A) (:rexpr B) (:rexpr C)) ;; with the (:match pattern being something that allows it to select the correct matcher for a given expression
-;;   (let [rr (bind-context (make-nested-context A)
-;;             (simplify A))]
-;;     ;; this is going to need to have some rewrite context which masks out the current value
-;;     nil
-
-;;     ))
-
-
-
-
-
-;; ;; this is something that can be automatically generated in the case that
-;; (def-rewrite
-;;   :match (add (:ground A) (:ground B) (:non-ground C))
-;;   (make-unify C `(+ ~A ~B)))
-
-
-;; (comment
-
-;; (def-rewrite
-;;   :match (proj (:var A) (:rexpr R))
-;;   :run-at :standard
-;;   ;; this needs to make sure that the variable is shaddowed in the context.
-;;   ;; which means that this is going to have
-;;   (bind-context
-;;    (make-nested-context-introduce-variable *context* rexpr A)
-;;    (let [nR (simplify R)]
-;;      (if (is-ground A)
-;;        ;; then the projected variable is now ground, so we should remove the
-;;        ;; projection expression though there might be multiple places where the
-;;        ;; variable appears so we want to be able to handle that the variable
-;;        ;; should still be maintained in such a way that we track the value
-
-
-;;   (let [ncontext (make-nested-context-introduce-variable *context* rexpr A)]
-;;     (bind-context
-;;         result (bind-context ncontext
-;;                              (simplify R))]
-;;     (if
-
-;;   (make-proj( A (simplify B)))
-
-;;     )))))
-
-;; )
-
-
-;; (def-rewrite
-;;   :match (user-call (:str name) args call-depth)
-;;   :run-at :standard
-;;   (let [n [name (count args)]
-;;         expr (system/lookup-named-expression name)]
-;;     ;; this needs to rename the variables which represent the expression
-;;     nil
-;;     )
-;;   )
-
-
-;; (def-rewrite
-;;   :match (user-call (:unchecked a) (:unchecked b) (:unchecked c) (:unchecked d) (:unchecked e))
-;;   :run-at :construction
-;;   (make-multiplicity 0))
-
-
-;; this rewrite finds buitin expressions and replaces them once they are created.  There is no need to delay expanding these expressions
-;; (def-rewrite
-;;   :match (user-call (:unchecked name) (:unchecked from-file) (:unchecked dynabase) (:unchecked args) (:unchecked call-depth))
-;;   :run-at :construction
-;;   (let [n [name (- (count args) 1)]
-;;         s (get @system/system-defined-user-term n)]
-;;     (when (not (nil? s))
-;;       ;; here we can just replace the expression with the variable names
-;;       (let [vmap (zipmap (map #(make-variable (str "$" %)) (range)) args)]
-;;         (remap-variables s vmap)))))
-
 (def-rewrite
   :match (user-call (:unchecked name) (:unchecked var-map) (:unchecked call-depth))
   :run-at :construction
@@ -1115,12 +994,14 @@
       (remap-variables s var-map))))
 
 
-(comment
-  (def-rewrite
-    :match (user-call (:unchecked name) (:unchecked var-map) (#(< % @system/user-recursion-limit) call-depth))
-
-    (let [d ])
-
-    ;; this needs to look up the relevant R-expr and replace with the expression
-    nil
-    ))
+(def-rewrite
+  :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:rexpr R))
+  (let [ctx (context/make-nested-context-introduce-variable R incoming-variable)
+        nR (context/bind-context ctx (simplify R))]
+    (if (and (context/is-bound? ctx incoming-variable) (= (make-multiplicity 1) nR))
+      (make-unify result-variable (make-constant (context/get-value ctx incoming-variable)))
+      (do
+        ;; if there is more stuff, then this will which of the expressions corresponds with it having either higher multiplicies, or more disjunctions
+        ;; that need to get handled here
+        (assert (not (context/is-bound? ctx incoming-variable))) ;; todo
+        (make-aggregator operator result-variable incoming-variable nR)))))
