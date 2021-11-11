@@ -2,6 +2,7 @@
   (:require [aprint.core :refer [aprint]])
   (:require [clojure.tools.namespace.repl :refer [refresh]])
   (:require [clj-java-decompiler.core :refer [decompile]])
+  (:require [clojure.java.io :refer [resource]])
 
   (:require [dyna.utils :refer :all])
   (:require [dyna.rexpr :refer :all])
@@ -15,9 +16,7 @@
                                        eval-ast]])
 
   (:require [dyna.repl :refer [repl]])
-  (:require [clojure.java.io :refer [resource]])
-  (:import [dyna DynaTerm])
-  )
+  (:import [dyna DynaTerm]))
 
 
 (defn main [args]

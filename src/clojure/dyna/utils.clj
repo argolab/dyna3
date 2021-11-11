@@ -56,7 +56,6 @@
   ([prompt]
    `(let [~'local-bindings (debugger-get-local-bindings)]
       (.printStackTrace (Throwable. "Entering Debugger") System/out)
-
       (aprint ~'local-bindings)
       (clojure.main/repl
          :prompt #(print ~prompt "=> ")
@@ -155,3 +154,8 @@
 
 (defmacro make-term [x]
   (make-term-fn x))
+
+(defmacro dyna-assert [expression]
+  `(when-not ~expression
+     (debug-repl)
+     (assert false)))

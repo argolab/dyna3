@@ -9,7 +9,7 @@
   (:require [clojure.java.io :refer [resource]])
   (:import [org.antlr.v4.runtime CharStream CharStreams UnbufferedTokenStream])
   (:import [org.antlr.v4.runtime.misc Interval])
-  (:import [dyna DynaTerm])
+  (:import [dyna DynaTerm DynaUserAssert])
   (:import [java.net URL]))
 
 
@@ -94,8 +94,8 @@
    (let [var-unifies (transient {})
 
          mr (cond
-              (is-proj? rexpr) (let [ufv (get-argument rexpr 0)
-                                     prexpr (get-argument rexpr 1)
+              (is-proj? rexpr) (let [ufv (:var rexpr)
+                                     prexpr (:body rexpr)
                                      [nested-unifies nested-rexpr] (optimize-rexpr prexpr
                                                                                    (conj proj-out-vars ufv))
                                      self-var (disj (get nested-unifies ufv) ufv)
@@ -347,6 +347,7 @@
                                                 rexpr (make-aggregator aggregator
                                                                        aggregator-result-variable
                                                                        incoming-variable
+                                                                       false ;; if this is false, then this should also be false
                                                                        (make-proj-many (vals project-variables-map)
                                                                                        body-rexpr))]
                                             (add-to-user-term source-file dynabase functor-name functor-arity
@@ -434,8 +435,7 @@
                                 rexpr (convert-from-ast expression (make-constant true) {} source-file)
                                 result (simplify-top rexpr)]
                             (when-not (= result (make-multiplicity 1))
-                              (debug-repl)
-                              (throw (RuntimeException. (str "assert on line " line-number " failed:\n\t" text-rep))))
+                              (throw (DynaUserAssert. source-file line-number text-rep result)))
                             (make-unify out-variable (make-constant true))) ;; if the assert fails, then it will throw some exception
 
             ["$query" 2] (let [[expression text-rep] (.arguments ast)
@@ -512,7 +512,7 @@
                              :arity arity
                              :source-file (or (.from_file ast) source-file) ;; the if there file name annotation on the term, then use that ratherthan the local file
                              }
-                  user-term (get-user-term call-name)
+                  user-term (get-user-term call-name) ;; this can return a user or system term
                   is-macro (:is-macro user-term false)
                   dispose-arguments (:dispose-arguments user-term)
                   call-vals (doall (if is-macro

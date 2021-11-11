@@ -19,6 +19,7 @@
   :resource-paths ["src/resources"]
   :test-paths ["test"]
   ;;:profiles {:uberjar {:aot :all}}
+  ;;:profiles {:uberjar {:aot [dyna.rexpr]}}
   :plugins [[lein-antlr-plugin "0.1.0"]]
   :antlr-src-dir "src/antlr"
   :antlr-dest-dir "target/gen-src"

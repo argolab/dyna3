@@ -81,7 +81,7 @@
     resulting-rexpr)
   Object
   (toString ^String [this]
-    (str "Context {" rexprs "}")))
+    (str "Context {" value-map "}")))
 
 
 
@@ -107,14 +107,23 @@
          resulting-rexpr# (binding [*context* new-ctx#]
                             ~@args)]
      ;; there should be some exit operation which can check if there is anything which should happen with the grounding
-     (exit-context new-ctx# resulting-rexpr#)
-     ))
+     (exit-context new-ctx# resulting-rexpr#)))
+
+(defmacro bind-context-raw [val & args]
+  `(let [new-ctx# ~val]
+     (binding [*context* new-ctx#]
+       ~@args)))
+
+(defmacro bind-no-context [& args]
+  `(binding [*context* nil]  ;; not 100% sure if we can "unbind" the context, maybe should just make the "root" nil and just check the nil value
+     ~@args))
+
+(defn has-context [] (and (bound? #'*context*)
+                          (not (nil? *context*))))
 
 (defmacro need-context [& args]
-  `(if (bound? #'*context*)
+  `(if (has-context)
      (do ~@args)))
-
-(defn has-context [] (bound? #'*context*))
 
 
 

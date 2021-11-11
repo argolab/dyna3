@@ -15,10 +15,11 @@ help() {
     echo ""
     echo "Useage: $self [args] [file to start]"
     echo ""
-    echo "To install python package for dyna: $self install-python"
+    #echo "To install python package for dyna: $self install-python"
 }
 
 install_python() {
+    exit 1  # Todo????
     t=`mktemp -d`
     trap "rm -rf $t" EXIT
 
@@ -29,7 +30,7 @@ install_python() {
     popd
 }
 
-copy_right() {
+welcome_message() {
 echo "                _____   __     __  _   _                                     "
 echo "               |  __ \  \ \   / / | \ | |     /\                             "
 echo "               | |  | |  \ \_/ /  |  \| |    /  \                            "
@@ -149,7 +150,7 @@ done
 jvm_args+="-Xmx$memory "
 
 if [ -z "$dyna_args" ]; then
-   copy_right
+   welcome_message
 fi
 
 

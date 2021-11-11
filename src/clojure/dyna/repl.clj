@@ -4,7 +4,8 @@
   (:import [org.jline.reader LineReader LineReader$Option LineReaderBuilder EOFError])
 
   (:require [dyna.ast-to-rexpr :refer [eval-string print-parser-errors parse-string]])
-  (:require [dyna.system :as system]))
+  (:require [dyna.system :as system])
+  (:import [dyna DynaUserAssert]))
 
 
 ;; there should be some REPL which is based off jline or something which allows
@@ -51,5 +52,8 @@
         (let [input (.readLine line-reader "dyna> ")]
                                         ;(println "read input" input)
           (when-not (contains? #{"exit" "quit"} input)
-            (println (eval-string input :fragment-allowed false))
+            (try
+              (println (eval-string input :fragment-allowed false))
+              (catch DynaUserAssert e
+                (println (.getMessage e))))
             (recur)))))))

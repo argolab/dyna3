@@ -7,6 +7,7 @@
              ;          set-value! context-set-value!}
 
   (:require [clojure.set :refer [union difference]])
+  (:require [clojure.string :refer [trim]])
   (:require [aprint.core :refer [aprint]])
   (:import (dyna UnificationFailure))
   (:import (dyna DynaTerm)))
@@ -29,6 +30,7 @@
   (get-variables [this])  ;; get the variables from the current rexpr
   (get-children [this])
   (get-argument [this n])
+  (get-argument-name [this name])
   (get-arguments [this])
   (as-list [this]) ; use for printing out the structure
 
@@ -43,6 +45,10 @@
   ;; (visit-rexpr-children [this remap-function]) ;; this will visit any nested R-exprs on the expression, and return a new expression of the same type with
   ;(visit-all-children [this remap-function]) ;; this will visit
   )
+
+(let [old-remap remap-variables]
+  (defn remap-variables [this var-remap]
+    (context/bind-no-context (old-remap this var-remap))))
 
 
 
@@ -68,6 +74,17 @@
        (deftype-with-overrides ~(symbol rname) ~(vec (concat (quote [^int cached-hash-code ^:unsynchronized-mutable cached-exposed-variables])
                                                              (map cdar vargroup)))
          ~opt
+         clojure.lang.ILookup
+         (~'valAt ~'[this name not-found]
+          (case ~'name
+            ~@(apply concat (for [[var idx] (zipmap vargroup (range))]
+                              `(~idx ~(cdar var))))
+            ~@(apply concat (for [var vargroup]
+                              `(~(keyword (cdar var)) ~(cdar var))))
+            ~'not-found))
+         ~'(valAt [this name] (let [r (.valAt this name :not-found-result)]
+                                (assert (not= :not-found-result r))
+                                r))
          Rexpr
          ~'(primitive-rexpr [this] this) ;; this is a primitive expression so we are going to just always return ourselves
          (~'get-variables ~'[this]
@@ -166,7 +183,7 @@
                         `(= ~(cdar var) (get-argument ~'other ~idx))))))
 
          (hashCode [this] ~'cached-hash-code) ;; is this something that should only be computed on demand instead of when it is constructed?
-         (toString ~'[this] (str (as-list ~'this))))
+         (toString ~'[this] (trim (str (as-list ~'this)))))
 
        (defn ~(symbol (str "make-no-simp-" name))
          {:rexpr-constructor (quote ~name)
@@ -339,7 +356,7 @@
 (defn check-argument-unchecked [x] true)
 (defn check-argument-opaque-constant [x] ;; something that is not in the R-expr language
   (not (or (satisfies? Rexpr x) (satisfies? RexprValue x))))
-
+(defn check-argument-boolean [x] (boolean? x))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -378,8 +395,7 @@
 (defn is-non-empty-rexpr? [rexpr]
   (and (rexpr? rexpr)
        (or (and (is-multiplicity? rexpr) (> (get-argument rexpr 0) 0))
-           (and (is-disjunct? rexpr) (some is-non-empty-rexpr? (get-argument rexpr 0)))
-           )))
+           (and (is-disjunct? rexpr) (some is-non-empty-rexpr? (get-argument rexpr 0))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -405,12 +421,15 @@
 
 
 
-(def-base-rexpr proj [:hidden-var v
+(def-base-rexpr proj [:hidden-var var
                       :rexpr body])
 
 (def-base-rexpr aggregator [:str operator
                             :var result
                             :hidden-var incoming
+                            ;; if false, and the body is 0, then this will also be 0, otherwise this will be 1 with the identity
+                            ;; there are many optimizations that can take place when not-null-result is false
+                            :boolean not-null-result
                             :rexpr body])
 
 (def-base-rexpr if [:rexpr cond
@@ -550,7 +569,7 @@
                                (conj (get old functor-name #{}) rewriter)))))
 
 
-(defn make-rewriter-function [matcher body]
+(defn make-rewriter-function [matcher body from-file]
   ;; this needs to go through and define something where the different functions
   ;; are invoked on the relvant parts of the expression.  Because the
   ;; expressions have different field values, and are not positional, this means
@@ -560,7 +579,8 @@
         named-args (for [v (cdr matcher)]
                      (if (seq? v) ;; if this is something like (:ground v0) then we just want the v0 part
                        (cdar v)
-                       v))]
+                       v))
+        res (gensym 'res)]
 
     `(fn ~'[rexpr]
        (let [~(vec named-args) (get-arguments ~'rexpr)] ; unsure if using the global function vs the .func is better?
@@ -569,7 +589,11 @@
                               ~arg)) named-args (for [m (cdr matcher)]
                                                   (if (seq? m) (car m) m))))
            ; call the implementation of the rewrite function
-           (do ~body)
+           (let [~res (do ~body)]
+             ~(when system/print-rewrites-performed
+                `(when (and (not (nil? ~res)) (not= ~res ~'rexpr))
+                   (print ~(str "Performed rewrite:"  (meta from-file) "\nOLD: ") ~'rexpr "NEW: " ~res "CONTEXT:" (context/get-context))))
+             ~res)
            ; return that there is nothing
            nil)))))
 
@@ -581,7 +605,7 @@
         functor-name (car (:match kw-args))
         arity (if (= (cdar (:match kw-args)) :any) nil (- (count (:match kw-args)) 1))
         matcher (:match kw-args)
-        rewriter-function (make-rewriter-function matcher rewrite)]
+        rewriter-function (make-rewriter-function matcher rewrite &form)]
 
 
     ;; this is going to have to identify which expressions are going to do the matching, then it will find which expressions
@@ -603,7 +627,7 @@
         functor-name (car (:match kw-args))
         arity (if (= (cdar (:match kw-args)) :any) nil (- (count (:match kw-args)) 1))
         matcher (:matcher kw-args)
-        func (make-rewriter-function matcher func-body)]
+        func (make-rewriter-function matcher func-body &form)]
     ;; there needs to be some find iterator method
     ;; we could use the same methods to construct the function for getting the iterators
     ;; then it would have the same access methods.  I suppose that there could be some base methods
@@ -724,8 +748,8 @@
 
 
 ;; something that has a name first followed by a number of different unified expressions
-(def-rewrite-matcher :structured [rexpr]
-  (instance? structured-rexpr rexpr))
+;; (def-rewrite-matcher :structured [rexpr]
+;;   (instance? structured-rexpr rexpr))
 ;; this could have that there is some meta-data that is contained in the context
 ;; then this will have to look at those values
 
@@ -762,15 +786,15 @@
   (if (= A B) ;; these two structures are equal to each other, so we can just remove the expression
     (make-multiplicity 1)))
 
-(def-rewrite
-  :match (unify (:structured A) (:structured B))
-  ;; that this should run early, when invoked by the make method call.
-  ;; there should be some methods like
-  :run-at :construction
-  (if (or (not= (count A) (count B)) (not= (car A) (car B)))
-    (make-multiplicity 0) ;; meaning that the names on these expressions does not match.
-    (make-conjunct (doall (map make-unify (cdar A) (cdar B)))) ; then make a bunch of smaller unifications on the variables themselves directly
-    ))
+;; (def-rewrite
+;;   :match (unify (:structured A) (:structured B))
+;;   ;; that this should run early, when invoked by the make method call.
+;;   ;; there should be some methods like
+;;   :run-at :construction
+;;   (if (or (not= (count A) (count B)) (not= (car A) (car B)))
+;;     (make-multiplicity 0) ;; meaning that the names on these expressions does not match.
+;;     (make-conjunct (doall (map make-unify (cdar A) (cdar B)))) ; then make a bunch of smaller unifications on the variables themselves directly
+;;     ))
 
 (def-rewrite
   ;; the matched variable should have what value is the result of the matched expression.
@@ -786,16 +810,16 @@
   (make-unify B A))
 
 
-(def-rewrite
-  :match (unify (:structured B) (:ground A))
-  :run-at :construction
-  (let [Av (get-value A)]
-    (if (not (and (instance? DynaTerm Av)
-                  (= (.name ^DynaTerm B) (.name ^DynaTerm Av))
-                  (= (count (.arguments ^DynaTerm B)) (count (.arguments ^DynaTerm Av)))))
-      (make-multiplicity 0)
-      (make-conjunct (doall (map make-unify (.arguments ^DynaTerm B) (.arguments ^DynaTerm Av))))
-      )))
+;; (def-rewrite
+;;   :match (unify (:structured B) (:ground A))
+;;   :run-at :construction
+;;   (let [Av (get-value A)]
+;;     (if (not (and (instance? DynaTerm Av)
+;;                   (= (.name ^DynaTerm B) (.name ^DynaTerm Av))
+;;                   (= (count (.arguments ^DynaTerm B)) (count (.arguments ^DynaTerm Av)))))
+;;       (make-multiplicity 0)
+;;       (make-conjunct (doall (map make-unify (.arguments ^DynaTerm B) (.arguments ^DynaTerm Av))))
+;;       )))
 
 ; this should run at both, so there should be a :run-at :both option that can be selected
 (def-rewrite
@@ -885,53 +909,26 @@
   :run-at :construction
   (make-multiplicity 0))
 
+(def-rewrite
+  :match (disjunct ((fn [x] (some is-empty-rexpr? x)) children))
+  :run-at :construction
+  (make-disjunct (doall (filter #(not (is-empty-rexpr? %)) children))))
 
 (def-rewrite
   :match (disjunct (:rexpr-list children))
   :run-at :standard
-  (do
-    ;; this is going to have to construct a nested context for everything that it goes into, and then
-    (let [found (transient [])]
-      (doseq [c children]
-           (let [ctx (context/make-nested-context c)
-                 ns (context/bind-context ctx (simplify c))]
-             (if (not (is-empty-rexpr? ns))
-               (do ; then we want to save these rexpr into the list of objects that we have constructed
-                 (conj! found [ctx ns])
-                 )
-               )
-             )
-           )
-      (case (count found)
-        0 (make-multiplicity 0)
-        1 (do
-            ;; then this should just return this single item, there is no need to keep the disjunct aronud in this case
-            ;; this will have to move the context info up
-            (let [[ctx r] (get found 0)]
-              (context/add-context! (context/get-context) ctx)
-              r)
-            (assert false))
-        (do
-          ;; then there are two or more values, so this needs to intersect all of the contexts and
-          (let [same-context (reduce context/intersect (map car found))]
-            ;; the new intersection is going to be added to the global context
-            (context/add-context! (context/get-context) same-context)
-            (make-disjunct (doall (for [[ctx r] found]
-                                    ;; this is going to have to make an r-expr for the stuff that this wants to save behind
-                                    ;; in the case that there are bindings to a value, then this should
-                                    (assert false)
-                                    )))
-            )
-          (assert false)
-          ))
-      (if (empty? found)
-        (make-multiplicity 0)
-        (do
-          ;; then there is one or more found objects
-          ))
-      )
+  (let [outer-context (context/get-context)
+        new-children (doall (for [child children]
+                              (let [ctx (context/make-nested-context child)
+                                    new-rexpr (context/bind-context-raw ctx (simplify child))]
+                                [new-rexpr ctx (context/subtract ctx outer-context)])))
+        intersected-context (reduce context/intersect (map cddar new-children))
+        ]
+    ;; the intersected context is what can be passed up to the parent, we are going to have to make new contexts for the children
+    (debug-repl)
+    (???) ;; todo finish
+    ))
 
-    nil))
 
 (def-rewrite
   ;; this is proj(A, 0) -> 0
@@ -995,9 +992,10 @@
 
 
 (def-rewrite
-  :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:rexpr R))
+  :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:any not-null-result) (:rexpr R))
   (let [ctx (context/make-nested-context-introduce-variable R incoming-variable)
         nR (context/bind-context ctx (simplify R))]
+    (assert (= false not-null-result))
     (if (and (context/is-bound? ctx incoming-variable) (= (make-multiplicity 1) nR))
       (make-unify result-variable (make-constant (context/get-value ctx incoming-variable)))
       (do

@@ -1,16 +1,17 @@
 (ns dyna.meta-programming
-
+  (:reuqire [dyna.rexpr :refer :all])
   )
 
+(comment
 
-;; there should be some meta-programming operations
+  ;; there should be some meta-programming operations
 
 
-(def-base-rexpr indirect-user-call [:var indirect-user-var
-                                    :var-list argument-vars
-                                    :var result])
+  (def-base-rexpr indirect-user-call [:var indirect-user-var
+                                      :var-list argument-vars
+                                      :var result])
 
-(doseq [i (range 1 10)]
+(doseq [i (range 1 50)]
   (let [vars (map #(symbol (str "v" %)) (range 1 (+ 1 i)))]
     (eval `(def-user-term "$call" ~i (make-indirect-user-call ~'v0 ~(vec (drop-last vars)) ~(last vars))))))
 
@@ -88,3 +89,5 @@
   ;; call, then it should have that it reports some warning to the user so if
   ;; there is some missmatch between arguments.
   ;;
+
+)

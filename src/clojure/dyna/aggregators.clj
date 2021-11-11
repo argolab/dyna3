@@ -2,8 +2,7 @@
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.rexpr-builtins :refer [make-lessthan make-lessthan-eq]])
   (:require [dyna.term :refer :all])
-  (:import (dyna UnificationFailure))
-  (:import (dyna DynaTerm)))
+  (:import (dyna UnificationFailure DynaTerm DynaUserError)))
 
 (def aggregators (atom {}))
 
@@ -39,6 +38,12 @@
                (throw (UnificationFailure. "The equals aggregator (=) requires only one contribution")))
              a))
 
+;; used if there are multiple aggregators on a single rule which need to get combined together
+;; this will throw an exception if we attempt to combine multiple expressions together at once
+;; though maybe this should just be some error state that propagates around as a user value or something instead of an exception
+(def-aggregator "only_one_contrib"
+  :combine (fn [a b]
+             (throw (DynaUserError. "multiple aggregators on the same rule"))))
 
 (defn- get-aggregated-value [v]
   (if (and (instance? DynaTerm v)

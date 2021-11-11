@@ -2,6 +2,7 @@
   (:require [dyna.utils :refer :all])
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.system :as system])
+  (:require [dyna.context :as context])
   (:require [dyna.assumptions :refer [invalidate! make-assumption depend-on-assumption]])
   (:import [dyna.rexpr user-call-rexpr]))
 
@@ -86,12 +87,50 @@
 
 
 (defn get-user-term [name]
-  (let [r (or (get @system/system-defined-user-term [(:name name) (:arity name)])
-              (get @system/user-defined-terms name))
-        another-file (:imported-from-another-file r)]
-    (if another-file
-      (recur another-file)
-      r)))
+  (let [sys (get @system/system-defined-user-term [(:name name) (:arity name)])]
+    (if-not (nil? sys)
+      {:builtin-def true
+       :rexpr sys}
+      (let [u (get @system/user-defined-terms name)
+            another-file (:imported-from-another-file u)]
+        (if another-file
+          (recur another-file)
+          u)))))
+
+(defn- combine-user-rexprs [term-bodies]
+  ;; this will combine multiple rexprs from a uesr's definition together
+  ;; this should
+  (context/bind-no-context ;; this is something that should be the same regardless of whatever nested context we are in
+   (if (= 1 (count term-bodies))
+     (:rexpr (first term-bodies))
+     (let [out-vars (into #{} (map #(:result (:rexpr %)) term-bodies))
+           grouped (group-by (fn [rexpr]
+                               (if (is-aggregator? rexpr)
+                                 (:operator rexpr)))
+                             (map :rexpr term-bodies))
+           strip-agg (fn [in-var r]
+                       (if (is-aggregator? r)
+                         (remap-variables (:body r)
+                                          {(:incoming r) in-var})
+                         r))
+           make-aggs (fn [op out-var in-var rexprs]
+                       (make-aggregator op out-var in-var false (make-disjunct (doall rexprs))))
+
+           groupped-aggs (into {} (for [[op children] grouped]
+                                    (if (= 1 (count children))
+                                      (first children)
+                                      (let [new-in (make-variable (gensym 'comb_incoming_var))
+                                            new-children (for [c children]
+                                                           (strip-agg new-in c))]
+                                        [op (make-aggs op (first out-vars) new-in new-children)]))))
+           ]
+       ;; if there is more than 1 group, then that means there are multiple aggregators, in which case we are going to have to have "two levels" of
+       ;; aggregation created as a result.  This will
+       (if (> (count groupped-aggs) 1)
+         (let [intermediate-var (make-variable (gensym 'comb2_incoming_var))]
+           (make-aggs "only_one_contrib" (first out-vars) intermediate-var
+                      (map #(remap-variables % {(first out-vars) intermediate-var}) (vals groupped-aggs))))
+         (first (vals groupped-aggs)))))))
 
 
 (def-rewrite
@@ -99,15 +138,14 @@
   (let [ut (get-user-term name)]
     (when ut  ;; this should really be a warning or something in the case that it can't be found. Though we might also need to create some assumption that nothing is defined...
       (let [rexprs (:rexprs ut)
-            rexpr (do
-                    (assert (= (count rexprs) 1)) ;; todo, this is going to need to combine the R-exprs in the case that there are multiple.  This means that the user expression will have possibly many aggregators, as well as
-                    (:rexpr (first rexprs)))
+            rexpr (combine-user-rexprs rexprs)
             rewrite-user-call-depth (fn rucd [rexpr]
-                                      (when-not (rexpr? rexpr)
-                                        (debug-repl))
+                                      (dyna-assert (rexpr? rexpr))
                                       (if (is-user-call? rexpr)
-                                        (do
-                                          (debug-repl))
+                                        (let [[lname lvar-map lcall-depth] (get-arguments rexpr)
+                                              new-call (make-user-call lname lvar-map (+ call-depth lcall-depth 1))]
+                                          (debug-repl)
+                                          new-call)
                                         (rewrite-rexpr-children rexpr rucd)))
             call-depth-rr (rewrite-user-call-depth rexpr)
             variable-map-rr (remap-variables call-depth-rr var-map)]
