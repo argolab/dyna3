@@ -159,3 +159,8 @@
   `(when-not ~expression
      (debug-repl)
      (assert false)))
+
+
+(defmacro dyna-debug [& args]
+  (if (java.lang.Boolean/getBoolean "dyna.debug")
+    `(do ~@args)))

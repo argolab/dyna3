@@ -1,5 +1,6 @@
 (ns dyna.user-defined-terms
   (:require [dyna.utils :refer :all])
+  (:require [dyna.base-protocols :refer :all])
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
@@ -114,7 +115,9 @@
                                           {(:incoming r) in-var})
                          r))
            make-aggs (fn [op out-var in-var rexprs]
-                       (make-aggregator op out-var in-var false (make-disjunct (doall rexprs))))
+                       (make-aggregator op out-var in-var
+                                        true ;; the body is conjunctive, meaning that we can move constraints out
+                                        (make-disjunct (doall rexprs))))
 
            groupped-aggs (into {} (for [[op children] grouped]
                                     (if (= 1 (count children))

@@ -1,11 +1,8 @@
 (ns dyna.rexpr
   (:require [dyna.utils :refer :all])
+  (:require [dyna.base-protocols :refer :all])
   (:require [dyna.context :as context])
   (:require [dyna.system :as system])
-             ;:rename '{get-value context-get-value,
-             ;          is-bound? context-is-bound?
-             ;          set-value! context-set-value!}
-
   (:require [clojure.set :refer [union difference]])
   (:require [clojure.string :refer [trim]])
   (:require [aprint.core :refer [aprint]])
@@ -22,39 +19,10 @@
 (defmethod print-method DynaTerm [^DynaTerm this ^java.io.Writer w]
   (.write w (.toString this)))
 
-;(defn simplify-construct [r] r)
+;; (let [old-remap remap-variables]
+;;   (defn remap-variables [this var-remap]
+;;     (context/bind-no-context (old-remap this var-remap))))
 
-(defprotocol Rexpr
-  (primitive-rexpr [this]) ;; return a primitive r-expr for the expression
-  ;;(replace-expressions [this expressions-map]) ;; replace a given nested expression
-  (get-variables [this])  ;; get the variables from the current rexpr
-  (get-children [this])
-  (get-argument [this n])
-  (get-argument-name [this name])
-  (get-arguments [this])
-  (as-list [this]) ; use for printing out the structure
-
-  (exposed-variables [this])        ; return variables values that are exposed externally (so hide aggregators and proj)
-
-  ;; these functions can recursivy walk the R-expr and rewmap the different variables which appear
-  ;; if there is something that
-
-
-  (remap-variables [this variable-renaming-map])
-  (rewrite-rexpr-children [this remap-function])
-  ;; (visit-rexpr-children [this remap-function]) ;; this will visit any nested R-exprs on the expression, and return a new expression of the same type with
-  ;(visit-all-children [this remap-function]) ;; this will visit
-  )
-
-(let [old-remap remap-variables]
-  (defn remap-variables [this var-remap]
-    (context/bind-no-context (old-remap this var-remap))))
-
-
-
-;; the annotation on a variable can be one of
-;;; :var, :rexpr, :var-list, :rexpr-list
-;;; other annotations are ignored for the time being
 
 (def rexpr-containers (atom #{}))
 (def rexpr-constructors (atom {}))
@@ -133,26 +101,34 @@
                                                  #(if (= :hidden-var (car %)) (cdar %))
                                                  vargroup)})))))
          (~'remap-variables ~'[this variable-map]
-          (if (empty? ~'variable-map)
-            ~'this ;; in this case, there are no variables in the expression to rename, so don't do any replacements and just return our selves
-            (let ~(vec (apply concat (for [v vargroup]
-                                       [(symbol (str "new-" (cdar v)))
-                                        (case (car v)
-                                          :var `(get ~'variable-map ~(cdar v) ~(cdar v))
-                                          :value `(get ~'variable-map ~(cdar v) ~(cdar v))
-                                          :hidden-var `(get ~'variable-map ~(cdar v) ~(cdar v))
-                                          :var-list `(map #(get ~'variable-map % %) ~(cdar v))
-                                          :var-map `(into {} (for [~'[kk vv] ~(cdar v)] [~'kk (get ~'variable-map ~'vv ~'vv)]))
-                                          :rexpr `(remap-variables ~(cdar v) ~'variable-map)
-                                          :rexpr-list `(map #(remap-variables % ~'variable-map) ~(cdar v))
-                                          (cdar v) ;; the default is that this is the same
-                                          )])))
-              (if (and ~@(for [v vargroup]
-                           `(= ~(cdar v) ~(symbol (str "new-" (cdar v))))))
-                ~'this ;; then there was no change, so we can just return ourself
-                ;; there was some change, so we are going to need to create a new object with the new values
-                (~(symbol (str "make-" name)) ~@(for [v vargroup]
-                                                          (symbol (str "new-" (cdar v)))))))))
+          (context/bind-no-context  ;; this is annoying, this will want to be
+                                    ;; something that we can avoid doing
+                                    ;; multiple times.  Which rewrites that we
+                                    ;; can perform should be something that is
+                                    ;; collected ahead of time, so there will be
+                                    ;; some rewrites which are "renaming-safe",
+                                    ;; or it will want to denote that it
+                                    ;; requires a context
+           (if (empty? ~'variable-map)
+             ~'this ;; in this case, there are no variables in the expression to rename, so don't do any replacements and just return our selves
+             (let ~(vec (apply concat (for [v vargroup]
+                                        [(symbol (str "new-" (cdar v)))
+                                         (case (car v)
+                                           :var `(get ~'variable-map ~(cdar v) ~(cdar v))
+                                           :value `(get ~'variable-map ~(cdar v) ~(cdar v))
+                                           :hidden-var `(get ~'variable-map ~(cdar v) ~(cdar v))
+                                           :var-list `(map #(get ~'variable-map % %) ~(cdar v))
+                                           :var-map `(into {} (for [~'[kk vv] ~(cdar v)] [~'kk (get ~'variable-map ~'vv ~'vv)]))
+                                           :rexpr `(remap-variables ~(cdar v) ~'variable-map)
+                                           :rexpr-list `(map #(remap-variables % ~'variable-map) ~(cdar v))
+                                           (cdar v) ;; the default is that this is the same
+                                           )])))
+               (if (and ~@(for [v vargroup]
+                            `(= ~(cdar v) ~(symbol (str "new-" (cdar v))))))
+                 ~'this ;; then there was no change, so we can just return ourself
+                 ;; there was some change, so we are going to need to create a new object with the new values
+                 (~(symbol (str "make-" name)) ~@(for [v vargroup]
+                                                   (symbol (str "new-" (cdar v))))))))))
          (~'rewrite-rexpr-children ~'[this remap-function]
           (let ~(vec (apply concat
                             (for [v vargroup]
@@ -231,11 +207,11 @@
          (aprint (as-list ~'this) ~'w)))))
 
 
-(defprotocol RexprValue
-  (get-value [this])
-  (set-value! [this value])
-  (is-bound? [this])
-  (all-variables [this]))
+;; (defprotocol RexprValue
+;;   (get-value [this])
+;;   (set-value! [this value])
+;;   (is-bound? [this])
+;;   (all-variables [this]))
 
 ;; this is the value of the object itself
 ;; this will want to keep a reference to which dynabase it was constructed in, as we might be using this
@@ -256,10 +232,12 @@
 
 (defrecord variable-rexpr [varname]
   RexprValue
-  (get-value [this] (context/get-value (context/get-context) this))
+  (get-value [this] (ctx-get-value (context/get-context) this))
+  (get-value-in-context [this ctx] (ctx-get-value ctx this))
   (set-value! [this value]
-    (context/set-value! (context/get-context) this value))
-  (is-bound? [this]  (context/need-context (context/is-bound? (context/get-context) this)))
+    (ctx-set-value! (context/get-context) this value))
+  (is-bound? [this]  (context/need-context (ctx-is-bound? (context/get-context) this)))
+  (is-bound-in-context? [this context] (ctx-is-bound? context this))
   (all-variables [this] #{this})
   Object
   (toString [this] (str "(variable " varname ")")))
@@ -275,10 +253,12 @@
 (defrecord constant-value-rexpr [value]
   RexprValue
   (get-value [this] value)
+  (get-value-in-context [this ctx] value)
   (set-value! [this v]
     (if (not= v value)
       (throw (UnificationFailure. "can not assign value to constant"))))
   (is-bound? [this] true)
+  (is-bound-in-context? [this context] true)
   (all-variables [this] #{})
   Object
   (toString [this] (str "(constant " value ")")))
@@ -305,6 +285,8 @@
     ;; this is going to have to construct the structure for this
     ;; which means that it has to get all of the values, and then flatten it to a structure
     (make-structure name (doall (map get-value arguments))))
+  (get-value-in-context [this ctx]
+    (make-structure name (doall (map #(get-value-in-context % ctx) arguments))))
 
   (set-value! [this v]
     (if (or (not= (car v) name) (not= (+ 1 (count arguments)) (count v)))
@@ -314,6 +296,8 @@
 
   (is-bound? [this]
     (context/need-context (every? is-bound? arguments)))
+  (is-bound-in-context? [this context]
+    (every? #(is-bound-in-context? % context) arguments))
   (all-variables [this] (apply union (map all-variables arguments)))
   Object
   (toString [this] (str "(structure " name " " arguments ")")))
@@ -361,7 +345,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-(def-base-rexpr multiplicity [:mult m])
+(def-base-rexpr multiplicity [:mult mult])
 
 ;; there is meta information on this which needs to be carried forward
 (let [prev make-multiplicity
@@ -427,9 +411,8 @@
 (def-base-rexpr aggregator [:str operator
                             :var result
                             :hidden-var incoming
-                            ;; if false, and the body is 0, then this will also be 0, otherwise this will be 1 with the identity
-                            ;; there are many optimizations that can take place when not-null-result is false
-                            :boolean not-null-result
+                            ;; if the body-is-conjunctive == true, then there are additional optimizations that we can perform
+                            :boolean body-is-conjunctive
                             :rexpr body])
 
 (def-base-rexpr if [:rexpr cond
@@ -650,7 +633,7 @@
 (defn is-variable-set? [variable]
   (or (instance? constant-value-rexpr variable)
       (context/need-context
-       (context/is-bound? (context/get-context) variable))))
+       (ctx-is-bound? (context/get-context) variable))))
 
 (defn is-constant? [variable]
   (instance? constant-value-rexpr variable))
@@ -658,13 +641,13 @@
 (defn get-variable-value [variable]
   (if (instance? constant-value-rexpr variable)
     (.value ^constant-value-rexpr variable)
-    (context/get-value (context/get-context) variable)))
+    (ctx-get-value (context/get-context) variable)))
 
 
 (defn simplify
   [rexpr]
   ;; this should just match the given type and identify if there are rewrites defined for this
-
+  (assert (context/has-context))
   (let [typ (type rexpr)
         rrs (get @rexpr-rewrites typ)]
     (if (nil? rrs)
@@ -710,7 +693,7 @@
         res (context/bind-context ctx
                                   (simplify-fully rexpr))]
     ;; there needs to be a better way to get the bindigns to variables rather than doing this "hack" to get the map
-    (system/query-output query-id (get (context/get-inner-values ctx) 3) res)))
+    (system/query-output query-id (get (ctx-get-inner-values ctx) 3) res)))
 
 
 (defn find-iterators [rexpr]
@@ -915,19 +898,36 @@
   (make-disjunct (doall (filter #(not (is-empty-rexpr? %)) children))))
 
 (def-rewrite
+  ;; if there are two (or more) multiplicies in the disjunct, combine the values together
+  :match (disjunct ((fn [x] (> (count (filter is-multiplicity? x)) 1)) children))
+  :run-at :construction
+  (let [cnt (atom 0)
+        others (doall (filter (fn [x] (if (is-multiplicity? x)
+                                        (do (swap! cnt + (:mult x))
+                                            nil)
+                                        x))
+                              children))]
+    (if (not= @cnt 0)
+      (make-disjunct (conj others (make-multiplicity @cnt)))
+      (make-disjunct others))))
+
+
+(def-rewrite
   :match (disjunct (:rexpr-list children))
   :run-at :standard
   (let [outer-context (context/get-context)
         new-children (doall (for [child children]
-                              (let [ctx (context/make-nested-context child)
+                              (let [ctx (context/make-nested-context-disjunct child)
                                     new-rexpr (context/bind-context-raw ctx (simplify child))]
-                                [new-rexpr ctx (context/subtract ctx outer-context)])))
-        intersected-context (reduce context/intersect (map cddar new-children))
-        ]
+                                [new-rexpr ctx])))
+        intersected-ctx (reduce ctx-intersect (map second new-children))
+        children-with-contexts (doall
+                                (for [[child-rexpr child-ctx] new-children]
+                                  (ctx-exit-context (ctx-subtract child-ctx intersected-ctx)
+                                                        child-rexpr)))]
     ;; the intersected context is what can be passed up to the parent, we are going to have to make new contexts for the children
-    (debug-repl)
-    (???) ;; todo finish
-    ))
+    (ctx-add-context! outer-context intersected-ctx)
+    (make-disjunct children-with-contexts)))
 
 
 (def-rewrite
@@ -947,13 +947,13 @@
   :match (proj (:variable A) (:rexpr R))
   :run-at :standard
 
-  (let [ctx (context/make-nested-context-introduce-variable R A)
+  (let [ctx (context/make-nested-context-proj R [A])
         nR (context/bind-context ctx
                                  (simplify R))]
-    (if (context/is-bound? ctx A)
+    (if (ctx-is-bound? ctx A)
       ;; if there is some unified expression, it would be nice if we could also attempt to identify if some expression is unified together
       ;; in which case we can remove the proj using the expression of
-      (let [var-val (context/get-value ctx A)
+      (let [var-val (ctx-get-value ctx A)
             replaced-R (remap-variables nR {A (make-constant var-val)}) ;; this is a bit annoying as it is going through and doing replacements
             ;; vvv (context/get-inner-values ctx)
             ;; all-bindings (context/get-all-bindings ctx)
@@ -978,7 +978,7 @@
 (def-rewrite
   :match (if (:rexpr A) (:rexpr B) (:rexpr C))
   :run-at :standard
-  (make-if (let [ctx (context/make-nested-context A)]
+  (make-if (let [ctx (context/make-nested-context-if-conditional A)]
              (context/bind-context ctx (simplify A)))
            B C))
 
@@ -989,17 +989,3 @@
         s (get @system/system-defined-user-term n)]
     (when s
       (remap-variables s var-map))))
-
-
-(def-rewrite
-  :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:any not-null-result) (:rexpr R))
-  (let [ctx (context/make-nested-context-introduce-variable R incoming-variable)
-        nR (context/bind-context ctx (simplify R))]
-    (assert (= false not-null-result))
-    (if (and (context/is-bound? ctx incoming-variable) (= (make-multiplicity 1) nR))
-      (make-unify result-variable (make-constant (context/get-value ctx incoming-variable)))
-      (do
-        ;; if there is more stuff, then this will which of the expressions corresponds with it having either higher multiplicies, or more disjunctions
-        ;; that need to get handled here
-        (assert (not (context/is-bound? ctx incoming-variable))) ;; todo
-        (make-aggregator operator result-variable incoming-variable nR)))))

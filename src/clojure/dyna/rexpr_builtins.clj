@@ -3,6 +3,7 @@
 
 (ns dyna.rexpr-builtins
   (:require [dyna.utils :refer :all])
+  (:require [dyna.base-protocols :refer :all])
   (:require [dyna.rexpr :refer :all])
   ;(:require [dyna.rewrites :refer [def-rewrite]])
   (:require [clojure.set :refer [union]])

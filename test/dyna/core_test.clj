@@ -1,9 +1,11 @@
 (ns dyna.core-test
   (:require [clojure.test :refer :all]
             [dyna.core :refer :all]
+            [dyna.base-protocols :refer :all]
             [dyna.rexpr :refer :all]
             [dyna.context :as context]
-            [dyna.rexpr-builtins :refer :all]))
+            [dyna.rexpr-builtins :refer :all]
+            [dyna.utils :refer [debug-repl]]))
 
 
 (deftest basic-rexpr
@@ -21,7 +23,7 @@
         ;r3 (make-unify (make-variable 'var1) (make-constant 5))
 
     (is (= r2 r3))
-    (is (= 5 (context/get-value ctx (make-variable 'var1))))
+    (is (= 5 (ctx-get-value ctx (make-variable 'var1))))
     (println ctx)))
 
 
@@ -34,9 +36,56 @@
         r2 (context/bind-context ctx (simplify-fully rexpr))
         r3 (make-multiplicity 1)]
     (is (= r2 r3))
-    (is (= (context/get-value ctx (make-variable 'v1)) 5))
-    (is (= (context/get-value ctx (make-variable 'v2)) 7))))
+    (is (= (ctx-get-value ctx (make-variable 'v1)) 5))
+    (is (= (ctx-get-value ctx (make-variable 'v2)) 7))))
 
+
+(deftest basic-disjunct
+  (let [rexpr (make-disjunct
+               [(make-unify (make-variable 'foo) (make-constant 123))
+                (make-unify (make-variable 'foo) (make-constant 123))])
+        ctx (context/make-empty-context rexpr)
+        r2 (context/bind-context ctx (simplify-fully rexpr))
+        r3 (make-multiplicity 2)]
+    (is (= r2 r3))
+    (is (= (ctx-get-value ctx (make-variable 'foo)) 123))))
+
+(deftest basic-aggregator1
+  (let [rexpr (make-aggregator "+="
+                               (make-variable 'out)
+                               (make-variable 'agg-in)
+                               true
+                               (make-unify (make-variable 'agg-in) (make-constant 777)))
+        ctx (context/make-empty-context rexpr)
+        r2 (context/bind-context ctx (simplify-fully rexpr))]
+    (is (= (make-multiplicity 1) r2))
+    (is (= (ctx-get-value ctx (make-variable 'out)) 777))))
+
+(deftest basic-aggregator2
+  (let [rexpr (make-aggregator "+="
+                               (make-variable 'out)
+                               (make-variable 'agg-in)
+                               true
+                               (make-conjunct [(make-multiplicity 2)
+                                               (make-unify (make-variable 'agg-in)
+                                                           (make-constant 333))]))
+      ctx (context/make-empty-context rexpr)
+        r2 (context/bind-context ctx (simplify-fully rexpr))]
+    (is (= (make-multiplicity 1) r2))
+    (is (= (ctx-get-value ctx (make-variable 'out)) 666))))
+
+(deftest basic-aggregator3
+  (let [rexpr (make-aggregator "+="
+                               (make-variable 'out)
+                               (make-variable 'agg-in)
+                               true
+                               (make-disjunct
+                                [(make-unify (make-variable 'agg-in) (make-constant 111))
+                                 (make-unify (make-variable 'agg-in) (make-constant 666))]))
+        ctx (context/make-empty-context rexpr)
+        r2 (context/bind-context ctx (simplify-fully rexpr))]
+    (is (= (make-multiplicity 1) r2))
+    (is (= (ctx-get-value ctx (make-variable 'out)) 777))))
 
 ;; (deftest basic-disjunct
 ;;   (let [rexpr (make-disjunct

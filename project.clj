@@ -23,10 +23,13 @@
   :plugins [[lein-antlr-plugin "0.1.0"]]
   :antlr-src-dir "src/antlr"
   :antlr-dest-dir "target/gen-src"
-  :aliases {"compile" ["do" ["antlr"] ["javac"] "compile"]
-            "uberjar" ["do" ["compile"] "uberjar"]}
+
+  ;; :aliases {"compile" ["do" ["antlr"] ["javac"] "compile"]
+  ;;           "uberjar" ["do" ["compile"] "uberjar"]}
+
+
   :main dyna.DynaMain
   :global-vars {;*warn-on-reflection* true  ;; useful for identifying where it uses clojure's reflection which is slow...
-                ;*unchecked-math* :warn-on-boxed ;; boxed math is slow9
+                                        ;*unchecked-math* :warn-on-boxed ;; boxed math is slow9
                 }
   )

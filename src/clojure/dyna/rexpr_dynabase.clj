@@ -1,5 +1,6 @@
 (ns dyna.rexpr-dynabase
   (:require [dyna.utils :refer :all])
+  (:require [dyna.base-protocols :refer :all])
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.user-defined-terms :refer [def-user-term]]))
 

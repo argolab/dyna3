@@ -8,8 +8,8 @@
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.rexpr-builtins :refer :all])
   (:require [dyna.context :as context])
+  (:require [dyna.aggregators])
   (:require [dyna.rexpr-dynabase])
-                                        ;(:require [dyna.parser_interface :refer [parse-string]])
   (:require [dyna.ast-to-rexpr :refer [parse-string
                                        import-file-url
                                        eval-string

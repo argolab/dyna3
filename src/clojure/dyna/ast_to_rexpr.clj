@@ -1,5 +1,6 @@
 (ns dyna.ast-to-rexpr
   (:require [dyna.utils :refer :all])
+  (:require [dyna.base-protocols :refer :all])
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.rexpr-dynabase :refer :all])
   (:require [dyna.system :as system])
@@ -347,7 +348,7 @@
                                                 rexpr (make-aggregator aggregator
                                                                        aggregator-result-variable
                                                                        incoming-variable
-                                                                       false ;; if this is false, then this should also be false
+                                                                       true ;; meaning that the body is conjunctive, so if the result of the body is 0, the the aggregator will be 0 also (instead of identity)
                                                                        (make-proj-many (vals project-variables-map)
                                                                                        body-rexpr))]
                                             (add-to-user-term source-file dynabase functor-name functor-arity
