@@ -1,6 +1,7 @@
 (ns dyna.rexpr
   (:require [dyna.utils :refer :all])
   (:require [dyna.base-protocols :refer :all])
+  (:require [dyna.rexpr-constructors])
   (:require [dyna.context :as context])
   (:require [dyna.system :as system])
   (:require [clojure.set :refer [union difference]])
@@ -204,7 +205,11 @@
        (defn ~(symbol (str "is-" name "?")) ~'[rexpr]
          (instance? ~(symbol rname) ~'rexpr))
        (defmethod print-method ~(symbol rname) ~'[this ^java.io.Writer w]
-         (aprint (as-list ~'this) ~'w)))))
+         (aprint (as-list ~'this) ~'w))
+       (intern 'dyna.rexpr-constructors '~(symbol (str "make-" name)) ~(symbol (str "make-" name)))
+       (intern 'dyna.rexpr-constructors '~(symbol (str "make-no-simp-" name)) ~(symbol (str "make-no-simp-" name)))
+       (intern 'dyna.rexpr-constructors '~(symbol (str "is-" name "?")) ~(symbol (str "is-" name "?")))
+       )))
 
 
 ;; (defprotocol RexprValue
@@ -244,6 +249,7 @@
 
 (defn make-variable [varname]
   (variable-rexpr. varname))
+(intern 'dyna.rexpr-constructors 'make-variable make-variable)
 
 (defmethod print-method variable-rexpr [^variable-rexpr this ^java.io.Writer w]
   (.write w (str "(variable " (.varname this) ")")))
@@ -267,6 +273,7 @@
 
 (defn make-constant [val]
   (constant-value-rexpr. val))
+(intern 'dyna.rexpr-constructors 'make-constant make-constant)
 
 (let [tv (make-constant true)
       fv (make-constant false)]
@@ -649,14 +656,16 @@
   ;; this should just match the given type and identify if there are rewrites defined for this
   (assert (context/has-context))
   (let [typ (type rexpr)
-        rrs (get @rexpr-rewrites typ)]
-    (if (nil? rrs)
-      rexpr ;; there is nothing here so we are just going to return the r-expr unmodified
-      (or (first (filter (complement nil?)
-                         (for [rw rrs]
-                           (let [res (rw rexpr)]
-                             (if (not= rexpr res) res)))))
-          rexpr))))
+        rrs (get @rexpr-rewrites typ)
+        ret (if (nil? rrs)
+              rexpr ;; there is nothing here so we are just going to return the r-expr unmodified
+              (or (first (filter (complement nil?)
+                                 (for [rw rrs]
+                                   (let [res (rw rexpr)]
+                                 (if (not= rexpr res) res)))))
+                  rexpr))]
+    (ctx-add-rexpr! (context/get-context) ret)  ;; add the R-expr to the context as this is a conjunct that we might want to use
+    ret))
 
 (defn simplify-construct [rexpr]
   (let [typ (type rexpr)
@@ -922,10 +931,11 @@
                                 [new-rexpr ctx])))
         intersected-ctx (reduce ctx-intersect (map second new-children))
         children-with-contexts (doall
-                                (for [[child-rexpr child-ctx] new-children]
-                                  (ctx-exit-context (ctx-subtract child-ctx intersected-ctx)
-                                                        child-rexpr)))]
+                                 (for [[child-rexpr child-ctx] new-children]
+                                   (ctx-exit-context (ctx-subtract child-ctx intersected-ctx)
+                                                     child-rexpr)))]
     ;; the intersected context is what can be passed up to the parent, we are going to have to make new contexts for the children
+    (debug-repl)
     (ctx-add-context! outer-context intersected-ctx)
     (make-disjunct children-with-contexts)))
 

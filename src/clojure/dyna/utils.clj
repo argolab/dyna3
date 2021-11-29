@@ -54,12 +54,23 @@
   "Starts a REPL with the local bindings available."
   ([] `(debug-repl "dr"))
   ([prompt]
-   `(let [~'local-bindings (debugger-get-local-bindings)]
+   `(let [local-bindings# (debugger-get-local-bindings)]
       (.printStackTrace (Throwable. "Entering Debugger") System/out)
-      (aprint ~'local-bindings)
+      (aprint local-bindings#)
       (clojure.main/repl
-         :prompt #(print ~prompt "=> ")
-         :eval (partial ~eval-with-locals ~'local-bindings)))))
+       :read (fn [fresh-request# exit-request#]
+               (let [res# (clojure.main/repl-read fresh-request# exit-request#)]
+                 ;(println "===========\n" res# "\n" (type res#) "\n==========")
+                 (cond (contains? ~'#{'quit 'exit} res#) (do (System/exit 0)
+                                                        fresh-request#)
+                       (contains? ~'#{'c 'continue} res#) exit-request#  ;; exit the eval loop
+                       (contains? ~'#{'bt 'backtrace} res#) (do (.printStackTrace (Throwable. "Entering Debugger") System/out)
+                                                              fresh-request#)
+                       (contains? ~'#{'locals} res#) (do (aprint local-bindings#)
+                                                         fresh-request#)
+                       :else res#)))
+       :prompt #(print ~prompt "=> ")
+       :eval (partial ~eval-with-locals local-bindings#)))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

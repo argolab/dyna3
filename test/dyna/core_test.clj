@@ -50,6 +50,16 @@
     (is (= r2 r3))
     (is (= (ctx-get-value ctx (make-variable 'foo)) 123))))
 
+(deftest basic-disjunct2
+  ;; these can not be combined because the values of the variables are different
+  (let [rexpr (make-disjunct
+               [(make-unify (make-variable 'foo) (make-constant 123))
+                (make-unify (make-variable 'foo) (make-constant 456))])
+        ctx (context/make-empty-context rexpr)
+        r2 (context/bind-context ctx (simplify-fully rexpr))]
+    (is (= rexpr r2))
+    (is (not (is-bound-in-context? (make-variable 'foo) ctx)))))
+
 (deftest basic-aggregator1
   (let [rexpr (make-aggregator "+="
                                (make-variable 'out)
@@ -69,7 +79,7 @@
                                (make-conjunct [(make-multiplicity 2)
                                                (make-unify (make-variable 'agg-in)
                                                            (make-constant 333))]))
-      ctx (context/make-empty-context rexpr)
+        ctx (context/make-empty-context rexpr)
         r2 (context/bind-context ctx (simplify-fully rexpr))]
     (is (= (make-multiplicity 1) r2))
     (is (= (ctx-get-value ctx (make-variable 'out)) 666))))
