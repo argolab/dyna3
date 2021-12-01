@@ -99,6 +99,18 @@
                                (if (contains? value-map proj-var)
                                  (???) ;; then this should propagate the value of this variable into the R-expr and remove this projection.  but that should get handled elsewhere.
                                  resulting-rexpr))
+      (= context-kind :aggregator-conjunctive) (let [incoming-var (:incoming root-rexpr)]
+                                                 (assert (:body-is-conjunctive root-rexpr)) ;; double check that the root is conjunctive
+                                                 ;; any constraints which do not reference the incoming variable can be added to the outer context
+                                                 (when-not (nil? parent)
+                                                   (doseq [[var val] value-map]
+                                                     (when (not= incoming-var var)
+                                                       (ctx-set-value! parent var val)))
+                                                   (when full-context
+                                                     (doseq [rx rexprs]
+                                                       (when-not (contains? (get-variables rx) incoming-var)
+                                                         (ctx-add-rexpr! parent rx)))))
+                                                 resulting-rexpr)
       :else (do
               (debug-repl)
               (???))  ;; todo: other kinds of contexts which are going

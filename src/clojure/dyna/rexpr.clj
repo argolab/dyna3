@@ -935,7 +935,6 @@
                                    (ctx-exit-context (ctx-subtract child-ctx intersected-ctx)
                                                      child-rexpr)))]
     ;; the intersected context is what can be passed up to the parent, we are going to have to make new contexts for the children
-    (debug-repl)
     (ctx-add-context! outer-context intersected-ctx)
     (make-disjunct children-with-contexts)))
 

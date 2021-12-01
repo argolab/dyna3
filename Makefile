@@ -32,3 +32,10 @@ $(JAR_TARGET): $(SOURCE)
 $(TARGET): $(JAR_TARGET) standalone-header.sh
 	cat standalone-header.sh $(JAR_TARGET) > $(TARGET)
 	chmod +x $(TARGET)
+
+
+# example to run a single test
+# reset && rlwrap -a lein test :only dyna.core-test/basic-aggregator2
+#
+# reset b/c lein messes with teh terminal settings,
+# rlwrap -a because lein does not echo what is input into the temrinal when running the tests

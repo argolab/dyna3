@@ -190,67 +190,51 @@
       (make-multiplicity 0)
       (make-unify result-variable (:identity (get @aggregators operator))))))
 
-(comment
-  (def-rewrite
-    :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable)
-                       (:unchecked body-is-conjunctive) (:rexpr R))
-    :run-at :construction
-    (let [aop (get @aggregators operator)
-          agg-val (atom nil)
-          combine-op (fn [x]
-                       (if (nil? @agg-val)
-                         (reset! agg-val x)
-                         (swap! agg-val (:combine aop) x)))]
+(def-rewrite
+  :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable)
+                     (:unchecked body-is-conjunctive) (:rexpr R))
+  :run-at :construction
+  (let [aop (get @aggregators operator)
+        agg-val (atom nil)
+        num-agg (atom 0)
+        combine-op (fn [x]
+                     (if (nil? @agg-val)
+                       (reset! agg-val x)
+                       (swap! agg-val (:combine aop) x))
+                     (swap! num-agg inc))]
 
-      (and (is-disjunct? R)
-           ;; if there is some branch which just has the assignment to the
-           ;; incoming variable, then we should attempt to perform
+    (and (is-disjunct? R)
+         ;; if there is some branch which just has the assignment to the
+         ;; incoming variable, then we should attempt to perform
 
-           (let [body1 (doall (remove (for [disj (:args R)]
+         (let [body1 (vec (remove nil? (for [disj (:args R)]
                                         (if (and (is-unify? disj)
                                                  (= (:a disj) incoming-variable))
                                           (let [val (get-value (:b disj))]
                                             (if-not (nil? val)
                                               (do
                                                 (combine-op val)
-                                                nil))
-                                            disj)
-                                          disj))))
-
-                 ;; this could do the add to incoming R-exprs thing here
-                 body2 (if-not (nil? @agg-val) (conj body1 (make-unify incoming-variable @agg-val)))]
-             (if (empty? body1)
-               (make-unify result-variable @agg-val)  ;; there is nothing else
-               ;; that remains, so just
-               ;; return the result of aggregation
-               ;; make a new aggregator with the body which has combined expressions together
-               (make-aggregator operoator result-variable incoming-variable
-                                body-is-conjunctive body2)))))))
-
-
-
-;; (def-rewrite
-;;   :match (aggregator (:unchecked operator) (:any result-variable)
-;;                      (:any incoming-variable) (:unchecked body-is-conjunctive)
-;;                      (:rexpr R))
-;;   (do (debug-repl)
-;;       (print "--------------------------------------------")))
+                                                nil)
+                                              disj))
+                                          disj))))]
+           (if (empty? body1)
+             (make-unify result-variable (make-constant @agg-val))  ;; there is nothing else
+             ;; that remains, so just
+             ;; return the result of aggregation
+             ;; make a new aggregator with the body which has combined expressions together
+             (when (> @num-agg 1) ;; otherwise this is just the same expression, so we should not reduce the complexity in this case
+               (make-aggregator operator result-variable incoming-variable
+                                body-is-conjunctive
+                                (make-disjunct (conj body1 (make-unify incoming-variable (make-constant @agg-val)))))))))))
 
 
 (def-rewrite
   :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:unchecked body-is-conjunctive) (:rexpr R))
   (let [aop (get @aggregators operator)
-        ctx (context/make-nested-context-aggregator R incoming-variable body-is-conjunctive)]
-        ;agg-val (atom nil)
-
-    ;; (if (is-disjunct? R))
-    ;; (let [new-disjunct-children (doall (for [child (:args R)]
-    ;;                                      (let [lctx (context/make-nested-context-disjunct child)
-    ;;                                            new-rexpr (context/bind-context-raw lctx child)]
-
-    ;;                                        [new-rexpr lctx])))])
+        ctx (context/make-nested-context-aggregator rexpr incoming-variable body-is-conjunctive)]
     (let [nR (context/bind-context ctx (simplify R))]
       (assert (= true body-is-conjunctive))
+      (assert (not (nil? nR)))
       (if (is-bound-in-context? incoming-variable ctx)
         (if (is-multiplicity? nR)
           ;; then we need to multiply in the result
@@ -265,6 +249,6 @@
                                           (:mult nR)))))
           (make-aggregator operator result-variable incoming-variable body-is-conjunctive
                            (make-conjunct [(make-unify incoming-variable
-                                                       (get-value-in-context incoming-variable ctx))
+                                                       (make-constant (get-value-in-context incoming-variable ctx)))
                                            nR])))
         (make-aggregator operator result-variable incoming-variable body-is-conjunctive nR)))))
