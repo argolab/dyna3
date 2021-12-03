@@ -393,8 +393,8 @@
 ;; (def-user-term "$nil" 1 (make-unify v0 (make-structured-rexpr "$nil" [])))
 ;; (def-user-term "$cons" 2 (make-unify v2 (make-structured-rexpr "." [v0 v1])))
 
-(def-user-term "$nil" 0 (make-unify-structure v0 (make-constant nil) "$nil" []))
-(def-user-term "$cons" 2 (make-unify-structure v2 (make-constant nil) "." [v0 v1]))
+(def-user-term "$nil" 0 (make-unify-structure v0 (make-constant undefined-dynabase) "$nil" []))
+(def-user-term "$cons" 2 (make-unify-structure v2 (make-constant undefined-dynabase) "." [v0 v1]))
 
 ;; operators for handing a map of elements.  The map is a wrapped clojure map which is associate
 (defrecord DynaMap [map-elements])

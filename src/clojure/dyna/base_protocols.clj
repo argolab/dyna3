@@ -48,3 +48,9 @@
   ;; for debugging
   (ctx-get-inner-values [this])
   (ctx-get-all-bindings [this]))
+
+
+
+(defrecord Dynabase [access-map])
+
+(def undefined-dynabase (Dynabase. nil))

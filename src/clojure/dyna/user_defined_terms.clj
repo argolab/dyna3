@@ -115,9 +115,11 @@
                                           {(:incoming r) in-var})
                          r))
            make-aggs (fn [op out-var in-var rexprs]
-                       (make-aggregator op out-var in-var
-                                        true ;; the body is conjunctive, meaning that we can move constraints out
-                                        (make-disjunct (doall rexprs))))
+                       (let [res
+                             (make-aggregator op out-var in-var
+                                              true ;; the body is conjunctive, meaning that we can move constraints out
+                                              (make-disjunct (doall rexprs)))]
+                         res))
 
            groupped-aggs (into {} (for [[op children] grouped]
                                     (if (= 1 (count children))
@@ -150,7 +152,9 @@
                                           (debug-repl)
                                           new-call)
                                         (rewrite-rexpr-children rexpr rucd)))
-            call-depth-rr (rewrite-user-call-depth rexpr)
-            variable-map-rr (remap-variables call-depth-rr var-map)]
+            variable-map-rr (context/bind-no-context
+                             (remap-variables
+                              (rewrite-user-call-depth rexpr)
+                              var-map))]
         (depend-on-assumption (:def-assumption ut))  ;; this should depend on the representational assumption or something.  Like there can be a composit R-expr, but getting optimized does not have to invalidate everything, so there can be a "soft" depend or something
         variable-map-rr))))

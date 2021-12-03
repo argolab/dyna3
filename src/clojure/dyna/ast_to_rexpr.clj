@@ -69,7 +69,7 @@
                                :unchecked variable-name-mapping ;; these are variable names which are in scope and the associated R-expr variable/constant
                                :unchecked source-file ;; this is the filename of the current item, so if we do $load, then we can have that get the relative file path
                                ]
-  (get-variables [this] (into #{} (filter variable?
+  (get-variables [this] (into #{} (filter is-variable?
                                           (concat (vals variable-name-mapping)
                                                   [out-variable ast]))))
   (remap-variables [this variable-map]
@@ -436,6 +436,7 @@
                                 rexpr (convert-from-ast expression (make-constant true) {} source-file)
                                 result (simplify-top rexpr)]
                             (when-not (= result (make-multiplicity 1))
+                              (debug-repl)
                               (throw (DynaUserAssert. source-file line-number text-rep result)))
                             (make-unify out-variable (make-constant true))) ;; if the assert fails, then it will throw some exception
 

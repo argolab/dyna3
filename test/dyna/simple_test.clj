@@ -37,3 +37,12 @@ def_fun2(2) = 22.
 assert def_fun2(1) = 11.
 assert def_fun2(2) = 22.
 ")
+
+
+(str-test simple-aggregator "
+def_agg(1) += 11.
+def_agg(1) += 11.
+def_agg(2) += 33.
+assert def_agg(1) = 22.
+assert def_agg(2) = 33.
+")

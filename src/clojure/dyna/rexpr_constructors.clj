@@ -23,5 +23,8 @@
  user-call
  )
 
-(declare make-variable)
-(declare make-constant)
+(declare make-variable
+         is-variable?
+         is-variable-set?
+         make-constant
+         is-constant?)

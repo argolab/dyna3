@@ -170,6 +170,17 @@
     ;; function means that we can make this do whatever
     ;; we want with the representation
 
+(def-rewrite
+  :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable)
+                     (:unchecked body-is-conjunctive) (:rexpr R))
+  :run-at :construction
+  (do (when-not (or (is-constant? incoming-variable)
+                    (some #{incoming-variable} (exposed-variables R))) ;; check that the variable is in the body of the expression
+        (debug-repl)
+        (assert false))
+      nil ;; this is just a check, so we make no rewrites in this case
+      ))
+
 
 (def-rewrite
   :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable)
@@ -242,7 +253,9 @@
             0 (if body-is-conjunctive
                 (make-multiplicity 0)
                 (make-unify result-variable (make-constant (:identity aop))))
-            1 (make-unify result-variable (make-constant (get-value-in-context incoming-variable ctx)))
+            1 (let [val (get-value-in-context incoming-variable ctx)]
+                (debug-repl)
+                (make-unify result-variable (make-constant val)))
             (make-unify result-variable (make-constant
                                          ((:many-items aop)
                                           (get-value-in-context incoming-variable ctx)

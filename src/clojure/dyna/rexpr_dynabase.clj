@@ -1,13 +1,13 @@
 (ns dyna.rexpr-dynabase
   (:require [dyna.utils :refer :all])
   (:require [dyna.base-protocols :refer :all])
+  (:import [dyna.base_protocols Dynabase])
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.user-defined-terms :refer [def-user-term]]))
 
 ;; R-exprs which represent construction of dynabases
 ;; dynabases are a prototype styled inheritiance system for dyna
 
-(defrecord Dynabase [access-map])
 
 ;; list of dynabases names which do not inherit from anything.  When these names
 ;; appear, it can allow for some additional rewrites to take place as we know

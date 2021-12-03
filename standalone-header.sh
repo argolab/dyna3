@@ -76,6 +76,7 @@ import_args=""
 jvm_args=""
 memory="2G"
 perf_mode="safe"
+debug_mode="false"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -95,6 +96,9 @@ while [ $# -gt 0 ]; do
             ;;
         --time)
             jvm_args+="-Ddyna.time_running=true "
+            ;;
+        --debug)
+            debug_mode="true"
             ;;
 
         # --fast)
@@ -147,7 +151,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-jvm_args+="-Xmx$memory "
+jvm_args+="-Xmx$memory -Ddyna.print_rewrites_performed=$debug_mode"
 
 if [ -z "$dyna_args" ]; then
    welcome_message
@@ -155,7 +159,7 @@ fi
 
 
 exec java $jvm_args -Ddyna.runtimejar=$self -jar "$self" $import_args $dyna_args
-exit 0
+exit 1  # should not get to this line
 
 # what follows is the dyna implementation compiled into a jar
 ##################################################

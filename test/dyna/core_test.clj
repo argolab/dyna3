@@ -10,7 +10,8 @@
 
 (deftest basic-rexpr
   (let [rexpr (make-add (make-constant 2) (make-constant 3) (make-constant 5))
-        r2 (simplify rexpr)
+        ctx (context/make-empty-context rexpr)
+        r2 (context/bind-context ctx (simplify rexpr))
         r3 (make-multiplicity 1)]
     (is (= r2 r3))))
 
@@ -96,15 +97,3 @@
         r2 (context/bind-context ctx (simplify-fully rexpr))]
     (is (= (make-multiplicity 1) r2))
     (is (= (ctx-get-value ctx (make-variable 'out)) 777))))
-
-;; (deftest basic-disjunct
-;;   (let [rexpr (make-disjunct
-;;               )]))
-
-
-
-
-
-;; (deftest basic-rexpr
-;;   (let [expr '(if expression )])
-;;   )

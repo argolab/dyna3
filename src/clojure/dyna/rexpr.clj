@@ -57,7 +57,7 @@
          Rexpr
          ~'(primitive-rexpr [this] this) ;; this is a primitive expression so we are going to just always return ourselves
          (~'get-variables ~'[this]
-          (filter variable?
+          (filter is-variable?
                   (union #{~@(map cdar (filter #(contains?  #{:var :value} (car %1)) vargroup))}
                          ~@(map (fn [x] `(set ~(cdar x))) (filter #(= :var-list (car %1)) vargroup))
                          )))
@@ -89,7 +89,7 @@
          (~'exposed-variables ~'[this]
           (cache-field ~'cached-exposed-variables
                        (set
-                        (filter variable?
+                        (filter is-variable?
                                 (difference (union (get-variables ~'this)
                                                    ~@(keep
                                                       #(if (= :rexpr (car %))
@@ -272,6 +272,8 @@
 
 
 (defn make-constant [val]
+  (when (nil? val) (debug-repl))
+  (assert (not (nil? val))) ;; otherwise this is a bug
   (constant-value-rexpr. val))
 (intern 'dyna.rexpr-constructors 'make-constant make-constant)
 
@@ -324,20 +326,21 @@
 
 (defn is-constant? [x] (instance? constant-value-rexpr x))
 
-(defn variable? [variable]
+(defn is-variable? [variable]
   (instance? variable-rexpr variable))
+(intern 'dyna.rexpr-constructors 'is-variable? is-variable?)
 
 (defn rexpr? [rexpr]
   (and (satisfies? Rexpr rexpr)
-       (not (or (variable? rexpr) (is-constant? rexpr)))))
+       (not (or (is-variable? rexpr) (is-constant? rexpr)))))
 
 
 ;; these are checks which are something that we might want to allow ourselves to turn off
 (defn check-argument-mult [x] (or (and (int? x) (>= x 0)) (= ##Inf x)))
 (defn check-argument-rexpr [x] (rexpr? x))
 (defn check-argument-rexpr-list [x] (and (seqable? x) (every? rexpr? x)))
-(defn check-argument-var [x] (or (variable? x) (is-constant? x))) ;; a variable or constant of a single value.  Might want to remove is-constant? from this
-(defn check-argument-var-list [x] (and (seqable? x) (every? variable? x)))
+(defn check-argument-var [x] (or (is-variable? x) (is-constant? x))) ;; a variable or constant of a single value.  Might want to remove is-constant? from this
+(defn check-argument-var-list [x] (and (seqable? x) (every? is-variable? x)))
 (defn check-argument-var-map [x] (and (map? x) (every? (fn [[a b]] (and (check-argument-var a)
                                                                         (check-argument-var b)))
                                                        x)))
@@ -641,9 +644,11 @@
   (or (instance? constant-value-rexpr variable)
       (context/need-context
        (ctx-is-bound? (context/get-context) variable))))
+(intern 'dyna.rexpr-constructors 'is-variable-set? is-variable-set?)
 
 (defn is-constant? [variable]
   (instance? constant-value-rexpr variable))
+(intern 'dyna.rexpr-constructors 'is-constant? is-constant?)
 
 (defn get-variable-value [variable]
   (if (instance? constant-value-rexpr variable)
@@ -716,7 +721,7 @@
 ;; this is going to have to have some context in which an expression
 
 (defn is-ground? [var-name]
-  (if (and (variable? var-name) (is-variable-set? var-name))
+  (if (and (is-variable? var-name) (is-variable-set? var-name))
     (get-variable-value var-name)
     (if (is-constant? var-name)
       (boolean (.value ^constant-value-rexpr var-name)))))
@@ -727,10 +732,10 @@
   (is-ground? var-name))
 
 (def-rewrite-matcher :not-ground [var]
-  (and (variable? var) (not (is-bound? var))))
+  (and (is-variable? var) (not (is-bound? var))))
 
 (def-rewrite-matcher :free [var-name]
-                     (and (variable? var-name) (not (is-variable-set? var-name)) var-name))
+                     (and (is-variable? var-name) (not (is-variable-set? var-name)) var-name))
 
 
 (def-rewrite-matcher :rexpr [rexpr] (rexpr? rexpr))
@@ -746,16 +751,16 @@
 ;; then this will have to look at those values
 
 (def-rewrite-matcher :variable [var]
-  (variable? var))
+  (is-variable? var))
 
 (def-rewrite-matcher :varible-list [var-list]
-  (every? variable? var-list))
+  (every? is-variable? var-list))
 
 (def-rewrite-matcher :ground-var-list [var-list]
   (every? is-ground? var-list))
 
 (def-rewrite-matcher :any [v]
-                     (or (variable? v) (is-constant? v)))
+                     (or (is-variable? v) (is-constant? v)))
 
 ;; just match anything
 (def-rewrite-matcher :unchecked [x] true)
@@ -763,7 +768,7 @@
 ;; this are things which we want to iterate over the domain for
 ;; this should
 (def-rewrite-matcher :iterate [x]
-  (and (variable? x) (not (is-bound? x))))
+  (and (is-variable? x) (not (is-bound? x))))
 
 (def-rewrite-matcher :type-known [x]
   ;; if there is meta data present for an expression in which case we can just use this
@@ -817,19 +822,18 @@
 (def-rewrite
   :match (unify (:free A) (:ground B))
   :run-at :construction ; this will want to run at construction and when it encounters the value so that we can use it as early as possible
-  (do
-    ; record that a value has been assigned with the context
-    (if (context/has-context)
-      (do (set-value! A (get-value B))
-          (make-multiplicity 1))
-      nil)))
+  (when (context/has-context)
+    ;;(debug-repl)
+    (set-value! A (get-value B))
+    (make-multiplicity 1)))
 
 (def-rewrite
   :match (unify (:free A) (:ground B))
   :run-at :standard
-  (if (context/has-context)
-    (do (set-value! A (get-value B))
-        (make-multiplicity 1))))
+  (when (context/has-context)
+    ;;(debug-repl)
+    (set-value! A (get-value B))
+    (make-multiplicity 1)))
 
 (def-iterator
   :match (unify (:iterate A) (:ground B))
@@ -936,6 +940,7 @@
                                                      child-rexpr)))]
     ;; the intersected context is what can be passed up to the parent, we are going to have to make new contexts for the children
     (ctx-add-context! outer-context intersected-ctx)
+    (debug-repl)
     (make-disjunct children-with-contexts)))
 
 
@@ -956,7 +961,7 @@
   :match (proj (:variable A) (:rexpr R))
   :run-at :standard
 
-  (let [ctx (context/make-nested-context-proj R [A])
+  (let [ctx (context/make-nested-context-proj rexpr [A])
         nR (context/bind-context ctx
                                  (simplify R))]
     (if (ctx-is-bound? ctx A)

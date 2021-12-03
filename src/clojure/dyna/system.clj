@@ -6,9 +6,8 @@
   (not= "false" (System/getProperty "dyna.check_rexprs_args")))
 
 (def print-rewrites-performed
-  true
-  ;(= "true" (System/getProperty "dyna.print_rewrites_performed"))
-  )
+  (= "true" (System/getProperty "dyna.print_rewrites_performed" "true")))
+
 
 
 ;; terms which are included by the system.  These will get automattically replaced once the objects are created in the first place

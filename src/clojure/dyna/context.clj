@@ -96,9 +96,14 @@
                                                             resulting-rexpr  ;; there is nothing to add to this expression
                                                             )
       (= context-kind :proj) (let [proj-var (:var root-rexpr)]
-                               (if (contains? value-map proj-var)
-                                 (???) ;; then this should propagate the value of this variable into the R-expr and remove this projection.  but that should get handled elsewhere.
-                                 resulting-rexpr))
+                               (assert (empty? (dissoc value-map proj-var))) ;; all of the other variable assignments should have already been propagated out
+                               resulting-rexpr ;;
+                               )
+      ;; (do (debug-repl)
+                             ;;   (let [proj-var (:var root-rexpr)]
+                             ;;       (if (contains? value-map proj-var)
+                             ;;         (???) ;; then this should propagate the value of this variable into the R-expr and remove this projection.  but that should get handled elsewhere.
+                             ;;         resulting-rexpr)))
       (= context-kind :aggregator-conjunctive) (let [incoming-var (:incoming root-rexpr)]
                                                  (assert (:body-is-conjunctive root-rexpr)) ;; double check that the root is conjunctive
                                                  ;; any constraints which do not reference the incoming variable can be added to the outer context
