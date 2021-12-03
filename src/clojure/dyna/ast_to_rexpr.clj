@@ -429,13 +429,13 @@
 
             ;; the assert can run inline, so it will check some statement before everything has been parsed
             ;; this will make writing tests for something easy
-            ["$assert" 3] (let [[expression text-rep line-number] (.arguments ast)
+            ["$assert" 4] (let [[expression text-rep line-number wants-to-succeed] (.arguments ast)
                                 all-variable-names (find-term-variables expression)
                                 ;; this should construct some assert= aggregator, which will check some expression for "all" of the values
                                 ;; which would mean that it identifies which of the expressions
                                 rexpr (convert-from-ast expression (make-constant true) {} source-file)
                                 result (simplify-top rexpr)]
-                            (when-not (= result (make-multiplicity 1))
+                            (when-not (= wants-to-succeed (= result (make-multiplicity 1)))
                               (debug-repl)
                               (throw (DynaUserAssert. source-file line-number text-rep result)))
                             (make-unify out-variable (make-constant true))) ;; if the assert fails, then it will throw some exception

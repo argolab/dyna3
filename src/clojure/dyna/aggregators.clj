@@ -254,7 +254,6 @@
                 (make-multiplicity 0)
                 (make-unify result-variable (make-constant (:identity aop))))
             1 (let [val (get-value-in-context incoming-variable ctx)]
-                (debug-repl)
                 (make-unify result-variable (make-constant val)))
             (make-unify result-variable (make-constant
                                          ((:many-items aop)

@@ -269,8 +269,16 @@ term returns[DynaTerm rterm = null]
         t=termBody["assert="] EndTerm
         {
             String ttext = $t.ctx.start.getInputStream().getText(new Interval($t.ctx.start.getStartIndex(), $t.ctx.stop.getStopIndex()));
-            $rterm = DynaTerm.create("\$assert", $t.rterm, ttext, $t.ctx.getStart().getLine());
+            $rterm = DynaTerm.create("\$assert", $t.rterm, ttext, $t.ctx.getStart().getLine(), true);
         }
+    | 'assert_fails'
+        t=termBody["assert="] EndTerm
+        {
+            // this is something that should fail with the unification.  So that we can test that something should also return multiplicity 0.
+            String ttext = $t.ctx.start.getInputStream().getText(new Interval($t.ctx.start.getStartIndex(), $t.ctx.stop.getStopIndex()));
+            $rterm = DynaTerm.create("\$assert", $t.rterm, ttext, $t.ctx.getStart().getLine(), false);
+        }
+
 // there could be warnings if some library is used in a particular way.  This should somehow defer in the case that some dynabase has not been constructed, but this would want to have that the expression would later come into existence
     | 'warning' '(' we=expression ')' t=termBody["warning="] EndTerm
         { // the warning stuff should somehow check something at runtime?

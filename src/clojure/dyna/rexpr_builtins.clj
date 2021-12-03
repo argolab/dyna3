@@ -104,6 +104,17 @@
 (def-user-term "+" 2 (make-add v0 v1 v2))
 (def-user-term "-" 2 (make-add v2 v1 v0))
 
+(def-rewrite
+  :match (add (:ground A) (:any B) (:any C))
+  (cond (= (get-value A) 0) (make-unify B C)  ;; the value is zero, so can unify the variables together
+        (= B C) (make-multiplicity 0)         ;; the two variables equal will never work
+        :else nil))
+
+(def-rewrite
+  :match (add (:any A) (:ground B) (:any C))
+  (cond (= (get-value B) 0) (make-unify A C)  ;; the value is zero, so can unify the variables together
+        (= A C) (make-multiplicity 0)         ;; the two variables equal will never work as non-zero added between them
+        :else nil))
 
 (def-builtin-rexpr times 3
   (:allground (= v2 (* v0 v1)))
@@ -113,6 +124,20 @@
 
 (def-user-term "*" 2 (make-times v0 v1 v2))
 (def-user-term "/" 2 (make-times v2 v1 v0))
+
+
+(def-rewrite
+  :match (times (:ground A) (:any B) (:any C))
+  (cond (= (get-value A) 1) (make-unify B C)
+        (= B C) (make-multiplicity 0)
+        :else nil))
+
+(def-rewrite
+  :match (times (:any A) (:ground B) (:any C))
+  (cond (= (get-value B) 1) (make-unify A C)
+        (= A C) (make-multiplicity 0)
+        :else nil))
+
 
 (def-builtin-rexpr min 3
   (:allground (= v2 (min v0 v1)))

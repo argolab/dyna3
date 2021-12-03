@@ -17,10 +17,10 @@
 
 
   (remap-variables [this variable-renaming-map])
-  (rewrite-rexpr-children [this remap-function])
+  (rewrite-rexpr-children [this remap-function]))
   ;; (visit-rexpr-children [this remap-function]) ;; this will visit any nested R-exprs on the expression, and return a new expression of the same type with
   ;(visit-all-children [this remap-function]) ;; this will visit
-  )
+
 
 
 (defprotocol RexprValue

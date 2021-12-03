@@ -8,6 +8,8 @@
 (def print-rewrites-performed
   (= "true" (System/getProperty "dyna.print_rewrites_performed" "true")))
 
+(def default-recursion-limit
+  (Integer/valueOf (System/getProperty "dyna.recursion_limit" "20")))
 
 
 ;; terms which are included by the system.  These will get automattically replaced once the objects are created in the first place
@@ -53,24 +55,30 @@
 ;;                    :lock (Object.)})
 
 ;; how many times a user-defined function can be expanded before we stop expanding
-(def ^:dynamic user-recursion-limit (atom 20))
+(def ^:dynamic user-recursion-limit (atom default-recursion-limit))
 
 ;; if a query is made, where it should get printed to
 (def ^:dynamic query-output println)
 
-;; (defn make-new-system-state []
-;;   {:user-expressions (atom {})
-;;    :memoized-expressions (atom {})
-;;    :optimized-expressions (atom {})
-;;    :work-agenda (atom #{})
-;;    })
+(defn make-new-dyna-system []
+  {:user-defined-terms (atom {})
+   :user-exported-terms (atom {})
+   :imported-files (atom {})
+   :work-agenda (atom #{})
+   :user-recursion-limit (atom default-recursion-limit)
+   :query-output println
+   })
 
-;; (defmacro run-under-state [state & args]
-;;   `(binding [user-defined-expressions (:user-expressions ~state)
-;;              optimized-user-defined-expressions (:optimized-expressions ~state)
-;;              memoized-expressions (:memoized-expressions ~state)]
-;;      ~@args
-;;      ))
+
+(defmacro run-under-system [system & args]
+  `(let [state# ~system]
+     (binding [user-defined-terms (:user-defined-terms state#)
+               user-exported-terms (:user-exported-terms state#)
+               imported-files (:imported-files state#)
+               work-agenda (:work-agenda state#)
+               user-recursion-limit (:user-recursion-limit state#)
+               query-output (:query-output state#)]
+       ~@args)))
 
 
 ;; the memozied expressions should be somehow embedded into the

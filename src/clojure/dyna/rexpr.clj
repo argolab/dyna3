@@ -58,7 +58,7 @@
          ~'(primitive-rexpr [this] this) ;; this is a primitive expression so we are going to just always return ourselves
          (~'get-variables ~'[this]
           (filter is-variable?
-                  (union #{~@(map cdar (filter #(contains?  #{:var :value} (car %1)) vargroup))}
+                  (union (set (list ~@(map cdar (filter #(contains?  #{:var :value} (car %1)) vargroup))))
                          ~@(map (fn [x] `(set ~(cdar x))) (filter #(= :var-list (car %1)) vargroup))
                          )))
 
@@ -940,7 +940,7 @@
                                                      child-rexpr)))]
     ;; the intersected context is what can be passed up to the parent, we are going to have to make new contexts for the children
     (ctx-add-context! outer-context intersected-ctx)
-    (debug-repl)
+    ;(debug-repl)
     (make-disjunct children-with-contexts)))
 
 

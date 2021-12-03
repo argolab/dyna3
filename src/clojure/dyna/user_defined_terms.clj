@@ -149,7 +149,7 @@
                                       (if (is-user-call? rexpr)
                                         (let [[lname lvar-map lcall-depth] (get-arguments rexpr)
                                               new-call (make-user-call lname lvar-map (+ call-depth lcall-depth 1))]
-                                          (debug-repl)
+                                          ;(debug-repl)
                                           new-call)
                                         (rewrite-rexpr-children rexpr rucd)))
             variable-map-rr (context/bind-no-context

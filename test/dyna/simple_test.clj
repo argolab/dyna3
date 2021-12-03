@@ -1,6 +1,7 @@
 (ns dyna.simple-test
   (:require [clojure.test :refer :all])
   (:require [dyna.core])
+  (:require [dyna.system :refer [make-new-dyna-system run-under-system]])
   (:require [dyna.ast-to-rexpr :refer [eval-string]])
   (:import [dyna DynaUserAssert]))
 
@@ -16,8 +17,10 @@
 (defmacro str-test [name str]
   `(deftest ~name
      (try
-       (do (eval-string ~str)
-           (is true))
+       (let [sstate# (make-new-dyna-system)]
+         (run-under-system sstate#
+          (eval-string ~str))
+         (is true))
        (catch DynaUserAssert e#
          (is false (str (.toString e#) "\nREXPR: " (.assert_rexpr e#)))))))
 
@@ -45,4 +48,14 @@ def_agg(1) += 11.
 def_agg(2) += 33.
 assert def_agg(1) = 22.
 assert def_agg(2) = 33.
+")
+
+(str-test fib-program "
+fib(0) = 0.
+fib(1) = 1.
+fib(X) = fib(X-1) + fib(X-2) for X > 1.
+
+assert fib(2) = 1.
+assert_fails fib(2) = 10.
+assert fib(5) = 5.
 ")
