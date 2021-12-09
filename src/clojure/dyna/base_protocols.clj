@@ -11,6 +11,7 @@
   (as-list [this]) ; use for printing out the structure
 
   (exposed-variables [this])        ; return variables values that are exposed externally (so hide aggregators and proj)
+  (get-all-variables-rec [this])
 
   ;; these functions can recursivy walk the R-expr and rewmap the different variables which appear
   ;; if there is something that

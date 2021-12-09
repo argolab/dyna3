@@ -279,6 +279,13 @@ term returns[DynaTerm rterm = null]
             $rterm = DynaTerm.create("\$assert", $t.rterm, ttext, $t.ctx.getStart().getLine(), false);
         }
 
+    | 'print'
+       t=termBody["print="] EndTerm
+       {
+            String ttext = $t.ctx.start.getInputStream().getText(new Interval($t.ctx.start.getStartIndex(), $t.ctx.stop.getStopIndex()));
+            $rterm = DynaTerm.create("\$print", $t.rterm, ttext, $t.ctx.getStart().getLine());
+       }
+
 // there could be warnings if some library is used in a particular way.  This should somehow defer in the case that some dynabase has not been constructed, but this would want to have that the expression would later come into existence
     | 'warning' '(' we=expression ')' t=termBody["warning="] EndTerm
         { // the warning stuff should somehow check something at runtime?

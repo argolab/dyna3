@@ -6,6 +6,7 @@
 
   (:require [dyna.utils :refer :all])
   (:require [dyna.rexpr :refer :all])
+  (:require [dyna.base-protocols :refer :all])
   (:require [dyna.rexpr-builtins :refer :all])
   (:require [dyna.context :as context])
   (:require [dyna.aggregators])

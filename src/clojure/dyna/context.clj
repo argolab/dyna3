@@ -88,7 +88,9 @@
 
   (ctx-exit-context [this resulting-rexpr]
     (cond
-      (= context-kind :root) resulting-rexpr  ;; do not add the context to this expression, as we are going to keep this context around
+      ;; the root context is the top level, when we exit, this is either getting stored or returned to the user
+      (= context-kind :root) (make-conjunct [(make-variable-assignment-conjunct value-map)
+                                             resulting-rexpr])
       (and (= context-kind :disjunct) (not full-context)) (if-not (empty? value-map)
                                                             ;; then we have to save the value of these variables into the R-expr
                                                             (make-conjunct [(make-variable-assignment-conjunct value-map)

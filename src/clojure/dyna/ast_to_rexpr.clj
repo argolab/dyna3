@@ -67,7 +67,7 @@
 (def-base-rexpr eval-from-ast [:var out-variable ;; the ast is structured such that everything returns some value.  This is the variable which is returned
                                :var ast
                                :unchecked variable-name-mapping ;; these are variable names which are in scope and the associated R-expr variable/constant
-                               :unchecked source-file ;; this is the filename of the current item, so if we do $load, then we can have that get the relative file path
+                               :file-name source-file ;; this is the filename of the current item, so if we do $load, then we can have that get the relative file path
                                ]
   (get-variables [this] (into #{} (filter is-variable?
                                           (concat (vals variable-name-mapping)
@@ -403,8 +403,9 @@
                                            (get variable-name-mapping "$self")
                                            (make-constant nil))
                                 structure (make-unify-structure out-variable
+                                                                source-file
                                                                 dynabase
-                                                                (.name quoted-structure) ;; the name of the structure
+                                                                name ;; the name of the structure
                                                                 vals)]
                             structure)
 
@@ -422,7 +423,7 @@
                                     (merge
                                      {(make-variable "$self") dynabase-val
                                       (make-variable (str "$" arity)) out-variable}
-                                     (into {} (for [[v i] (zipmap call-vals (range))]
+                                     (into {} (for [[i v] (zipmap (range) call-vals)]
                                                 [(make-variable (str "$" i)) v]))))
                                    0 ;; the call depth
                                    )
@@ -439,6 +440,17 @@
                               (debug-repl)
                               (throw (DynaUserAssert. source-file line-number text-rep result)))
                             (make-unify out-variable (make-constant true))) ;; if the assert fails, then it will throw some exception
+
+            ["$print" 3] (let [[expression text-rep line-number] (.arguments ast)
+                               all-variable-names (find-term-variables expression)
+                               rexpr (convert-from-ast expression (make-variable 'Result) {} source-file)
+                               result (simplify-top rexpr)]
+                           (println "=================================================")
+                           (println "Query: " text-rep)
+                           (println result)
+                           (println "=================================================")
+                           (debug-repl)
+                           (make-unify out-variable (make-constant true)))
 
             ["$query" 2] (let [[expression text-rep] (.arguments ast)
                                all-variables-names (find-term-variables expression)
@@ -557,7 +569,7 @@
 (def-base-rexpr eval-from-ast-dmap [:var out-variable
                                     :var ast
                                     :var dyna-variable-name-mapping ;; this is like the above, but the map should instead be a dynaMap which means that it can be constructed by the user to set the "context" in which some ast would be evaluated in
-                                    :unchecked source-file])
+                                    :file-name source-file])
 
 
 

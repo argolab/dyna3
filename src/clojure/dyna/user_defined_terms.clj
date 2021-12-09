@@ -152,9 +152,19 @@
                                           ;(debug-repl)
                                           new-call)
                                         (rewrite-rexpr-children rexpr rucd)))
+            all-variables (get-all-variables-rec rexpr)
+            var-map-all (merge
+                         (into {} (remove nil? (for [k all-variables]
+                                                 (when-not (contains? k var-map)
+                                                   ;; these remapped variables could just be a unique object, where the object
+                                                   ;; would use its hascode and define equals as the identity.
+                                                   ;; but that would prevent it from creating a representation for the variable that could be used later
+                                                   ;; so maybe keeping this something that can be represented as clojure code is better
+                                                   [k (make-variable (gensym 'remaped-var))]))))
+                         var-map)
             variable-map-rr (context/bind-no-context
                              (remap-variables
                               (rewrite-user-call-depth rexpr)
-                              var-map))]
+                              var-map-all))]
         (depend-on-assumption (:def-assumption ut))  ;; this should depend on the representational assumption or something.  Like there can be a composit R-expr, but getting optimized does not have to invalidate everything, so there can be a "soft" depend or something
         variable-map-rr))))

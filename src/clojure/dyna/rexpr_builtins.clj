@@ -386,7 +386,7 @@
 (def-rewrite
   :match (unify-with-return (:ground A) (:ground B) (:free Return))
   :run-at :construction
-  (make-unify Return (= (get-value A) (get-value B))))
+  (make-unify Return (make-constant (= (get-value A) (get-value B)))))
 
 (def-rewrite
   :match (unify-with-return (:any A) (:any B) (#(= (make-constant true) %) Return))
@@ -418,8 +418,8 @@
 ;; (def-user-term "$nil" 1 (make-unify v0 (make-structured-rexpr "$nil" [])))
 ;; (def-user-term "$cons" 2 (make-unify v2 (make-structured-rexpr "." [v0 v1])))
 
-(def-user-term "$nil" 0 (make-unify-structure v0 (make-constant undefined-dynabase) "$nil" []))
-(def-user-term "$cons" 2 (make-unify-structure v2 (make-constant undefined-dynabase) "." [v0 v1]))
+(def-user-term "$nil" 0 (make-unify-structure v0 nil (make-constant undefined-dynabase) "$nil" []))
+(def-user-term "$cons" 2 (make-unify-structure v2 nil (make-constant undefined-dynabase) "." [v0 v1]))
 
 ;; operators for handing a map of elements.  The map is a wrapped clojure map which is associate
 (defrecord DynaMap [map-elements])

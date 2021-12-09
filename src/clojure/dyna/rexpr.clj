@@ -20,10 +20,6 @@
 (defmethod print-method DynaTerm [^DynaTerm this ^java.io.Writer w]
   (.write w (.toString this)))
 
-;; (let [old-remap remap-variables]
-;;   (defn remap-variables [this var-remap]
-;;     (context/bind-no-context (old-remap this var-remap))))
-
 
 (def rexpr-containers (atom #{}))
 (def rexpr-constructors (atom {}))
@@ -61,7 +57,9 @@
                   (union (set (list ~@(map cdar (filter #(contains?  #{:var :value} (car %1)) vargroup))))
                          ~@(map (fn [x] `(set ~(cdar x))) (filter #(= :var-list (car %1)) vargroup))
                          )))
-
+         (~'get-all-variables-rec ~'[this]
+          (apply union (get-variables ~'this)
+                 (map get-all-variables-rec (get-children ~'this))))
          (~'get-children ~'[this]
           (concat
            (list ~@(map cdar (filter #(= :rexpr (car %1)) vargroup)))
@@ -212,22 +210,22 @@
        )))
 
 
-;; (defprotocol RexprValue
-;;   (get-value [this])
-;;   (set-value! [this value])
-;;   (is-bound? [this])
-;;   (all-variables [this]))
-
-;; this is the value of the object itself
-;; this will want to keep a reference to which dynabase it was constructed in, as we might be using this
-;; as a reference to some function.  In which case, there might be multiple arguments for this.  How this object is constructed
-;;(defrecord structured-term-value [name constructing-dynabase arguments])
-
-
 (defn make-structure [name args]
   (DynaTerm. name nil nil args))
+(intern 'dyna.rexpr-constructors 'make-structure make-structure)
 
 (def ^:const null-term (DynaTerm/null_term))
+
+(defmethod print-dup DynaTerm [^DynaTerm term ^java.io.Writer w]
+  (.write w "(dyna.DynaTerm. ")
+  (print-dup (.name term) w)
+  (.write w " ")
+  (print-dup (.dynabase term) w)
+  (.write w " ")
+  (print-dup (.from_file term) w)
+  (.write w " ")
+  (print-dup (vec (.arguments term)) w)
+  (.write w ")"))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -254,8 +252,6 @@
 (defmethod print-method variable-rexpr [^variable-rexpr this ^java.io.Writer w]
   (.write w (str "(variable " (.varname this) ")")))
 
-;; there should be some version of bound/unbound variables which are designed to access slots in the expression
-
 (defrecord constant-value-rexpr [value]
   RexprValue
   (get-value [this] value)
@@ -268,7 +264,6 @@
   (all-variables [this] #{})
   Object
   (toString [this] (str "(constant " value ")")))
-
 
 
 (defn make-constant [val]
@@ -286,43 +281,44 @@
   (.write w (str "(constant " (.value this) ")")))
 
 
-;; should the structured types have their own thing for how their are represented
-;; though these will want to have some e
-(defrecord structured-rexpr [name arguments]
-  RexprValue
-  (get-value [this]
-    ;; this is going to have to construct the structure for this
-    ;; which means that it has to get all of the values, and then flatten it to a structure
-    (make-structure name (doall (map get-value arguments))))
-  (get-value-in-context [this ctx]
-    (make-structure name (doall (map #(get-value-in-context % ctx) arguments))))
+;; ;; should the structured types have their own thing for how their are represented
+;; ;; though these will want to have some e
+;; (defrecord structured-rexpr [name arguments]
+;;   RexprValue
+;;   (get-value [this]
+;;     ;; this is going to have to construct the structure for this
+;;     ;; which means that it has to get all of the values, and then flatten it to a structure
+;;     (make-structure name (doall (map get-value arguments))))
+;;   (get-value-in-context [this ctx]
+;;     (make-structure name (doall (map #(get-value-in-context % ctx) arguments))))
 
-  (set-value! [this v]
-    (if (or (not= (car v) name) (not= (+ 1 (count arguments)) (count v)))
-      (throw (UnificationFailure. "name/arity does not match structure"))
-      (doall (map set-value! arguments (cdr v)))
-      ))
+;;   (set-value! [this v]
+;;     (if (or (not= (car v) name) (not= (+ 1 (count arguments)) (count v)))
+;;       (throw (UnificationFailure. "name/arity does not match structure"))
+;;       (doall (map set-value! arguments (cdr v)))
+;;       ))
 
-  (is-bound? [this]
-    (context/need-context (every? is-bound? arguments)))
-  (is-bound-in-context? [this context]
-    (every? #(is-bound-in-context? % context) arguments))
-  (all-variables [this] (apply union (map all-variables arguments)))
-  Object
-  (toString [this] (str "(structure " name " " arguments ")")))
+;;   (is-bound? [this]
+;;     (context/need-context (every? is-bound? arguments)))
+;;   (is-bound-in-context? [this context]
+;;     (every? #(is-bound-in-context? % context) arguments))
+;;   (all-variables [this] (apply union (map all-variables arguments)))
+;;   Object
+;;   (toString [this] (str "(structure " name " " arguments ")")))
 
-(defn make-structured-rexpr [name arguments]
-  (assert (string? name))
-  (assert (every? (partial satisfies? RexprValue) arguments))
-  (structured-rexpr. name arguments))
+;; (defn make-structured-rexpr [name arguments]
+;;   (???) ;; not used anymore
+;;   (assert (string? name))
+;;   (assert (every? (partial satisfies? RexprValue) arguments))
+;;   (structured-rexpr. name arguments))
 
-(defmethod print-method structured-rexpr [^structured-rexpr this ^java.io.Writer w]
-  (.write w (.toString ^Object this)))
+;; (defmethod print-method structured-rexpr [^structured-rexpr this ^java.io.Writer w]
+;;   (.write w (.toString ^Object this)))
 
-(defn make-structured-value [name values]
-  (assert (every? (partial satisfies? RexprValue) values))
-  (assert (string? name))
-  (structured-rexpr. name values))
+;; (defn make-structured-value [name values]
+;;   (assert (every? (partial satisfies? RexprValue) values))
+;;   (assert (string? name))
+;;   (structured-rexpr. name values))
 
 (defn is-constant? [x] (instance? constant-value-rexpr x))
 
@@ -351,6 +347,10 @@
 (defn check-argument-opaque-constant [x] ;; something that is not in the R-expr language
   (not (or (satisfies? Rexpr x) (satisfies? RexprValue x))))
 (defn check-argument-boolean [x] (boolean? x))
+(defn check-argument-file-name [x]
+  (or (nil? x)
+      (= "REPL" x)
+      (instance? java.net.URL x)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -368,7 +368,8 @@
     (case x
       true true-mul
       false false-mul
-      0 false-mul ; we can special case the common values to avoid creating these objects many times
+      0 (do
+          false-mul) ; we can special case the common values to avoid creating these objects many times
       1 true-mul
       (prev x))))
 
@@ -396,14 +397,17 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def-base-rexpr unify [:value a
+(def-base-rexpr unify [:value a ;; this should be changed to just use :var
                        :value b])
 
 (def-base-rexpr unify-structure [:var out
+                                 :file-name file-name
                                  :var dynabase ;; the dynabase variable is only
-                                               ;; used for reading.  When
-                                               ;; destrcturing a term, this will
-                                               ;; _not_ unify with this variable
+                                               ;; used for reading when
+                                               ;; constructing a new structure.
+                                               ;; When destrcturing a term, this
+                                               ;; will _not_ unify with this
+                                               ;; variable
                                  :str name
                                  :var-list arguments])
 
@@ -430,10 +434,10 @@
                     :rexpr false-branch])
 
 
-(defn set-variable [var value]
-  ;; would be nice if there was a bit more efficient approach to this method?
-  ;; this might be something where we can handle which of the expressions
-  (make-unify var (make-constant value)))
+;; (defn set-variable [var value]
+;;   ;; would be nice if there was a bit more efficient approach to this method?
+;;   ;; this might be something where we can handle which of the expressions
+;;   (make-unify var (make-constant value)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -598,21 +602,18 @@
         functor-name (car (:match kw-args))
         arity (if (= (cdar (:match kw-args)) :any) nil (- (count (:match kw-args)) 1))
         matcher (:match kw-args)
+        runs-at (:run-at kw-args :standard)
         rewriter-function (make-rewriter-function matcher rewrite &form)]
-
-
-    ;; this is going to have to identify which expressions are going to do the matching, then it will find which expressions
-
-    ;; todo: this needs to handle the other kinds of times when we want to do the rewrites
-    `(save-defined-rewrite
-       ~(case (:run-at kw-args :standard)
-          :standard `(var-get #'rexpr-rewrites)
-          :construction `(var-get #'rexpr-rewrites-construct)
-          :standard-and-construction `(var-get #'rexpr-rewrites-construct) ;; this should also run these when their variables become ground
-          :construction-and-grounding-change nil ;; this could run it when there is a new variable which is ground, which might be useful in avoiding running sutff too much?
-          :inference `(var-get #'rexpr-rewrites-inference))
-       ~(symbol (str functor-name "-rexpr"))
-       ~rewriter-function)))
+    `(do ~@(for [run-at (if (seqable? runs-at) runs-at [runs-at])]
+             `(save-defined-rewrite
+               ~(case run-at
+                  :standard `(var-get #'rexpr-rewrites)
+                  :construction `(var-get #'rexpr-rewrites-construct)
+                  ;;:standard-and-construction `(var-get #'rexpr-rewrites-construct) ;; this should also run these when their variables become ground
+                  ;;:construction-and-grounding-change nil ;; this could run it when there is a new variable which is ground, which might be useful in avoiding running sutff too much?
+                  :inference `(var-get #'rexpr-rewrites-inference))
+               ~(symbol (str functor-name "-rexpr"))
+               ~rewriter-function)))))
 
 (defmacro def-iterator [& args]
   (let [kw-args (apply hash-map (drop-last args))
@@ -821,23 +822,48 @@
 ; this should run at both, so there should be a :run-at :both option that can be selected
 (def-rewrite
   :match (unify (:free A) (:ground B))
-  :run-at :construction ; this will want to run at construction and when it encounters the value so that we can use it as early as possible
+  :run-at [:standard :construction] ; this will want to run at construction and when it encounters the value so that we can use it as early as possible
   (when (context/has-context)
     ;;(debug-repl)
     (set-value! A (get-value B))
     (make-multiplicity 1)))
 
-(def-rewrite
-  :match (unify (:free A) (:ground B))
-  :run-at :standard
-  (when (context/has-context)
-    ;;(debug-repl)
-    (set-value! A (get-value B))
-    (make-multiplicity 1)))
+;; (def-rewrite
+;;   :match (unify (:free A) (:ground B))
+;;   :run-at :standard
+;;   (when (context/has-context)
+;;     ;;(debug-repl)
+;;     (set-value! A (get-value B))
+;;     (make-multiplicity 1)))
 
 (def-iterator
   :match (unify (:iterate A) (:ground B))
   (make-iterator A [(get-value B)]))
+
+(def-rewrite
+  :match (unify-structure (:any out) (:unchecked file-name) (:ground dynabase) (:unchecked name-str) (:ground-var-list arguments))
+  (let [dbval (get-value dynabase)
+        arg-vals (map get-value arguments)]
+    (make-unify out (make-constant (DynaTerm. name-str dbval file-name  arg-vals)))))
+
+(def-rewrite
+  :match (unify-structure (:ground out) (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:variable-list arguments))
+  (if-not (or (instance? DynaTerm out)
+              (not= (.name ^DynaTerm out) name-str)
+              (not= (.arity ^DynaTerm out) (count arguments)))
+    (make-multiplicity 0) ;; the types do not match, so this is nothing
+    (make-conjunct (into [] (map (fn [a b] (make-unify a (make-constant b)))
+                                 arguments (.arguments ^DynaTerm out))))))
+
+(def-rewrite
+  :match (unify-structure-get-meta (:ground struct) (:any dynabase) (:any from-file))
+  (if-not (instance? DynaTerm struct)
+    (make-multiplicity 0)
+    ;; java null should get cast to $nil as the dyna term that represents that value
+    (make-conjunct [(make-unify dynabase (make-constant (or (.dynabase ^DynaTerm struct)
+                                                            null-term)))
+                    (make-unify from-file (make-constant (or (.from_file ^DynaTerm struct)
+                                                             null-term)))])))
 
 
 (def-rewrite
@@ -946,13 +972,13 @@
 
 (def-rewrite
   ;; this is proj(A, 0) -> 0
-  :match (proj (:variable A) (is-empty-rexpr? R))
+  :match (proj (:any A) (is-empty-rexpr? R))
   :run-at :construction
   (make-multiplicity 0))
 
 (def-rewrite
   ;; proj(A, 1) -> inf
-  :match (proj (:variable A) (is-multiplicity? M))
+  :match (proj (:any A) (is-multiplicity? M))
   :run-at :construction
   (if (not= (get-argument M 0) 0)
     (make-multiplicity ##Inf)))
@@ -975,8 +1001,14 @@
           ;(debug-repl) ;; this is going to have to propagate the value of the new variable into the body
           ;; this is either already done via the context?  Or this is going to be slow if we have a large expression where we have to do lots of
           ;; replacements of the variables
-          replaced-R)
-        (make-proj A nR))))
+        replaced-R)
+      (make-proj A nR))))
+
+(def-rewrite
+  :match (proj (:ground A) (:rexpr R))
+  :run-at [:standard :construction]
+  (if (is-constant? A) R
+      (remap-variables R {A (get-value A)})))
 
 
 (def-rewrite

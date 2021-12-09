@@ -50,6 +50,20 @@ assert def_agg(1) = 22.
 assert def_agg(2) = 33.
 ")
 
+(str-test factorial-program "
+fact(1) = 1.
+fact(N) = fact(N-1)*N for N > 1.
+
+assert fact(1) = 1.
+
+%print fact(1).
+%print fact(2).
+%print fact(3).
+
+assert fact(2) = 2.
+assert fact(3) = 6.
+")
+
 (str-test fib-program "
 fib(0) = 0.
 fib(1) = 1.
