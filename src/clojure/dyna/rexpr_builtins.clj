@@ -385,13 +385,19 @@
 
 (def-rewrite
   :match (unify-with-return (:ground A) (:ground B) (:free Return))
-  :run-at :construction
+  :run-at [:standard :construction]
   (make-unify Return (make-constant (= (get-value A) (get-value B)))))
 
 (def-rewrite
   :match (unify-with-return (:any A) (:any B) (#(= (make-constant true) %) Return))
   :run-at :construction
   (make-unify A B))
+
+(def-rewrite
+  :match (unify-with-return (:any A) (:any B) (:ground Return))
+  :run-at [:standard :construction]
+  (when (= (get-value Return) true)
+    (make-unify A B)))
 
 ;; this should check if the arguments are the same variable, in which case this
 ;; can just unify the result with true?  but if there is an expression like

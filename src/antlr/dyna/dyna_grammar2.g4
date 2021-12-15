@@ -95,9 +95,6 @@ Variable
     : [A-Z_][a-zA-Z0-9_]*
     ;
 
-EscapedVariable
-    : '`' [A-Z_][a-zA-Z0-9_]*
-    ;
 
 // going to change this to only match the aggregators which are actually defined
 MergedAggregator
@@ -190,9 +187,9 @@ primitive returns[Object v]
     // TODO: should have $null in this list
     ;
 
-escapedVariable returns [DynaTerm rterm]
-    : e=EscapedVariable { $rterm = DynaTerm.create("\$escaped_variable", $e.getText().substring(1)); }
-    ;
+// escapedVariable returns [DynaTerm rterm]
+//     : e=EscapedVariable { $rterm = DynaTerm.create("\$escaped_variable", $e.getText().substring(1)); }
+//     ;
 
 
 // the entry point for parsing a file
@@ -419,7 +416,7 @@ methodCall returns [String name, ArrayList<DynaTerm> args]
 
 
 arguments returns [ArrayList<DynaTerm> args = new ArrayList<>();]
-    : (e=expression Comma {$args.add($e.rterm);})* e=expression {$args.add($e.rterm);}
+    : (e=expression Comma {$args.add($e.rterm);})* e=expression {$args.add($e.rterm);} Comma?
     | // zero arguments
     ;
 
@@ -514,42 +511,42 @@ dynabaseInnerBracket returns[DynaTerm rterm]
 //     ;
 
 
-inlineAggregated returns [DynaTerm rterm]
-locals [ArrayList<DynaTerm> bodies = new ArrayList<>()]
-    : '(' agg=aggregatorName
-        (t=termBody[$agg.t] ';' { $bodies.add($t.rterm); })*
-        termBody[$agg.t] {$bodies.add($t.rterm);}
-        ')'
-        {$rterm = DynaTerm.create("\$inline_aggregated_function", $agg.t, DynaTerm.make_list($bodies));}
-    ;
+// inlineAggregated returns [DynaTerm rterm]
+// locals [ArrayList<DynaTerm> bodies = new ArrayList<>()]
+//     : '(' agg=aggregatorName
+//         (t=termBody[$agg.t] ';' { $bodies.add($t.rterm); })*
+//         termBody[$agg.t] {$bodies.add($t.rterm);}
+//         ')'
+//         {$rterm = DynaTerm.create("\$inline_aggregated_function", $agg.t, DynaTerm.make_list($bodies));}
+//     ;
 
 
-// is there any use for having an inline function syntax.  I suppose that this can't hurt it too bad...
-// expressing something like a general list sort using a function call would be interesting.
-// so the calling expressions would correspond with
+// // is there any use for having an inline function syntax.  I suppose that this can't hurt it too bad...
+// // expressing something like a general list sort using a function call would be interesting.
+// // so the calling expressions would correspond with
 
-// could also use a keyword lambda like in python, so the expression could be lambda X,Y,Z: what is going to go here???
-// having the () wrap the expression makes it a bit nicer
-inlineAnonFunction returns [DynaTerm rterm]
-locals [ArrayList<String> varlist = new ArrayList<>(),
-ArrayList<DynaTerm> bodylist = new ArrayList<>()]
-    : '(' (v=Variable Comma {$varlist.add($v.getText());} )* v=Variable {$varlist.add($v.getText());} '~>'
-        (t=termBody["="] {$bodylist.add($t.rterm);} ';')*
-    t=termBody["="] {$bodylist.add($t.rterm);} ')'
-{
+// // could also use a keyword lambda like in python, so the expression could be lambda X,Y,Z: what is going to go here???
+// // having the () wrap the expression makes it a bit nicer
+// inlineAnonFunction returns [DynaTerm rterm]
+// locals [ArrayList<String> varlist = new ArrayList<>(),
+// ArrayList<DynaTerm> bodylist = new ArrayList<>()]
+//     : '(' (v=Variable Comma {$varlist.add($v.getText());} )* v=Variable {$varlist.add($v.getText());} '~>'
+//         (t=termBody["="] {$bodylist.add($t.rterm);} ';')*
+//     t=termBody["="] {$bodylist.add($t.rterm);} ')'
+// {
 
-            // (X,Y,Z ~> X+Y+Z+V)
-            // because this should require that the expression unifies, does it make since to allow a comma expression here?  Should this just be a single expression?  But someone could always sneak into the expression something with commas.  Maybe this should really just be some short hand for expressing functions wihch represent different operations
+//             // (X,Y,Z ~> X+Y+Z+V)
+//             // because this should require that the expression unifies, does it make since to allow a comma expression here?  Should this just be a single expression?  But someone could always sneak into the expression something with commas.  Maybe this should really just be some short hand for expressing functions wihch represent different operations
 
-            // this is going to have to convert this into some new dummy term where anything that is captured gets added into some term
-            // then any additional variables will have that the expression should correspond with which of the operators will
-    $rterm = DynaTerm.create("\$inline_function", DynaTerm.make_list($varlist), DynaTerm.make_list($bodylist));
-    // this wants to get a reference to the anon function, not call it immediately.
-    // so this should construct what the name for the item is, but not identify which of the arguments
-}
-    | v=Variable '~>' e=expression
-      {$rterm = DynaTerm.create("\$inline_function", DynaTerm.make_list(new String[]{$v.getText()}), DynaTerm.make_list(new DynaTerm[]{$e.rterm}));}
-    ;
+//             // this is going to have to convert this into some new dummy term where anything that is captured gets added into some term
+//             // then any additional variables will have that the expression should correspond with which of the operators will
+//     $rterm = DynaTerm.create("\$inline_function", DynaTerm.make_list($varlist), DynaTerm.make_list($bodylist));
+//     // this wants to get a reference to the anon function, not call it immediately.
+//     // so this should construct what the name for the item is, but not identify which of the arguments
+// }
+//     | v=Variable '~>' e=expression
+//       {$rterm = DynaTerm.create("\$inline_function", DynaTerm.make_list(new String[]{$v.getText()}), DynaTerm.make_list(new DynaTerm[]{$e.rterm}));}
+//     ;
 
 
 inlineFunction2 returns [DynaTerm rterm]
@@ -610,7 +607,8 @@ expressionRoot returns [DynaTerm rterm]
         $arguments.args.add(0, $e.rterm);
         $rterm = DynaTerm.create_arr("\$call", $arguments.args);
     }
-    | ea=escapedVariable { $rterm = $ea.rterm; }
+//    | ea=escapedVariable { $rterm = $ea.rterm; }
+    | '`' e=expression { $rterm = DynaTerm.create("\$escaped", $e.rterm); }
     ;
 
 
@@ -623,16 +621,16 @@ expressionAddBrakcetsCall returns [DynaTerm rterm]
 locals [DynaTerm add_arg=null]
     : a=expressionDynabaseAccess  { $rterm = $a.rterm; }
     | a=expressionDynabaseAccess ('{'
-        // this could get the current symbol at a given location, and then capture the string between two symbols
-        // that could allow for this expression to do "whatever it wants" between a block of {} stuff
-        (db=dynabaseInnerBracket {$add_arg=$db.rterm;}
-        | nm=assocativeMapInnerBrackets {$add_arg=$nm.rterm;})
-        '}'
-    |   str=StringConstBrackets {
-                String lstr = $str.getText();
-                $add_arg = DynaTerm.create("\$constant", lstr.substring(2, lstr.length() - 1));
-                                  }
-    )
+            // this could get the current symbol at a given location, and then capture the string between two symbols
+            // that could allow for this expression to do "whatever it wants" between a block of {} stuff
+            (db=dynabaseInnerBracket {$add_arg=$db.rterm;}
+            | nm=assocativeMapInnerBrackets {$add_arg=$nm.rterm;})
+            '}'
+        |   str=StringConstBrackets {
+                    String lstr = $str.getText();
+                    $add_arg = DynaTerm.create("\$constant", lstr.substring(2, lstr.length() - 1));
+                    }
+        )
         {
             $rterm = $a.rterm;
             assert($add_arg != null);
@@ -794,7 +792,6 @@ locals [ArrayList<Object> args]
 // disposeArgument returns [String t]
 //     : '*' { $t = "*"; }
 //     | '&' { $t = "&"; }
-// //    | '$quote' { $t = "$quote"; }  // TODO remove. this isn't actually going to be used any more (I think
 //     ;
 
 // onOffArgument returns [boolean t]

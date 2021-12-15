@@ -158,29 +158,61 @@
 ;; $define_term_dynabase_added --> object after $self and $dynabase have been setup
 ;; $define_term_normalized --> term after normalization is complete, ready to get converted into an R-expr and loaded into the system
 
+(defn recurse-through-escaped [ast fun]
+  (if (instance? DynaTerm ast)
+    (case [(.name ^DynaTerm ast) (.arity ^DynaTerm ast)]
+      ["$escaped" 1] (fun (get ast 0))
+      (apply union (map #(recurse-through-escaped % fun) (.arguments ^DynaTerm ast)))
+      )
+    #{}))
+
 (defn find-all-variables [ast]
   (if (instance? DynaTerm ast)
     (case [(.name ^DynaTerm ast) (.arity ^DynaTerm ast)]
-      ["$variable" 1] #{get ast 0}
-      ["$quote" 1] #{}  ;; do not look through quote expressions, as those could be $variables that are just escaped
+      ["$variable" 1] #{(get ast 0)}
+      ["$constant" 1] #{}  ;; no variables in a constant
+      ;;["$quote" 1] #{}  ;; do not look through quote expressions, as those could be $variables that are just escaped
       ["$quote1" 1] (apply union (map find-all-variables (.arguments ^DynaTerm (get ast 0))))
+      ["$escaped" 1] (recurse-through-escaped (get ast 0) find-all-variables)
       (apply union (map find-all-variables (.arguments ^DynaTerm ast)))
     ;; this is something else, like maybe the inside of a constant or something
     #{})))
 
 (defn find-term-variables [ast]
   (if (instance? DynaTerm ast)
-    (case (.name ^DynaTerm ast) ;; put the arity into the expression
-      "$variable" #{(get ast 0)}
-      "$dynabase_create" #{}  ;; do not look through a dynabase create
+    (case [(.name ^DynaTerm ast) (.arity ^DynaTerm ast)] ;; put the arity into the expression
+      ["$variable" 1] #{(get ast 0)}
+      ["$constant" 1] #{}
+      ["$dynabase_create" 2] (find-term-variables (get ast 0))  ;; the first argument could reference a parent variable name
       ;;"$inline_aggregated_function" #{}  ;; do not look through an inline aggregator
-      "$inline_function" #{}
-      "$quote" #{}
-      "$quote1" (apply union (map find-all-variables (.arguments ^DynaTerm (get ast 0))))
-      (apply union (map find-term-variables (.arguments ^DynaTerm ast))))
+      ["$inline_function" 3] #{}
+      ;;["$quote" 1] #{}
+      ["$quote1" 1] (let [qs (get ast 0)
+                          args (.arguments ^DynaTerm qs)
+                          res (apply union (map find-term-variables args))]
+                      res) ;; if the quote is $variale, skip that
+      ["$escaped" 1] (recurse-through-escaped (get ast 0) find-term-variables)
+      (let [res (apply union (map find-term-variables (.arguments ^DynaTerm ast)))]
+        ;; (when-not (empty? res)
+        ;;   (debug-repl))
+        res))
     #{}))
 
 (def current-dir (-> (java.io.File. (System/getProperty "user.dir")) .toURI .toURL))
+
+(defn convert-from-escaped-ast-to-ast [^DynaTerm ast]
+  (case [(.name ast) (.arity ast)]
+    ["$escaped" 1] (get ast 0) ;; then this is hitting something that is "unescaped" so we do not have to keep this around
+    (let [arguments (doall (map convert-from-escaped-ast-to-ast (.arguments ast)))
+          ;; the arguments are going to be wrapped in $quote if they are the same
+          ;; so if all of the
+          same-args (every? true? (map #(= (DynaTerm. "$constant" [%1]) %2)
+                                       (.arguments ast)
+                                       arguments))]
+      (if same-args
+        (DynaTerm. "$constant" [ast]) ;; then we can just quote the entire structure
+        (DynaTerm. "$quote1" [(DynaTerm. (.name ast) arguments)])) ;; then we are going to have to only quote the outer level, as there is something unescaped inside
+          )))
 
 
 (defn convert-from-ast [^DynaTerm ast out-variable variable-name-mapping source-file]
@@ -207,7 +239,8 @@
                     (case (.name a)
                       "$variable" (let [[name] (.arguments a)
                                         var (get variable-name-mapping name)]
-                                    (assert (not (nil? var)))
+                                    (when (nil? var)
+                                      (throw (RuntimeException. (str "Did not find variable " name))))
                                     var)
                       "$constant" (let [[val] (.arguments a)]
                                     (make-constant val))
@@ -401,7 +434,7 @@
                                 ;; in the case that something comes from a top level
                                 dynabase (if (contains? variable-name-mapping "$self")
                                            (get variable-name-mapping "$self")
-                                           (make-constant nil))
+                                           (make-constant DynaTerm/null_term))
                                 structure (make-unify-structure out-variable
                                                                 source-file
                                                                 dynabase
@@ -409,8 +442,12 @@
                                                                 vals)]
                             structure)
 
-            ["$quote" 1] (let [[^DynaTerm quoted-structure] (.arguments ast)]
-                           (make-unify out-variable (make-constant quoted-structure)))
+            ;; ["$quote" 1] (let [[^DynaTerm quoted-structure] (.arguments ast)]
+            ;;                (make-unify out-variable (make-constant quoted-structure)))
+
+            ["$escaped" 1] (let [[escaped-expression] (.arguments ast)
+                                 basic-ast (convert-from-escaped-ast-to-ast escaped-expression)]
+                             (convert-from-ast basic-ast out-variable variable-name-mapping source-file))
 
             ["$dynabase_call" 2] (let [[dynabase-var call-term] (.arguments ast)
                                        dynabase-val (get-value dynabase-var)
@@ -428,13 +465,19 @@
                                    0 ;; the call depth
                                    )
 
+            ["$dynabase_create" 2] (let [[extended-dynabase-value dynabase-terms] (.arguments ast)]
+                                     (???) ;; TODO
+                                     )
+
             ;; the assert can run inline, so it will check some statement before everything has been parsed
             ;; this will make writing tests for something easy
             ["$assert" 4] (let [[expression text-rep line-number wants-to-succeed] (.arguments ast)
                                 all-variable-names (find-term-variables expression)
                                 ;; this should construct some assert= aggregator, which will check some expression for "all" of the values
                                 ;; which would mean that it identifies which of the expressions
-                                rexpr (convert-from-ast expression (make-constant true) {} source-file)
+                                variable-name-mapping (into {} (for [n all-variable-names] [n (make-variable n)]))
+                                rexpr (make-proj-many (vals variable-name-mapping)
+                                                      (convert-from-ast expression (make-constant true) variable-name-mapping source-file))
                                 result (simplify-top rexpr)]
                             (when-not (= wants-to-succeed (= result (make-multiplicity 1)))
                               (debug-repl)
@@ -554,8 +597,7 @@
                                                                    variable-name-mapping
                                                                    source-file)])
                                call-rexpr)]
-              full-rexpr)
-            )]
+              full-rexpr))]
       ;; add the R-expr that we constructed to the conjunctive R-exprs
       (conj! other-conjunctive-rexprs constructed-rexpr)
       ;; project out all of the variables which were added as intermediate expressions along the way

@@ -203,6 +203,7 @@
        (defn ~(symbol (str "is-" name "?")) ~'[rexpr]
          (instance? ~(symbol rname) ~'rexpr))
        (defmethod print-method ~(symbol rname) ~'[this ^java.io.Writer w]
+         (assert (not (nil? ~'w)))
          (aprint (as-list ~'this) ~'w))
        (intern 'dyna.rexpr-constructors '~(symbol (str "make-" name)) ~(symbol (str "make-" name)))
        (intern 'dyna.rexpr-constructors '~(symbol (str "make-no-simp-" name)) ~(symbol (str "make-no-simp-" name)))
@@ -336,7 +337,7 @@
 (defn check-argument-rexpr [x] (rexpr? x))
 (defn check-argument-rexpr-list [x] (and (seqable? x) (every? rexpr? x)))
 (defn check-argument-var [x] (or (is-variable? x) (is-constant? x))) ;; a variable or constant of a single value.  Might want to remove is-constant? from this
-(defn check-argument-var-list [x] (and (seqable? x) (every? is-variable? x)))
+(defn check-argument-var-list [x] (and (seqable? x) (every? check-argument-var x)))
 (defn check-argument-var-map [x] (and (map? x) (every? (fn [[a b]] (and (check-argument-var a)
                                                                         (check-argument-var b)))
                                                        x)))
@@ -443,11 +444,11 @@
 
 
 (def-base-rexpr user-call [:unchecked name  ;; the name for this call object.  Will include the name, arity and file for which this call is being performed from
-                            ;; :str name ;; the name for this call represented as a string
-                            ;; :int arity  ;; the arity for this call
-                            ;; :var from-file
-                            :var-map args-map ;; the arguments which are present for this call
-                            :unchecked call-depth]
+                           ;; :str name ;; the name for this call represented as a string
+                           ;; :int arity  ;; the arity for this call
+                           ;; :var from-file
+                           :var-map args-map ;; the arguments which are present for this call
+                           :unchecked call-depth]
   (get-variables [this] (into #{} (vals args-map))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -582,7 +583,12 @@
     `(fn ~'[rexpr]
        (let [~(vec named-args) (get-arguments ~'rexpr)] ; unsure if using the global function vs the .func is better?
          (if (and ~@(map (fn [arg mat]
-                           `(~(get @rexpr-matchers mat mat)
+                           `(~(let [matr (get @rexpr-matchers mat mat)]
+                                (when (keyword? matr)
+                                  (debug-repl)
+                                  (assert false)
+                                  )  ;; if this is a keyword, then there is a typo or something and this should not be what is matched
+                                matr)
                               ~arg)) named-args (for [m (cdr matcher)]
                                                   (if (seq? m) (car m) m))))
            ; call the implementation of the rewrite function
@@ -727,6 +733,8 @@
     (if (is-constant? var-name)
       (boolean (.value ^constant-value-rexpr var-name)))))
 
+(def-rewrite-matcher :str [string] (string? string))
+
 (def-rewrite-matcher :ground [var-name]
                                         ; this should be redfined such that it will return the ground value for the variable
                                         ; though we might not want to have the matchers identifying a given expression
@@ -754,7 +762,7 @@
 (def-rewrite-matcher :variable [var]
   (is-variable? var))
 
-(def-rewrite-matcher :varible-list [var-list]
+(def-rewrite-matcher :variable-list [var-list]
   (every? is-variable? var-list))
 
 (def-rewrite-matcher :ground-var-list [var-list]
@@ -762,6 +770,9 @@
 
 (def-rewrite-matcher :any [v]
                      (or (is-variable? v) (is-constant? v)))
+
+(def-rewrite-matcher :any-list [any-list]
+  (every? #(or (is-variable? %) (is-constant? %)) any-list))
 
 ;; just match anything
 (def-rewrite-matcher :unchecked [x] true)
@@ -844,26 +855,28 @@
   :match (unify-structure (:any out) (:unchecked file-name) (:ground dynabase) (:unchecked name-str) (:ground-var-list arguments))
   (let [dbval (get-value dynabase)
         arg-vals (map get-value arguments)]
-    (make-unify out (make-constant (DynaTerm. name-str dbval file-name  arg-vals)))))
+    (make-unify out (make-constant (DynaTerm. name-str dbval file-name arg-vals)))))
 
 (def-rewrite
-  :match (unify-structure (:ground out) (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:variable-list arguments))
-  (if-not (or (instance? DynaTerm out)
-              (not= (.name ^DynaTerm out) name-str)
-              (not= (.arity ^DynaTerm out) (count arguments)))
-    (make-multiplicity 0) ;; the types do not match, so this is nothing
-    (make-conjunct (into [] (map (fn [a b] (make-unify a (make-constant b)))
-                                 arguments (.arguments ^DynaTerm out))))))
+  :match (unify-structure (:ground out) (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:any-list arguments))
+  (let [out-val (get-value out)]
+    (if-not (or (instance? DynaTerm out-val)
+                (not= (.name ^DynaTerm out-val) name-str)
+                (not= (.arity ^DynaTerm out-val) (count arguments)))
+      (make-multiplicity 0) ;; the types do not match, so this is nothing
+      (make-conjunct (into [] (map (fn [a b] (make-unify a (make-constant b)))
+                                   arguments (.arguments ^DynaTerm out-val)))))))
 
 (def-rewrite
   :match (unify-structure-get-meta (:ground struct) (:any dynabase) (:any from-file))
-  (if-not (instance? DynaTerm struct)
-    (make-multiplicity 0)
-    ;; java null should get cast to $nil as the dyna term that represents that value
-    (make-conjunct [(make-unify dynabase (make-constant (or (.dynabase ^DynaTerm struct)
-                                                            null-term)))
-                    (make-unify from-file (make-constant (or (.from_file ^DynaTerm struct)
-                                                             null-term)))])))
+  (let [struct-val (get-value struct)]
+    (if-not (instance? DynaTerm struct-val)
+      (make-multiplicity 0)
+      ;; java null should get cast to $nil as the dyna term that represents that value
+      (make-conjunct [(make-unify dynabase (make-constant (or (.dynabase ^DynaTerm struct-val)
+                                                              null-term)))
+                      (make-unify from-file (make-constant (or (.from_file ^DynaTerm struct-val)
+                                                               null-term)))]))))
 
 
 (def-rewrite

@@ -73,3 +73,9 @@ assert fib(2) = 1.
 assert_fails fib(2) = 10.
 assert fib(5) = 5.
 ")
+
+(str-test structure-unification "
+foo = &f(1,2).
+assert foo = &f(X,Y), X = 1, Y > 1.
+assert_fails foo = &f(X, Y), Y < 1.
+")

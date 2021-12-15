@@ -178,8 +178,8 @@
                     (some #{incoming-variable} (exposed-variables R))) ;; check that the variable is in the body of the expression
         (debug-repl)
         (assert false))
-      nil ;; this is just a check, so we make no rewrites in this case
-      ))
+      nil)) ;; this is just a check, so we make no rewrites in this case
+
 
 
 (def-rewrite

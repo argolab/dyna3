@@ -27,4 +27,5 @@
          is-variable?
          is-variable-set?
          make-constant
-         is-constant?)
+         is-constant?
+         make-structure)

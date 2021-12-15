@@ -104,7 +104,7 @@
       ;; (do (debug-repl)
                              ;;   (let [proj-var (:var root-rexpr)]
                              ;;       (if (contains? value-map proj-var)
-                             ;;         (???) ;; then this should propagate the value of this variable into the R-expr and remove this projection.  but that should get handled elsewhere.
+                             ;;         (???) ;; then this should propagate the value of this variable into the R-expr and remove this projection.  but that should get handled
                              ;;         resulting-rexpr)))
       (= context-kind :aggregator-conjunctive) (let [incoming-var (:incoming root-rexpr)]
                                                  (assert (:body-is-conjunctive root-rexpr)) ;; double check that the root is conjunctive
