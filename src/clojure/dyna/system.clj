@@ -60,6 +60,8 @@
 ;; if a query is made, where it should get printed to
 (def ^:dynamic query-output println)
 
+;; this should ensure that there are system-defined-user-terms also.  could have some flag which is "system is inited" and that it would parse
+;; the prelude in the case that it wasn't already inited or something?  It would want for
 (defn make-new-dyna-system []
   {:user-defined-terms (atom {})
    :user-exported-terms (atom {})
@@ -67,6 +69,7 @@
    :work-agenda (atom #{})
    :user-recursion-limit (atom default-recursion-limit)
    :query-output println
+   :system-is-inited (atom false)
    })
 
 
@@ -78,6 +81,9 @@
                work-agenda (:work-agenda state#)
                user-recursion-limit (:user-recursion-limit state#)
                query-output (:query-output state#)]
+       (when-not @(:system-is-inited state#)
+         ((var-get #'dyna.core/init-system))
+         (reset! (:system-is-inited state#) true))
        ~@args)))
 
 

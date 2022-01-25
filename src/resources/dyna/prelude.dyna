@@ -1,20 +1,9 @@
-% this file is loaded at the start of the system
-
-
 :- export key/1.
-
-%:- macro key/1.  % declare that the key expression is a macro.  This will be something that should take the AST for something, but what is the name that is going to be used by this expression then?  Are we just going to quote escape its arguments.  Are we going to give it the entire AST for its arguments including
 
 :- dispose key(quote1).
 :- make_system_term key/1.
 key(QuotedName) = $reflect(QuotedName, Dynabase, Name, _),
                   $get_key_for_expression(Dynabase, Name, QuotedName).
-
-% the macros for a given arity of a function will
-%% key(AST) = $reflect(AST, Dynabase, Name, Args),
-%%            &$get_key_for_expression(Dynabase, Name, Args).
-
-% want to be able to do something like key(foo(X)) and then this will instead get
 
 
 :- export list/1.
@@ -23,84 +12,10 @@ key(QuotedName) = $reflect(QuotedName, Dynabase, Name, _),
 list([]).
 list([_|A]) :- list(A).
 
-:- export list/2.
-:- dispose list(quote1, eval).
-:- make_system_term list/2.
-% allows for type annotation against something.  This
-list(Type, []).
-list(Type, [X|A]) :- *Type(X), list(Type, A).
 
-
-%% $eval_list([]) = [].
-%% $eval_list([X|A]) = [$eval(X)|$eval_list(A)].
-
-
-:- export list_length/1.
-:- make_system_term list_length/1.
-list_length([]) = 0.
-list_length([X|A]) = list_length(A) + 1.
-
-
-:- export append/3.
-:- make_system_term append/3.
-append([], A, A).
-append([X|Y], A, [X|B]) :- append(Y, A, B).
-
-map_list([], F) = [].
-map_list([X|A], Function) = [*Function(X)|map_list(A, Function)].
-
-% do remap the values in a map, it would require that there is some cut
-% operator, such that it does not rebind the balues multiple times?  I suppose
-% that we could say that it non-deterministically pulls a value of the map,
-% though maybe it should just pull the first value from the iterator?  So it
-% would be deterministic?
-%
-% but then that would have to be some sort of "delayed" binding to some
-% operation, but that makes the computation more complicated.  It would also
-% need to declare that there is only one way in which a variable could be bound.
-% I suppose that it could do the binding via iteration, which would mean that it
-% must be trying to loop over the domain of a variable?
-%
-% maybe there needs to be some $map_first_key() which can read out the first key
-% in the map, so it would be able to unpack stuff
-
-map_dict({}, Function) = {}.
-map_dict(Map, Function) =
-  Key=$map_first_key(Map),  % will be deterministic wrt to the Map, and provide some binding for Key
-  Map={Key -> Value|Rest},  % this could have higher multiplicity for a given Value, so this would be a problem, or multiple values come out of the expression
-  [NKey,NVal] = *Function(Key,Val),
-  {NKey -> NVal | map_dict(Rest, Function)}.
-
-% this unpacking of some map value should only remove one entry from the map, and its multiplicty returned should _never_ be greater than one
-% otherwise something like the above function will not work
-% additionaly, it should not automattically pull the value of the map
-% I suppose that the map_first_key entry might also want to allow for the differen tkeys to get pulled out of the map?
-
-% if this just returns the value once, then that is essentially making some
-% version of cut I suppose, but this could also make that kind of a cut using
-% one of the aggregators?  It would just have to represent the expression
-
-:- export in_list/2.
-:- make_system_term in_list/2.
-in_list([X|_], X).
-in_list([_|Xs], X) :- in_list(Xs, X).
-
-:- export $with_key/2.
-:- make_system_term $with_key/2.
-$with_key(Value,Key) = &$with_key(Value,Key).
-
-
-
-
-% would be nice if we could continue to allow aggregators to be defined in dyna
-% code.  something like it would construct some macro or something so that the
-% aggregator -= would just be an alias for += where a unitary minus is added
-% into the expression
-
-:- define_aggregator "-=".
-'aggregator_-='(&$define_term(Head, DBase, "-=", Body)) = &$define_term(Head, DBase, "+=" &$unary_-(Boddy)).
-'aggregator_-=_combine'(A,B) = 123.
-
-:- make_system_term $union_type/3.
-$union_type(A, B, Value) |= *A(Value).
-$union_type(A, B, Value) |= *B(Value).
+% :- export list/2.
+% :- dispose list(quote1, eval).
+% :- make_system_term list/2.
+% % allows for type annotation against something.  This
+% list(Type, []).
+% list(Type, [X|A]) :- Type(X), list(Type, A).

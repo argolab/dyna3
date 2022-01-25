@@ -65,7 +65,7 @@ echo "                       \  / /                                             
 echo "                        \/ --------------------------------------------------"
 echo "                                                                             "
 echo "                                 Impelemented By                             "
-echo "                                      Matthew Francis-Landau (2020-2021)     "
+echo "                                      Matthew Francis-Landau (2020-2022)     "
 # echo ""
 # echo "                                      https://github.com/matthewfl/dyna-R/   "
 echo ""
@@ -118,7 +118,7 @@ while [ $# -gt 0 ]; do
             ;;
 
 
-        --import)
+        --import|--run)
             [[ -f "$2" ]] || {
                 echo "File $2 not found"
                 exit 2

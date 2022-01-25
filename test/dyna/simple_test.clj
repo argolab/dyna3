@@ -7,6 +7,7 @@
 
 (deftest basic-assert-test
   (eval-string "assert 1 = 1.")
+  (eval-string "assert_fails 1 = 0.")
   (is true)
   (try (do
          (eval-string "assert 1 = 0.") ;; this should fail, and it will run an assert
@@ -78,4 +79,12 @@ assert fib(5) = 5.
 foo = &f(1,2).
 assert foo = &f(X,Y), X = 1, Y > 1.
 assert_fails foo = &f(X, Y), Y < 1.
+")
+
+
+(str-test compiler-expression-export "
+:- export foo/1.
+:- make_system_term foo/1.
+
+foo(X) = 123.
 ")

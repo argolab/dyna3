@@ -1048,3 +1048,6 @@
         s (get @system/system-defined-user-term n)]
     (when s
       (remap-variables s var-map))))
+
+;; does this want to allow for user defined system terms to expand, if something is recursive, then we don't want to expand those eagerly.  Also, we will want for those to still be stack depth limited
+;; I suppose that we could have the things which bottom out in built-ins would have it can still expand these early

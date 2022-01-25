@@ -10,7 +10,7 @@
   (:require [clojure.java.io :refer [resource]])
   (:import [org.antlr.v4.runtime CharStream CharStreams UnbufferedTokenStream])
   (:import [org.antlr.v4.runtime.misc Interval])
-  (:import [dyna DynaTerm DynaUserAssert])
+  (:import [dyna DynaTerm DynaUserAssert ParserUnbufferedInputStream])
   (:import [java.net URL]))
 
 
@@ -173,6 +173,8 @@
       ["$constant" 1] #{}  ;; no variables in a constant
       ;;["$quote" 1] #{}  ;; do not look through quote expressions, as those could be $variables that are just escaped
       ["$quote1" 1] (apply union (map find-all-variables (.arguments ^DynaTerm (get ast 0))))
+      ["$dynabase_quote1" 2] (union (apply union (map find-all-variables (.arguments ^DynaTerm (get ast 1))))
+                                    (find-all-variables (get ast 0)))
       ["$escaped" 1] (recurse-through-escaped (get ast 0) find-all-variables)
       (apply union (map find-all-variables (.arguments ^DynaTerm ast)))
     ;; this is something else, like maybe the inside of a constant or something
@@ -191,6 +193,11 @@
                           args (.arguments ^DynaTerm qs)
                           res (apply union (map find-term-variables args))]
                       res) ;; if the quote is $variale, skip that
+      ["$dynabase_quote1" 2] (let [dynabase (get ast 0)
+                                   qs (get ast 1)
+                                   args (.arguments ^DynaTerm qs)
+                                   res (union (apply union (map find-term-variables args) (find-term-variables dynabase)))]
+                               res)
       ["$escaped" 1] (recurse-through-escaped (get ast 0) find-term-variables)
       (let [res (apply union (map find-term-variables (.arguments ^DynaTerm ast)))]
         ;; (when-not (empty? res)
@@ -255,8 +262,8 @@
         ]
     (let [constructed-rexpr
           (case [(.name ast) (.arity ast)] ;; this should match on name and arity
-            ["$compiler_expression" 1] (let [^DynaTerm arg1 (get ast 1)]
-                                         (case (.name ^DynaTerm (get ast 0))
+            ["$compiler_expression" 1] (let [^DynaTerm arg1 (get ast 0)]
+                                         (case (.name arg1)
                                            "import" (let [imported-filename (if (= (.arity arg1) 2)
                                                                               (get arg1 1)
                                                                               (get arg1 0))
@@ -287,10 +294,11 @@
                                            ;; that going to work?  I suppose that
                                            ;; there can just be a function which is
                                            ;; called by import to do the importing
-                                           ;; of a function in place.  That will
-                                           "export" (swap! system/user-exported-terms
-                                                           (fn [o]
-                                                             (assoc o source-file (conj [(get arg1 0) (int (get arg1 1))] (get o source-file #{})))))
+                                           ;; of a function in place.
+                                           "export" (let [[^String lname larity] (.arguments ^DynaTerm (get arg1 0))]
+                                                      (swap! system/user-exported-terms
+                                                             (fn [o]
+                                                               (assoc o source-file (conj [lname (int larity)] (get o source-file #{}))))))
 
                                            ;; some of the arugments to a function should get escaped escaped, or quoted
                                            ;; used like `:- dispose foo(quote1,eval).`
@@ -311,8 +319,7 @@
                                            ;; make a term global so that it can be referenced form every file
                                            ;; I suppose that there should be some global list of terms which will get resolved at every possible point
                                            ;; use like `:- make_global_term foo/3.`
-                                           "make_system_term" (let [name (get arg1 0)
-                                                                    arity (int (get arg1 1))
+                                           "make_system_term" (let [[name arity] (.arguments ^DynaTerm (get arg1 0))
                                                                     call-name {:name name
                                                                                :arity arity
                                                                                :source-file source-file}
@@ -322,14 +329,16 @@
                                                                                           0)
                                                                     ]
                                                                 (swap! system/system-defined-user-term
-                                                                       (fn [old]
-                                                                         (assoc old [name arity] rexpr))))
+                                                                       assoc [name arity] rexpr))
 
 
                                            "memoize_unk" (???) ;; mark some function as being memoized
                                            "memoize_null" (???)
 
-                                           "import_csv" (???) ;; import some CSV file as a term
+                                           "import_csv" (let [[term-name term-arity file-name] (.arguments ^DynaTerm (get args1 0))]
+                                                          ;; import some CSV file as a term
+                                                          ;; this could get represented as a R-expr?  In which case it would not be represented
+                                                          (???))
                                            "export_csv" (???) ;; export a CSV file for a term after the program is done running
 
                                            (???) ;; there should be some invalid parse expression or something in the case that this fails at this point
@@ -448,6 +457,21 @@
             ["$escaped" 1] (let [[escaped-expression] (.arguments ast)
                                  basic-ast (convert-from-escaped-ast-to-ast escaped-expression)]
                              (convert-from-ast basic-ast out-variable variable-name-mapping source-file))
+
+            ["$dynabase_quote1" 2] (let [[dynabase ^DynaTerm quoted-structure] (.arguments ast)
+                                         name (.name quoted-structure)
+                                         vals (get-arg-values (.arguments quoted-structure))
+                                         dbval (get-value dynabase)
+                                         structure (make-unify-structure out-variable
+                                                                         source-file
+                                                                         dbval
+                                                                         name
+                                                                         vals)
+                                         meta-struct (make-unify-structure-get-meta out-variable
+                                                                                    dbval
+                                                                                    (make-intermediate-var) ;; we do not care about the file which this comes from, so we just ignore this
+                                                                                    )]
+                                     (make-conjunct [structure meta-struct]))
 
             ["$dynabase_call" 2] (let [[dynabase-var call-term] (.arguments ast)
                                        dynabase-val (get-value dynabase-var)
@@ -689,10 +713,10 @@
     (run-parser char-stream :fragment-allowed fragment-allowed)))
 
 (defn parse-stream [istream & {:keys [fragment-allowed] :or {fragment-allowed false}}]
-  (let [stream (java.io.BufferedInputStream istream 4096)
-        cstream (java.io.SequenceInputStream stream
+  (let [stream (java.io.BufferedInputStream. istream 4096)
+        cstream (java.io.SequenceInputStream. stream
                                              (java.io.ByteArrayInputStream.
-                                              (.getBytes (str "\n\n%end of file\n\n"))))
+                                              (.getBytes ^String (str "\n\n%end of file\n\n"))))
         astream (dyna.ParserUnbufferedInputStream. cstream 1024)]
     (run-parser astream :fragment-allowed fragment-allowed)))
 
@@ -700,9 +724,11 @@
 (defn parse-file [file-url]
   ;; this is going to want to take a java url object, and then parse that into something
   ;; this should consider using the file stream to handle
-  (let [url (if (string? (URL. file-url))
-              (do (assert (instance? URL file-url))
-                  file-url))]
+  (println file-url)
+  (let [url ^URL (if (string? file-url)
+                   (URL. ^String file-url)
+                   (do (assert (instance? URL file-url))
+                     file-url))]
     (parse-stream (.openStream url)
                   :fragment-allowed false)))
 
@@ -733,7 +759,7 @@
   (let [do-import (atom false)]
     (swap! system/imported-files
            (fn [o]
-             (if (contains? url)
+             (if (contains? o url)
                (do (reset! do-import false)
                    o)
                (do
@@ -741,9 +767,11 @@
                  (conj o url)))))
     (if @do-import
       ;; then we have to be the one to import this file
-      (let [parse (parse-file url)
-            result (convert-from-ast parse (make-constant true) {} url)]
-        (assert (= result (make-multiplicity 1)))))))
+      (let [parse (parse-file url)]
+        (if (nil? parse)
+          (println (str "WARNING: file " url " did not contain any dyna rules"))
+          (let [result (convert-from-ast parse (make-constant true) {} url)]
+            (assert (= result (make-multiplicity 1)))))))))
 
 
 

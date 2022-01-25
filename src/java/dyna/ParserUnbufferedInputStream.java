@@ -5,7 +5,7 @@ import org.antlr.v4.runtime.misc.Interval;
 
 import java.io.InputStream;
 
-class ParserUnbufferedInputStream extends UnbufferedCharStream {
+public class ParserUnbufferedInputStream extends UnbufferedCharStream {
 
     public ParserUnbufferedInputStream(InputStream input, int bufferSize) {
         super(input, bufferSize);
@@ -30,14 +30,20 @@ class ParserUnbufferedInputStream extends UnbufferedCharStream {
 
         int cpy[] = new int[stopToken - startToken + 1];
         int idx = 0;
-        for(int i = startToken; i < stopToken; i++) {
+        for(int i = startToken; i <= stopToken; i++) {
             if(i < currentCharIndex)
                 cpy[idx++] = oldBuffer[i % oldBuffer.length];
             else
                 cpy[idx++] = data[i - currentCharIndex + p];
         }
 
-        return new String(cpy, 0, cpy.length);
+        String ret = new String(cpy, 0, cpy.length);
+        return ret;
+    }
+
+    @Override
+    public int size() {
+        return currentCharIndex;
     }
 
     static final int bufferSize = Integer.valueOf(System.getProperty("dyna.parser.bufferSize", "512000"));

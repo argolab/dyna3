@@ -403,6 +403,10 @@ methodCall returns [String name, ArrayList<DynaTerm> args]
     }
     ;
 
+bracketTerm returns [String name, ArrayList<DynaTerm> args]
+    : m=methodName '[' p=arguments ']' { $name = $m.name; $args = $p.args; }
+    ;
+
 
 // we could have something like $atoms will just quote their arguments so it
 // would be something like a macro a bit, where those somehow expand out more.
@@ -549,6 +553,8 @@ dynabaseInnerBracket returns[DynaTerm rterm]
 //     ;
 
 
+
+// possible that the `(X) = foo` will get confused with unification.  In which case this will need something else for the syntax of an equals aggregator?
 inlineFunction2 returns [DynaTerm rterm]
 locals [ArrayList<DynaTerm> argslist = null, ArrayList<DynaTerm> bodies = new ArrayList()]
     : '(' ('(' {$argslist = new ArrayList<>();}
@@ -573,6 +579,7 @@ expressionRoot returns [DynaTerm rterm]
             assert(false);
             // this is something like constructing, or deconstructing a structured term in a specific dynabase
         }
+    | brt=bracketTerm { $rterm = DynaTerm.create("\$quote1", DynaTerm.create_arr($brt.name, $brt.args)); }
     | v=Variable {
             if($v.getText().equals("_")) {
                 // this is an anon variable that is not referenced from multiple places
@@ -598,12 +605,12 @@ expressionRoot returns [DynaTerm rterm]
     | mp=assocativeMap { $rterm=$mp.rterm; }
     | db=dynabase { $rterm = $db.rterm; }
     //| dba=dynabaseAccess[$prog] { $rterm = $dba.rterm; }
-    | '*' v=Variable '(' arguments ')' {
+    | v=Variable '(' arguments ')' {
             // for doing an indirect call to some value
             $arguments.args.add(0, DynaTerm.create("\$variable", $v.getText()));
             $rterm = DynaTerm.create_arr("\$call", $arguments.args);
         }
-    | '*' '(' e=expression ')' '(' arguments ')' {
+    | '(' e=expression ')' '(' arguments ')' {
         $arguments.args.add(0, $e.rterm);
         $rterm = DynaTerm.create_arr("\$call", $arguments.args);
     }
@@ -614,7 +621,9 @@ expressionRoot returns [DynaTerm rterm]
 
 
 expressionDynabaseAccess returns[DynaTerm rterm]
-    : a=expressionRoot {$rterm=$a.rterm;} ('.' m=methodCall {$rterm = DynaTerm.create("\$dynabase_call", $rterm, DynaTerm.create_arr($m.name, $m.args));})*
+    : a=expressionRoot {$rterm=$a.rterm;}
+      ('.' m=methodCall {$rterm = DynaTerm.create("\$dynabase_call", $rterm, DynaTerm.create_arr($m.name, $m.args));})*
+      ('.' bracketTerm { assert(false); })? // todo, represent the construction of a term refering a dynabase somehow
     ;
 
 expressionAddBrakcetsCall returns [DynaTerm rterm]
@@ -634,6 +643,9 @@ locals [DynaTerm add_arg=null]
         {
             $rterm = $a.rterm;
             assert($add_arg != null);
+            if($rterm.name.equals("\$quote1") || $rterm.name.equals("\$quote") || $rterm.name.equals("\$variable") || $rterm.name.equals("\$constant")
+               || $rterm.name.equals("\$escaped") || $rterm.name.equals("\$inline_function"))
+               assert(false); // this should return a syntax error rather than an assert(false)
             if($rterm.name.equals("\$dynabase_call")) {
                 // have to put the argument onto the dynabase call element,
                 $rterm = DynaTerm.create("\$dynabase_call", $rterm.get(0), ((DynaTerm)$rterm.get(1)).extend_args($add_arg));
@@ -741,12 +753,19 @@ expression returns [DynaTerm rterm]
     : a=expressionIs { $rterm = $a.rterm; }
     ;
 
+compilerExpressionArgument returns [Object val]
+    locals [ArrayList<Object> args=null]
+    : p=primitive {$val=$p.v;}
+    | {$args=new ArrayList<>();} a=atom ('(' (ag=compilerExpressionArgument Comma {$args.add($ag.val);})*
+                                             (ag=compilerExpressionArgument Comma? {$args.add($ag.val);})?  ')' )?
+      {$val = DynaTerm.create_arr($a.t, $args); }
+    ;
 
 compilerExpressionParams returns [ArrayList<Object> args = new ArrayList<>()]
     : /* empty */ {}
     | '(' ')'
-    | '(' (p=primitive { $args.add($p.v); } Comma)*
-           p=primitive { $args.add($p.v); } Comma? ')'
+    | '(' (p=compilerExpressionArgument { $args.add($p.val); } Comma)*
+           p=compilerExpressionArgument { $args.add($p.val); } Comma? ')'
     ;
 
 compilerExpression returns [DynaTerm rterm]
