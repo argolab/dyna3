@@ -80,7 +80,7 @@
             (System/exit 1))
           (let [arg-list (DynaTerm/make_list args)]
             ;; define $args = ["arg1", "arg2", ..., "argN"]
-            (eval-ast (make-term "$define_function" ("$args") DyanTerm/null_term "=" ("$constant" arg-list)))
+            (eval-ast (make-term ("$define_function" ("$args") DynaTerm/null_term "=" ("$constant" arg-list))))
             (import-file-url (.toURL run-filef))
             ;; TODO: this needs to handle the csv export functions
             (System/exit 0)))
@@ -89,9 +89,11 @@
           (repl)
           ;; TODO: is there some exception that can be caught in the case that the repl is getting quit, in which case, we should run the
           ;; csv save file operations at that point?
-          )))
+          ))))
 
-    (println "End of main function for dyna"))
+  (println "End of main function for dyna"))
+
+
 
 (defn main2 [& args]
   (main (vec args)))

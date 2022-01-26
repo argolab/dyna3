@@ -139,7 +139,7 @@
 
 
 (def-rewrite
-  :match (user-call (:unchecked name) (:unchecked var-map) (#(< % @system/user-recursion-limit) call-depth))
+  :match (user-call (:unchecked name) (:unchecked var-map) (#(< % @system/user-recursion-limit) call-depth) (:unchecked parent-call-arguments))
   (let [ut (get-user-term name)]
     (when ut  ;; this should really be a warning or something in the case that it can't be found. Though we might also need to create some assumption that nothing is defined...
       (let [rexprs (:rexprs ut)
@@ -148,7 +148,8 @@
                                       (dyna-assert (rexpr? rexpr))
                                       (if (is-user-call? rexpr)
                                         (let [[lname lvar-map lcall-depth] (get-arguments rexpr)
-                                              new-call (make-user-call lname lvar-map (+ call-depth lcall-depth 1))]
+                                              new-call (make-user-call lname lvar-map (+ call-depth lcall-depth 1)
+                                                                       #{})]
                                           ;(debug-repl)
                                           new-call)
                                         (rewrite-rexpr-children rexpr rucd)))

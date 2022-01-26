@@ -118,6 +118,8 @@
                                            :hidden-var `(get ~'variable-map ~(cdar v) ~(cdar v))
                                            :var-list `(map #(get ~'variable-map % %) ~(cdar v))
                                            :var-map `(into {} (for [~'[kk vv] ~(cdar v)] [~'kk (get ~'variable-map ~'vv ~'vv)]))
+                                           :var-set-map `(into #{} (for [~'s ~(cdar v)]
+                                                                     (into {} (for [~'[kk vv] ~'s] [~'kk (get ~'variable-map ~'vv ~'vv)]))))
                                            :rexpr `(remap-variables ~(cdar v) ~'variable-map)
                                            :rexpr-list `(map #(remap-variables % ~'variable-map) ~(cdar v))
                                            (cdar v) ;; the default is that this is the same
@@ -341,6 +343,7 @@
 (defn check-argument-var-map [x] (and (map? x) (every? (fn [[a b]] (and (check-argument-var a)
                                                                         (check-argument-var b)))
                                                        x)))
+(defn check-argument-var-set-map [x] (and (set? x) (every? check-argument-var-map x)))
 (defn check-argument-value [x] (satisfies? RexprValue x)) ;; something that has a get-value method (possibly a structure)
 (defn check-argument-hidden-var [x] (check-argument-var x))
 (defn check-argument-str [x] (string? x))
@@ -448,7 +451,9 @@
                            ;; :int arity  ;; the arity for this call
                            ;; :var from-file
                            :var-map args-map ;; the arguments which are present for this call
-                           :unchecked call-depth]
+                           :unchecked call-depth
+                           :var-set-map args-parent-map ;; this needs to track which
+                           ]
   (get-variables [this] (into #{} (vals args-map))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -680,15 +685,20 @@
     ret))
 
 (defn simplify-construct [rexpr]
-  (let [typ (type rexpr)
-        rrs (get @rexpr-rewrites-construct typ)]
-    (if (nil? rrs)
-      rexpr
-      (or (first (filter (complement nil?)
-                         (for [rw rrs]
-                           (let [res (rw rexpr)]
-                             (if (not= rexpr res) res)))))
-          rexpr))))
+  (debug-try
+   (let [typ (type rexpr)
+         rrs (get @rexpr-rewrites-construct typ)]
+     (if (nil? rrs)
+       rexpr
+       (or (first (filter (complement nil?)
+                          (for [rw rrs]
+                            (let [res (rw rexpr)]
+                              (if (not= rexpr res) res)))))
+           rexpr)))
+
+   (catch StackOverflowError e
+     (do (println "Stack overflow when trying to construct " rexpr)
+         (throw e)))))
 
 
 ;; simplification which takes place a construction time
@@ -1042,8 +1052,8 @@
            B C))
 
 (def-rewrite
-  :match (user-call (:unchecked name) (:unchecked var-map) (:unchecked call-depth))
-  :run-at :construction
+  :match (user-call (:unchecked name) (:unchecked var-map) (:unchecked call-depth) (:unchecked parent-call-arguments))
+  ;;:run-at :construction
   (let [n [(:name name) (:arity name)] ;; this is how the name for built-in R-exprs are represented.  There is no info about the file
         s (get @system/system-defined-user-term n)]
     (when s

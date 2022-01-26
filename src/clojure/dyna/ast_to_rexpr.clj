@@ -326,7 +326,7 @@
                                                                     rexpr (make-user-call call-name
                                                                                           (into {} (map #(let [x (make-variable (str "$" %))] [x x])
                                                                                                         (range (+ arity 1))))
-                                                                                          0)
+                                                                                          0 #{})
                                                                     ]
                                                                 (swap! system/system-defined-user-term
                                                                        assoc [name arity] rexpr))
@@ -335,7 +335,7 @@
                                            "memoize_unk" (???) ;; mark some function as being memoized
                                            "memoize_null" (???)
 
-                                           "import_csv" (let [[term-name term-arity file-name] (.arguments ^DynaTerm (get args1 0))]
+                                           "import_csv" (let [[term-name term-arity file-name] (.arguments ^DynaTerm (get arg1 0))]
                                                           ;; import some CSV file as a term
                                                           ;; this could get represented as a R-expr?  In which case it would not be represented
                                                           (???))
@@ -487,6 +487,7 @@
                                      (into {} (for [[i v] (zipmap (range) call-vals)]
                                                 [(make-variable (str "$" i)) v]))))
                                    0 ;; the call depth
+                                   #{}  ;; the set of arguments which need to get avoid
                                    )
 
             ["$dynabase_create" 2] (let [[extended-dynabase-value dynabase-terms] (.arguments ast)]
@@ -613,6 +614,7 @@
                               call-name
                               var-map
                               0 ;; call depth
+                              #{}
                               )
                   full-rexpr (if is-macro
                                (make-conjunct [call-rexpr
