@@ -9,13 +9,21 @@ key(QuotedName) = $reflect(QuotedName, Dynabase, Name, _),
 :- export list/1.
 :- make_system_term list/1.
 % for annotation that somethign is a list.  This will match against all list types
-list([]).
-list([_|A]) :- list(A).
+list_rec([]).
+list_rec([_|A]) :- list_rec(A).
+
+% the "builtin" prelude is not allowed to be recursive, so this has to reference another function which is allowed to be recursive
+% if the make_system_term is recursive, then it will cause the startup processes to crash
+list(A) :- list_rec(A).
+% list([]).
+% list([_|A]) :- list(A).
 
 
-% :- export list/2.
-% :- dispose list(quote1, eval).
-% :- make_system_term list/2.
+:- export list/2.
+:- dispose list(quote1, eval).  % this is going to quote the type argument, but if we make quoting something that is already hapening, then could this have some issue?
+:- make_system_term list/2.
 % % allows for type annotation against something.  This
-% list(Type, []).
-% list(Type, [X|A]) :- Type(X), list(Type, A).
+
+list_rec(Type, []).
+list_rec(Type, [X|A]) :- Type(X), list_rec(Type, A).
+list(Type, L) :- list_rec(Type, L).

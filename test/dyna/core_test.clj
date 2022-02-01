@@ -19,10 +19,9 @@
 (deftest basic-rexpr2
   (let [rexpr (make-add (make-constant 2) (make-constant 3) (make-variable 'var1))
         ctx (context/make-empty-context rexpr)
-        r2 (context/bind-context ctx (simplify rexpr))
+        r2 (context/bind-context-raw ctx (simplify rexpr))
         r3 (make-multiplicity 1)]
         ;r3 (make-unify (make-variable 'var1) (make-constant 5))
-
     (is (= r2 r3))
     (is (= 5 (ctx-get-value ctx (make-variable 'var1))))
     (println ctx)))
@@ -34,7 +33,7 @@
                 [(make-add (make-constant 2) (make-variable 'v1) (make-variable 'v2))
                  (make-add (make-constant 2) (make-constant 3) (make-variable 'v1))])
         ctx (context/make-empty-context rexpr)
-        r2 (context/bind-context ctx (simplify-fully rexpr))
+        r2 (context/bind-context-raw ctx (simplify-fully rexpr))
         r3 (make-multiplicity 1)]
     (is (= r2 r3))
     (is (= (ctx-get-value ctx (make-variable 'v1)) 5))
@@ -46,7 +45,7 @@
                [(make-unify (make-variable 'foo) (make-constant 123))
                 (make-unify (make-variable 'foo) (make-constant 123))])
         ctx (context/make-empty-context rexpr)
-        r2 (context/bind-context ctx (simplify-fully rexpr))
+        r2 (context/bind-context-raw ctx (simplify-fully rexpr))
         r3 (make-multiplicity 2)]
     (is (= r2 r3))
     (is (= (ctx-get-value ctx (make-variable 'foo)) 123))))
@@ -57,7 +56,7 @@
                [(make-unify (make-variable 'foo) (make-constant 123))
                 (make-unify (make-variable 'foo) (make-constant 456))])
         ctx (context/make-empty-context rexpr)
-        r2 (context/bind-context ctx (simplify-fully rexpr))]
+        r2 (context/bind-context-raw ctx (simplify-fully rexpr))]
     (is (= rexpr r2))
     (is (not (is-bound-in-context? (make-variable 'foo) ctx)))))
 
@@ -68,7 +67,7 @@
                                true
                                (make-unify (make-variable 'agg-in) (make-constant 777)))
         ctx (context/make-empty-context rexpr)
-        r2 (context/bind-context ctx (simplify-fully rexpr))]
+        r2 (context/bind-context-raw ctx (simplify-fully rexpr))]
     (is (= (make-multiplicity 1) r2))
     (is (= (ctx-get-value ctx (make-variable 'out)) 777))))
 
@@ -81,7 +80,7 @@
                                                (make-unify (make-variable 'agg-in)
                                                            (make-constant 333))]))
         ctx (context/make-empty-context rexpr)
-        r2 (context/bind-context ctx (simplify-fully rexpr))]
+        r2 (context/bind-context-raw ctx (simplify-fully rexpr))]
     (is (= (make-multiplicity 1) r2))
     (is (= (ctx-get-value ctx (make-variable 'out)) 666))))
 
@@ -94,6 +93,6 @@
                                 [(make-unify (make-variable 'agg-in) (make-constant 111))
                                  (make-unify (make-variable 'agg-in) (make-constant 666))]))
         ctx (context/make-empty-context rexpr)
-        r2 (context/bind-context ctx (simplify-fully rexpr))]
+        r2 (context/bind-context-raw ctx (simplify-fully rexpr))]
     (is (= (make-multiplicity 1) r2))
     (is (= (ctx-get-value ctx (make-variable 'out)) 777))))

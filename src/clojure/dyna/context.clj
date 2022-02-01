@@ -168,6 +168,7 @@
 
 (defmacro bind-context-raw [val & args]
   `(let [new-ctx# ~val]
+     (assert (satisfies? RContext new-ctx#))
      (binding [*context* new-ctx#]
        ~@args)))
 

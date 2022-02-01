@@ -23,4 +23,4 @@
 (deftest inline-aggregator
   (do
     (parse-string "foo(X) = (min= X;Y).")
-    (parse-string "foo2(X,Y) = Func=((Z)min=X,Z), *Func(Y).")))
+    (parse-string "foo2(X,Y) = Func=((Z) min= X,Z ), Func(Y).")))

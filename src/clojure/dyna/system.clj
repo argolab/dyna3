@@ -3,10 +3,13 @@
 ;; variables which control how the system runs
 
 (def check-rexpr-arguments
-  (not= "false" (System/getProperty "dyna.check_rexprs_args")))
+  (not= "false" (System/getProperty "dyna.check_rexprs_args" "true")))
 
 (def print-rewrites-performed
   (= "true" (System/getProperty "dyna.print_rewrites_performed" "true")))
+
+(def track-where-rexpr-constructed
+  (= "true" (System/getProperty "dyna.trace_rexpr_construction" "true")))
 
 (def default-recursion-limit
   (Integer/valueOf (System/getProperty "dyna.recursion_limit" "20")))
@@ -38,7 +41,7 @@
 ;; the agenda of pending work.  When an assumption is invalidated, this will want to push the work onto this object
 ;; this should probably be a queue type rather than just a set, also some priority function will want to be constructed
 ;; for this also
-(def ^:dynamic work-agenda (atom #{})) ;; this should really be a priority queue instead of just a set
+(def ^:dynamic work-agenda (atom #{})) ;; this should really be a priority quieue instead of just a set
 
 
 ;; (declare get-priority)
@@ -65,7 +68,7 @@
 (defn make-new-dyna-system []
   {:user-defined-terms (atom {})
    :user-exported-terms (atom {})
-   :imported-files (atom {})
+   :imported-files (atom #{})
    :work-agenda (atom #{})
    :user-recursion-limit (atom default-recursion-limit)
    :query-output println

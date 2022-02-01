@@ -37,6 +37,7 @@
                 ~(symbol (str "make-no-simp-" name)) ;; this should really be something that is "require context"
                 ~(symbol (str "is-" name "?")))
        (deftype-with-overrides ~(symbol rname) ~(vec (concat (quote [^int cached-hash-code ^:unsynchronized-mutable cached-exposed-variables])
+                                                             (if system/track-where-rexpr-constructed (quote [traceback-to-construction]))
                                                              (map cdar vargroup)))
          ~opt
          clojure.lang.ILookup
@@ -46,6 +47,7 @@
                               `(~idx ~(cdar var))))
             ~@(apply concat (for [var vargroup]
                               `(~(keyword (cdar var)) ~(cdar var))))
+            ~@(if system/track-where-rexpr-constructed `(:where-constructed ~'traceback-to-construction :constructed-from ~'traceback-to-construction ))
             ~'not-found))
          ~'(valAt [this name] (let [r (.valAt this name :not-found-result)]
                                 (assert (not= :not-found-result r))
@@ -56,6 +58,9 @@
           (filter is-variable?
                   (union (set (list ~@(map cdar (filter #(contains?  #{:var :value} (car %1)) vargroup))))
                          ~@(map (fn [x] `(set ~(cdar x))) (filter #(= :var-list (car %1)) vargroup))
+                         ~@(map (fn [x] `(set (values ~(cdar x)))) (filter #(= :var-map (car %1)) vargroup))
+                         ;; TODO: this needs to handle the case where there is the var-set-map which will have nested variable inside of the arguments
+                         ;;~@(map (fn [x] `(set (values ))))
                          )))
          (~'get-all-variables-rec ~'[this]
           (apply union (get-variables ~'this)
@@ -177,8 +182,8 @@
                                   (hash rname)
                                   (for [[var idx] (zipmap vargroup (range))]
                                     `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
-
           nil                           ; the cached unique variables
+          ~(if system/track-where-rexpr-constructed `(Throwable.))
           ~@(map cdar vargroup))
          )
 
@@ -200,6 +205,7 @@
                                   (for [[var idx] (zipmap vargroup (range))]
                                     `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
                               nil       ; the cached unique variables
+                              ~(if system/track-where-rexpr-constructed `(Throwable.))
                               ~@(map cdar vargroup))))
        (swap! rexpr-constructors assoc ~(str name) ~(symbol (str "make-" name)))
        (defn ~(symbol (str "is-" name "?")) ~'[rexpr]
@@ -362,20 +368,24 @@
 (def-base-rexpr multiplicity [:mult mult])
 
 ;; there is meta information on this which needs to be carried forward
-(let [prev make-multiplicity
-      true-mul (prev 1)
-      false-mul (prev 0)]
-  (defn make-multiplicity
-    {:rexpr-constructor 'multiplicity
-     :rexpr-constructor-type multiplicity-rexpr}
-    [x]
-    (case x
-      true true-mul
-      false false-mul
-      0 (do
-          false-mul) ; we can special case the common values to avoid creating these objects many times
-      1 true-mul
-      (prev x))))
+(when-not system/track-where-rexpr-constructed ;; if we are tracing where it was
+                                               ;; constructed from, then we do
+                                               ;; not want to have the thing
+                                               ;; used a cached representation
+  (let [prev make-multiplicity
+        true-mul (prev 1)
+        false-mul (prev 0)]
+    (defn make-multiplicity
+      {:rexpr-constructor 'multiplicity
+       :rexpr-constructor-type multiplicity-rexpr}
+      [x]
+      (case x
+        true true-mul
+        false false-mul
+        0 (do
+            false-mul) ; we can special case the common values to avoid creating these objects many times
+        1 true-mul
+        (prev x)))))
 
 (def-base-rexpr conjunct [:rexpr-list args])
 
@@ -1053,7 +1063,7 @@
 
 (def-rewrite
   :match (user-call (:unchecked name) (:unchecked var-map) (:unchecked call-depth) (:unchecked parent-call-arguments))
-  ;;:run-at :construction
+  :run-at :construction
   (let [n [(:name name) (:arity name)] ;; this is how the name for built-in R-exprs are represented.  There is no info about the file
         s (get @system/system-defined-user-term n)]
     (when s
