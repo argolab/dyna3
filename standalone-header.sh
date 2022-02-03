@@ -97,7 +97,9 @@ while [ $# -gt 0 ]; do
         --time)
             jvm_args+="-Ddyna.time_running=true "
             ;;
-        --debug)
+        --debug-dyna-impl)
+            # this turns on additional debugging stuff in the implementation
+            # this should not need to be used
             debug_mode="true"
             ;;
 

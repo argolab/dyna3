@@ -45,6 +45,16 @@
        ;;:grounding ~all-vars
        :run-at :standard
        ;;:resulting ()  ; might be nice to know what the resulting form of this rewrite should be
+       ~@(if all-ground
+           `[:is-check-rewrite true
+             :check-expression (quote ~(cdar body))]  ;; this expression should return true or false depending if the check works
+           `[:is-assignment-rewrite true
+             :assignment-requires-ground-vars [~@required-ground]  ;; variables which are required ground by this expression
+             :assignment-computes-var ~(car body) ;; which variable is computed as the result of this expression
+             :assignment-computes-expression (quote ~(cdar body)) ;; the code which is going to do the computation
+             ])
+
+
 
      (let ~(vec (apply concat
                        (for [v required-ground]

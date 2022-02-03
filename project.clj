@@ -8,7 +8,8 @@
                  ;[clj-python/libpython-clj "2.00-beta-22"]
                  [com.clojure-goes-fast/clj-java-decompiler "0.3.0"]
                  [org.antlr/antlr4-runtime "4.7.2"]
-                 [org.jline/jline "3.20.0"]]
+                 [org.jline/jline "3.20.0"]
+                 [robert/hooke "1.3.0"]]
   :repl-options {:init-ns dyna.core}
   ;; :aot [dyna.interface
   ;;       dyna.parser_interface]
@@ -20,15 +21,21 @@
   :test-paths ["test"]
   ;;:profiles {:uberjar {:aot :all}}
   ;;:profiles {:uberjar {:aot [dyna.rexpr]}}
-  :plugins [[lein-antlr-plugin "0.1.0"]]
+  :plugins [[lein-antlr-plugin "0.1.0"]
+            [me.shalakapatil/retest-failures "0.1.0-SNAPSHOT" :hooks false]]
   :antlr-src-dir "src/antlr"
   :antlr-dest-dir "target/gen-src"
 
-  ;; :aliases {"compile" ["do" ["antlr"] ["javac"] "compile"]
-  ;;           "uberjar" ["do" ["compile"] "uberjar"]}
+  :profiles {:uberjar {:main dyna.DynaMain}}
+  :main dyna.core
+
+  ;; this is needed to generate the uberjar, but it makes it slower to run when working on stuff
+  ;; so can comment out if running tests or something from the local directory
+  :aliases {"compile" ["do" ["antlr"] ["javac"] "compile"]
+            "uberjar" ["do" ["compile"] "uberjar"]}
 
 
-  :main dyna.DynaMain
+  ;;:main dyna.DynaMain
   :global-vars {;*warn-on-reflection* true  ;; useful for identifying where it uses clojure's reflection which is slow...
                                         ;*unchecked-math* :warn-on-boxed ;; boxed math is slow9
                 }

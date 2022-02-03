@@ -8,3 +8,4 @@ target/
 .attach_pid*
 dyna-*
 .lein.sh
+.lein-failures*

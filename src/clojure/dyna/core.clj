@@ -70,7 +70,7 @@
             (recur (+ i 1))))))
 
     (let [other-args (persistent! other-args)]
-      (if (or other-args @run-file)
+      (if (or (not (empty? other-args)) (not (nil? @run-file)))
         (let [[run-file args] (if-not (nil? @run-file)
                                  [run-file other-args]
                                  [(get other-args 0) (vec (drop 1 other-args))])
@@ -97,3 +97,5 @@
 
 (defn main2 [& args]
   (main (vec args)))
+
+(defn -main [] (main []))

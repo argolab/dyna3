@@ -505,7 +505,7 @@
                                                       (convert-from-ast expression (make-constant true) variable-name-mapping source-file))
                                 result (simplify-top rexpr)]
                             (when-not (= wants-to-succeed (= result (make-multiplicity 1)))
-                              (debug-repl)
+                              (dyna-debug (debug-repl)) ;; when in debug mode, stop here when an assert fails
                               (throw (DynaUserAssert. source-file line-number text-rep result)))
                             (make-unify out-variable (make-constant true))) ;; if the assert fails, then it will throw some exception
 
@@ -726,7 +726,7 @@
 (defn parse-file [file-url]
   ;; this is going to want to take a java url object, and then parse that into something
   ;; this should consider using the file stream to handle
-  (println file-url)
+  ;;(println file-url)
   (let [url ^URL (if (string? file-url)
                    (URL. ^String file-url)
                    (do (assert (instance? URL file-url))

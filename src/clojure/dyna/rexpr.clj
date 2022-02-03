@@ -90,20 +90,25 @@
                       (cdar v)))))
 
          (~'exposed-variables ~'[this]
-          (cache-field ~'cached-exposed-variables
-                       (set
-                        (filter is-variable?
-                                (difference (union (get-variables ~'this)
-                                                   ~@(keep
-                                                      #(if (= :rexpr (car %))
-                                                         `(exposed-variables ~(cdar %)))
-                                                      vargroup)
-                                                   ~@(keep
-                                                      #(if (= :rexpr-list (car %))
-                                                         `(apply union (map exposed-variables ~(cdar %)))) vargroup))
-                                            #{~@(keep
-                                                 #(if (= :hidden-var (car %)) (cdar %))
-                                                 vargroup)})))))
+          (debug-try
+           (cache-field ~'cached-exposed-variables
+                        (set
+                         (filter is-variable?
+                                 (difference (union (get-variables ~'this)
+                                                    ~@(keep
+                                                       #(if (= :rexpr (car %))
+                                                          `(exposed-variables ~(cdar %)))
+                                                       vargroup)
+                                                    ~@(keep
+                                                       #(if (= :rexpr-list (car %))
+                                                          `(apply union (map exposed-variables ~(cdar %)))) vargroup))
+                                             #{~@(keep
+                                                  #(if (= :hidden-var (car %)) (cdar %))
+                                                  vargroup)}))))
+           (catch java.lang.ClassCastException ~'error
+             (do (debug-repl)
+                 (throw ~'error)))
+           ))
          (~'remap-variables ~'[this variable-map]
           (context/bind-no-context  ;; this is annoying, this will want to be
                                     ;; something that we can avoid doing

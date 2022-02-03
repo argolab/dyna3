@@ -37,7 +37,17 @@
   "Produces a map of the names of local bindings to their values."
   []
   (let [symbols (map key @clojure.lang.Compiler/LOCAL_ENV)]
-    (zipmap (map (fn [sym] `(quote ~sym)) symbols) symbols)))
+    (into {} (for [s symbols]
+               ;; this removes type tag info which causes the compiler to choke on the information
+               [`(quote ~s) (vary-meta s dissoc :tag)]))
+    ;;res (zipmap (map (fn [sym] `(quote ~sym)) symbols) (map symbol symbols))
+    ;;(aprint res)
+    ;;res
+    ;;     res `{}~@(apply concat (for [s symbols]
+    ;;                              `((quote ~(symbol s)) ~(symbol s))))]
+    ;; (print res)
+    ;; res
+        ))
 
 (defn- eval-with-locals
   "Evals a form with given locals.  The locals should be a map of symbols to
@@ -87,7 +97,7 @@
                        (if (contains? functions (car body))
                          (concat (list (car body) argument) ags)
                          (cons (car body) ags)))
-        ;; though this map might return different type
+        ;; though this map might return different types
         (or (vector? body) (set? body)) (map-same-type (partial add-function-argument functions argument) body)
         (map? body) (into {} (map (fn [[name b]] [name (add-function-argument functions argument b)]) body))
         :else body))
@@ -110,12 +120,11 @@
 ;; by default, and then run the function to store the result of the computation.
 ;; I suppose that this should allow for the function to be such that it
 (defmacro cache-field [field & func]
-  (let [sr (gensym)]
-    `(if (nil? ~field) ;; what if the field is an int, like we want to
-       (let [~sr (do ~@func)]
-         (set! ~field ~sr)
-         ~sr)
-       ~field)))
+  `(if (nil? ~field)  ;; if the field is an int, then the nil? check doesn't work
+     (let [sr# (do ~@func)]
+       (set! ~field sr#)
+       ~field)
+     ~field))
 
 
 
@@ -175,7 +184,6 @@
 (defmacro dyna-debug [& args]
   (if (java.lang.Boolean/getBoolean "dyna.debug")
     `(do ~@args)))
-
 
 (defmacro debug-try [& args]
   (if true;;(java.lang.Boolean/getBoolean "dyna.debug")

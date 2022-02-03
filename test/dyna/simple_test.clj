@@ -12,8 +12,8 @@
   (try (do
          (eval-string "assert 1 = 0.") ;; this should fail, and it will run an assert
          (is false))
-       (catch RuntimeException e
-         (is (not= -1 (.indexOf (.toString e) "assert on line "))))))
+       (catch DynaUserAssert e
+         (is (not= -1 (.indexOf (.toString e) "Assert "))))))
 
 (defmacro str-test [name str]
   `(deftest ~name

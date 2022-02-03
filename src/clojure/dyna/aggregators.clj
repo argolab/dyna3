@@ -173,9 +173,13 @@
 (def-rewrite
   :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable)
                      (:unchecked body-is-conjunctive) (:rexpr R))
+  :is-debug-rewrite true ;; meaning that this is a check
   :run-at :construction
-  (do (when-not (or (is-constant? incoming-variable)
-                    (some #{incoming-variable} (exposed-variables R))) ;; check that the variable is in the body of the expression
+  (do ;;(let [exp (exposed-variables R)])
+        ;;(debug-repl)
+      (when-not (or (is-constant? incoming-variable)
+                    ;;(let [eee (exposed-variables R)])
+                    (contains? (exposed-variables R) incoming-variable)) ;; check that the variable is in the body of the expression
         (debug-repl)
         (assert false))
       nil)) ;; this is just a check, so we make no rewrites in this case
