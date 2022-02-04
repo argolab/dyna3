@@ -4,6 +4,7 @@
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.rexpr-dynabase :refer :all])
   (:require [dyna.system :as system])
+  (:require [dyna.context :as context])
   (:require [dyna.user-defined-terms :refer [add-to-user-term update-user-term def-user-term get-user-term]])
   (:require [clojure.set :refer [union intersection difference]])
   (:require [clojure.string :refer [join]])
@@ -11,7 +12,8 @@
   (:import [org.antlr.v4.runtime CharStream CharStreams UnbufferedTokenStream])
   (:import [org.antlr.v4.runtime.misc Interval])
   (:import [dyna DynaTerm DynaUserAssert ParserUnbufferedInputStream])
-  (:import [java.net URL]))
+  (:import [java.net URL])
+  (:import [java.nio.file Paths]))
 
 
 
@@ -206,6 +208,7 @@
     #{}))
 
 (def current-dir (-> (java.io.File. (System/getProperty "user.dir")) .toURI .toURL))
+(def current-dir-path (Paths/get (.toURI current-dir)))
 
 (defn convert-from-escaped-ast-to-ast [^DynaTerm ast]
   (case [(.name ast) (.arity ast)]
@@ -511,13 +514,22 @@
 
             ["$print" 3] (let [[expression text-rep line-number] (.arguments ast)
                                all-variable-names (find-term-variables expression)
-                               rexpr (convert-from-ast expression (make-variable 'Result) {} source-file)
-                               result (simplify-top rexpr)]
+                               result-variable (make-variable 'Result)
+                               rexpr (convert-from-ast expression result-variable {} source-file)
+                               ctx (context/make-empty-context rexpr)
+                               result (context/bind-context-raw ctx (simplify-fully rexpr))
+                               ;; zzz (???;;;;;;;;;;;;;;;;;;;;;;;;;;
+                               ;;      )
+                               ;; result (simplify-top rexpr)
+                               rel-path (if (instance? URL source-file)
+                                          (str (.relativize current-dir-path (Paths/get (.toURI source-file))))
+                                          (str source-file))]
                            (println "=================================================")
-                           (println "Query: " text-rep)
-                           (println result)
+                           (println "Print from line" (str "`" rel-path ":" line-number "`") "Query:" text-rep )
+                           (if (= (make-multiplicity 1) result)
+                             (println (ctx-get-value ctx result-variable))
+                             (println "Rexpr:" (ctx-exit-context ctx result)))
                            (println "=================================================")
-                           (debug-repl)
                            (make-unify out-variable (make-constant true)))
 
             ["$query" 2] (let [[expression text-rep] (.arguments ast)
