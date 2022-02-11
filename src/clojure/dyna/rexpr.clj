@@ -473,15 +473,15 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; an optimized version of aggregation which does projection and the aggregation in the same operator
-;; the aggregator outer should only have a list of aggregator-op-inner as its arguments
-(def-base-rexpr aggregator-op-outer [:str operator
-                                     :var result
-                                     :rexpr bodies])
+;; ;; an optimized version of aggregation which does projection and the aggregation in the same operator
+;; ;; the aggregator outer should only have a list of aggregator-op-inner as its arguments
+;; (def-base-rexpr aggregator-op-outer [:str operator
+;;                                      :var result
+;;                                      :rexpr bodies])
 
-(def-base-rexpr aggregator-op-inner [:var incoming
-                                     :var-list projected
-                                     :rexpr body])
+;; (def-base-rexpr aggregator-op-inner [:var incoming
+;;                                      :var-list projected
+;;                                      :rexpr body])
 
 
 ;; would be nice if we knew which of the variables were required for an
@@ -1076,3 +1076,22 @@
 
 ;; does this want to allow for user defined system terms to expand, if something is recursive, then we don't want to expand those eagerly.  Also, we will want for those to still be stack depth limited
 ;; I suppose that we could have the things which bottom out in built-ins would have it can still expand these early
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def-base-rexpr simple-function-call [:unchecked function
+                                      :var result
+                                      :var-list arguments])
+
+(def-rewrite
+  :match (simple-function-call (:unchecked function) (:any result) (:ground-var-list arguments))
+  :run-at [:standard :construction]
+  (make-unify result (make-constant (apply function (map get-value arguments)))))
+
+(defn make-function-call
+  {:rexpr-constructor 'simple-function-call
+   :rexpr-constructor-type simple-function-call-rexpr}
+  [function result args]
+  (assert (fn? function))
+  (make-simple-function-call function result args))

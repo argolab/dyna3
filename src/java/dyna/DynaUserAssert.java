@@ -19,10 +19,12 @@ public class DynaUserAssert extends DynaUserError {
 
     public String getMessage() {
         if(filename == null) {
-            return "Assert on line " + line + " failed\n" + assert_text;
+            return "Assert on line " + line + " failed\n==============================\n" + assert_text + "\n==============================\n";
         } else {
-            return "Assert at " + filename.toString() + ":"+line + " failed\n" + assert_text;
+            return "Assert at " + filename.toString() + ":"+line + " failed\n==============================\n" + assert_text + "\n==============================\n";
         }
     }
+
+    public String toString() { return getMessage(); }
 
 }

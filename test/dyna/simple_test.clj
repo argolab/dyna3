@@ -88,3 +88,11 @@ assert_fails foo = &f(X, Y), Y < 1.
 
 foo(X) = 123.
 ")
+
+
+(str-test colon-aggregator "
+z := 1.
+%debug_repl z.
+assert z = 1.
+
+")

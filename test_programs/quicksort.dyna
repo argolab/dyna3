@@ -1,0 +1,17 @@
+
+partition([], _, [], []).
+partition([X|Xs], Pivot, [X|S], B) :-
+    partition(Xs, Pivot, S, B) for X < Pivot.
+partition([X|Xs], Pivot, S, [X|B]) :-
+    partition(Xs, Pivot, S, B) for X >= Pivot.
+
+quicksort([]) := [].
+quicksort([X|Xs]) :=
+    partition(Xs, X, S, B),
+    concat(quicksort(S), [X | quicksort(B)]).
+
+concat([], Y) := Y.
+concat(X, []) := X.
+concat([X|Xs], Y) := [X|concat(Xs, Y)].
+
+assert quicksort([2,3,4,1]) = [1,2,3,4].

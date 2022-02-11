@@ -182,10 +182,13 @@
 
 
 (defmacro dyna-debug [& args]
-  (if (java.lang.Boolean/getBoolean "dyna.debug")
+  (if true;(java.lang.Boolean/getBoolean "dyna.debug")
     `(do ~@args)))
 
 (defmacro debug-try [& args]
   (if true;;(java.lang.Boolean/getBoolean "dyna.debug")
     `(try ~@args)
     (first args)))
+
+(defn dyna-warning [msg]
+  (println "WARNING" msg))

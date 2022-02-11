@@ -6,7 +6,7 @@
   (not= "false" (System/getProperty "dyna.check_rexprs_args" "true")))
 
 (def print-rewrites-performed
-  (= "true" (System/getProperty "dyna.print_rewrites_performed" "false")))
+  (= "true" (System/getProperty "dyna.print_rewrites_performed" "true")))
 
 (def track-where-rexpr-constructed
   (= "true" (System/getProperty "dyna.trace_rexpr_construction" "true")))

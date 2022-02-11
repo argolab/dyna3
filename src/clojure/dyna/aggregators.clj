@@ -3,7 +3,8 @@
   (:require [dyna.base-protocols :refer :all])
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.rexpr-builtins :refer [make-lessthan make-lessthan-eq
-                                         make-add make-times make-min make-max make-lor make-land]])
+                                         make-add make-times make-min make-max make-lor make-land
+                                         make-not-equals]])
   (:require [dyna.term :refer :all])
   (:import (dyna UnificationFailure DynaTerm DynaUserError))
   (:import [dyna.rexpr aggregator-rexpr])
@@ -133,27 +134,36 @@
 ;; a global counter which is used for all := across the entire program in the
 ;; case of nested dynabases, this will not necessarily allow for overriding a
 ;; value with another expression as this will not know the "order" in which expressions are contributed
-(def ^:private colon-equals-counter (atom 0))
-(defn get-colon-equals-count [] (swap! colon-equals-counter inc))
+;; (def ^:private colon-equals-counter (atom 0))
+;; (defn get-colon-equals-count [] (swap! colon-equals-counter inc))
+(defn get-colon-equals-count [] (DynaTerm/colon_line_counter))
 
-(comment
-  (def-aggregator ":="
-    :combine (fn [a b]
-               (let [[la va] (.arguments ^DynaTerm a)
-                     [lb vb] (.arguments ^DynaTerm b)]
-                 (if (> lb la) b a)))
-    :check-input (fn [x]
-                   (and
-                    (instance? DynaTerm x)
-                    (= "$colon_line_tracking" (.name ^DynaTerm x))))
-    :add-to-rexpr (let [linevar (make-variable (gensym))
-                        valvar (make-variable (gensym))]
-                    (fn [current-value incoming-variable]
-                      (let [[line val] (.arguments ^DynaTerm current-value)]
-                        (make-proj-many [linevar valvar] (make-conjunct [
-                                                                         (make-unify-structure incoming-variable (make-constant nil)
-                                                                                               "$colon_line_tracking" [linevar valvar])
-                                                                         (make-lessthan-eq (make-constant line) linevar)]))))))
+(def colon-identity-elem (DynaTerm. "$null" []))
+
+(def-aggregator ":="
+  :combine (fn [a b]
+             (let [[la va] (.arguments ^DynaTerm a)
+                   [lb vb] (.arguments ^DynaTerm b)]
+               (if (> lb la) b a)))
+  :identity (DynaTerm. "$colon_line_tracking" [-1 colon-identity-elem])  ;; this is going to have that
+  :check-input (fn [x]
+                 (and
+                  (instance? DynaTerm x)
+                  (= "$colon_line_tracking" (.name ^DynaTerm x))))
+  :add-to-in-rexpr (let [linevar (make-variable (gensym))
+                         valvar (make-variable (gensym))]
+                     (fn [current-value incoming-variable]
+                       (let [[line val] (.arguments ^DynaTerm current-value)]
+                         (make-proj-many [linevar valvar] (make-conjunct [
+                                                                          (make-unify-structure incoming-variable (make-constant nil)
+                                                                                                "$colon_line_tracking" [linevar valvar])
+                                                                          (make-lessthan-eq (make-constant line) linevar)])))))
+  :add-to-out-rexpr (fn [current-value result-variable]
+                      (make-not-equals result-variable (make-constant colon-identity-elem)))
+  :lower-value (fn [x]
+                 (assert (= "$colon_line_tracking" (.name ^DynaTerm x)))
+                 (let [[la va] (.arguments ^DynaTerm x)]
+                   va)))
 
 
                                         ; this should merge a map together.  This would not have which of the expressions would
@@ -162,6 +172,8 @@
   ;;   :check-input (partial instance? DynaMap)
   ;;   )
 
+
+(comment
   (def-aggregator "?="
     :combine (fn [a b] a) ;; we just have to choose something
     :saturate (fn [x] true)))  ;; this saturates once it gets something, so we can
@@ -186,14 +198,20 @@
 
 
 
+;; if there is a single value which is a unification, then this is going t
 (def-rewrite
   :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable)
                      (:unchecked body-is-conjunctive) (:rexpr R))
   :run-at :construction
   (when (and (is-unify? R)
              (= (:a R) incoming-variable)
-             (is-bound? (:b R)))  ;; I think that we don't need to care if the other side of the unfication is ground, though maybe only if the body is conjunctive, or we can always remove the aggregator
-    (make-unify result-variable (:b R))))
+             (is-bound? (:b R))) ;; I think that we don't need to care if the other side of the unfication is ground, though maybe only if the body is conjunctive, or we can always remove the aggregator
+    (do (debug-repl)
+        (if body-is-conjunctive
+          (let [agg (get @aggregators operator)
+                lower (:lower-value agg identity)]
+            (make-unify result-variable (make-constant (lower (get-value (:b R))))))
+          (make-unify result-variable (:b R))))))
 
 (def-rewrite
   :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable)
@@ -223,17 +241,18 @@
          ;; incoming variable, then we should attempt to perform
 
          (let [body1 (vec (remove nil? (for [disj (:args R)]
-                                        (if (and (is-unify? disj)
-                                                 (= (:a disj) incoming-variable))
-                                          (let [val (get-value (:b disj))]
-                                            (if-not (nil? val)
-                                              (do
-                                                (combine-op val)
-                                                nil)
-                                              disj))
-                                          disj))))]
+                                         (if (and (is-unify? disj)
+                                                  (= (:a disj) incoming-variable))
+                                           (let [val (get-value (:b disj))]
+                                             (if-not (nil? val)
+                                               (do
+                                                 (combine-op val)
+                                                 nil)
+                                               disj))
+                                           disj))))]
            (if (empty? body1)
-             (make-unify result-variable (make-constant @agg-val))  ;; there is nothing else
+             (do (debug-repl)
+                 (make-unify result-variable (make-constant @agg-val)))  ;; there is nothing else
              ;; that remains, so just
              ;; return the result of aggregation
              ;; make a new aggregator with the body which has combined expressions together
@@ -258,11 +277,12 @@
                 (make-multiplicity 0)
                 (make-unify result-variable (make-constant (:identity aop))))
             1 (let [val (get-value-in-context incoming-variable ctx)]
-                (make-unify result-variable (make-constant val)))
-            (make-unify result-variable (make-constant
-                                         ((:many-items aop)
-                                          (get-value-in-context incoming-variable ctx)
-                                          (:mult nR)))))
+                (make-unify result-variable (make-constant ((:lower-value aop identity) val))))
+            (do (debug-repl)
+                (make-unify result-variable (make-constant
+                                             ((:many-items aop)
+                                              (get-value-in-context incoming-variable ctx)
+                                              (:mult nR))))))
           (make-aggregator operator result-variable incoming-variable body-is-conjunctive
                            (make-conjunct [(make-unify incoming-variable
                                                        (make-constant (get-value-in-context incoming-variable ctx)))

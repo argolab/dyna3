@@ -1,1 +1,33 @@
 print "hello world".
+
+print X + 1.
+
+print X + 1 for X = 3.
+
+print '{
+      this is a longer message {
+      that
+      we are going }
+      to test out
+
+}.
+
+
+my_f(X) = str("this is a concat string test ", X).
+print my_f("to see all of this together").
+
+print my_f'{
+      to have a larger block of text here
+}.
+
+my_concat(A,B) = str("this concats two strings ", A, " and ", B).
+
+print my_concat("this is the first")'{
+     and this is the second
+
+}.
+
+
+z := 1.
+%assert z = 1.
+print z.

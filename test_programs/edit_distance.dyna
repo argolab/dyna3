@@ -1,0 +1,18 @@
+
+% Base case: distance between two empty strings.
+dist([],[]) min= 0.
+
+dist([X|Xs],     Ys) min=   del + dist(Xs,Ys).
+dist(    Xs, [Y|Ys]) min=   ins + dist(Xs,Ys).
+dist([X|Xs], [Y|Ys]) min=     0 + dist(Xs,Ys) for X==Y.
+dist([X|Xs], [Y|Ys]) min= subst + dist(Xs,Ys) for X!=Y.
+
+del := 1.
+ins := 1.
+
+subst := 1.
+
+assert dist(["a","b","c","d"], ["s","b","c","t","d"]) = 2.
+
+%subst := 1.5.
+%assert dist(["a","b","c","d"], ["s","b","c","t","d"]) = 2.5.

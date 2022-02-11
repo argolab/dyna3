@@ -243,7 +243,7 @@
 (def-builtin-rexpr lor 3
   (:allground (= (boolean v2) (boolean (or v0 v1))))
   (v2 (boolean (or v0 v1))))
-(def-user-term ["lor" "|"] 2 (make-lor v0 v1 v2))
+(def-user-term ["lor" "|"] 2 (make-lor v0 v1 v2))  ;; the pipe might be something which is or between methods so that we can use this to define types
 
 
 (def-builtin-rexpr not 2
@@ -372,6 +372,9 @@
 (def-user-term "random" 1 (make-random v0 v1))
 
 
+;; this will cast to a string as well as concat strings together.
+;; I suppose that if all but one of the arguments are ground, then it could still run.
+;; this would be finding which of the expressions would correspond with
 (def-base-rexpr cast-to-string [:var Out
                                 :var-list Args])
 
@@ -380,16 +383,18 @@
   (make-unify Out (make-constant (apply str (map get-value Args)))))
 
 ;; this is going to cast the value to some expression
-(doseq [i (range 1 10)]
-    (let [vars (map #(symbol (str "v" %)) (range 1 (+ 1 i)))]
-      (eval `(def-user-term "tostr" ~i (make-cast-to-string ~(last vars) ~(vec (drop-last vars)))))))
+(doseq [i (range 1 50)]
+  (let [vars (map #(symbol (str "v" %)) (range 0 (+ 1 i)))]
+    (eval `(def-user-term "str" ~i (make-cast-to-string ~(last vars) ~(vec (drop-last vars)))))))
+
+(def-user-term "str" 0 (make-unify v0 (make-constant ""))) ;; with zero arguments, it should just return the empty stringx
 
 ;; check that the argument is a string
 (def-builtin-rexpr isstring 2
   (:allground (= v1 (string? v0)))
   (v1 (string? v0)))
 
-(def-user-term "str" 1 (make-isstring v0 v1))
+(def-user-term "string" 1 (make-isstring v0 v1))
 
 (def-base-rexpr unify-with-return [:var A :var B :var Return])
 
@@ -483,5 +488,35 @@
 ;; defined using the existing operators
 (def-user-term "$unary_-" 1 (make-add v0 v1 (make-constant 0)))
 
-
 (def-user-term "," 2 (make-conjunct [(make-unify (make-constant true) v0) (make-unify v1 v2)]))
+
+
+(def-base-rexpr regex-matcher [:var InputString
+                               :var Regex
+                               :var matched-string
+                               :var-list Args])
+
+(def-rewrite
+  :match (regex-matcher (:ground InputString) (:ground Regex) (:any MatchedResult) (:variable-list Args))
+  (let [inp (get-value InputString)
+        re (get-value Regex)]
+    (if-not (and (string? inp) (string? re))
+      (make-multiplicity 0)
+      (let [pattern (re-pattern re)
+            matched (re-seq pattern inp)]
+        ;; this needs to unify all of the expressions together
+        (make-disjunct (doall (for [match matched]
+                                (if (< (count match) (+ 1 (count Args)))
+                                  (do
+                                    (dyna-warning (str "The regular expression " Regex " does not have enough groups for " (count Args) " variables"))
+                                    (make-multiplicity 0))
+                                  (make-conjunct [(make-no-simp-unify MatchedResult (make-constant (car match)))
+                                                  (make-conjunct (doall (map #(make-no-simp-unify %1 (make-constant %2))
+                                                                             Args (cdr match))))])))))))))
+
+
+;; (doseq [i (range 0 50)]
+;;   (let [vars (map #(symbol (str "v" %)) (range 3 (+ i 4)))]
+;;     (eval `(def-user-term "$regex_match" ~(+ i 3)
+;;              (make-conjunct (make-unify ~(last vars) (make-constant true))
+;;                             (make-regex-matcher v0 v1 v2 ~(vec (drop-last vars))))))))

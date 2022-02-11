@@ -1,0 +1,5 @@
+
+
+generate_parser(Grammar) = $builtin_library("dyna.builtin-libraries.parser-generator/generate-parser", Grammar).
+
+run_parser(Grammar, InputString) = $builtin_library("dyna.builtin-libraries.parser-generator/run-parser", Grammar, InputString).

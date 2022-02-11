@@ -515,12 +515,10 @@
             ["$print" 3] (let [[expression text-rep line-number] (.arguments ast)
                                all-variable-names (find-term-variables expression)
                                result-variable (make-variable 'Result)
-                               rexpr (convert-from-ast expression result-variable {} source-file)
+                               variable-map (into {} (for [v all-variable-names] [v (make-variable v)]))
+                               rexpr (convert-from-ast expression result-variable variable-map source-file)
                                ctx (context/make-empty-context rexpr)
                                result (context/bind-context-raw ctx (simplify-fully rexpr))
-                               ;; zzz (???;;;;;;;;;;;;;;;;;;;;;;;;;;
-                               ;;      )
-                               ;; result (simplify-top rexpr)
                                rel-path (if (instance? URL source-file)
                                           (str (.relativize current-dir-path (Paths/get (.toURI source-file))))
                                           (str source-file))]
@@ -531,6 +529,16 @@
                              (println "Rexpr:" (ctx-exit-context ctx result)))
                            (println "=================================================")
                            (make-unify out-variable (make-constant true)))
+
+            ["$_debug_repl" 3] (let [[expression text-rep line-number] (.arguments ast)
+                                     all-variable-names (find-term-variables expression)
+                                     result-variable (make-variable 'Result)
+                                     variable-map (into {} (for [v all-variable-names] [v (make-variable v)]))
+                                     rexpr (convert-from-ast expression result-variable variable-map source-file)
+                                     ctx (context/make-empty-context rexpr)
+                                     result (context/bind-context-raw ctx (simplify-fully rexpr))]
+                                 (debug-repl)
+                                 (make-unify out-variable (make-constant true)))
 
             ["$query" 2] (let [[expression text-rep] (.arguments ast)
                                all-variables-names (find-term-variables expression)
