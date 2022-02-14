@@ -81,6 +81,24 @@ assert foo = &f(X,Y), X = 1, Y > 1.
 assert_fails foo = &f(X, Y), Y < 1.
 ")
 
+(str-test simple-list "
+f = [1,2,3,4,5].
+assert f=[X,Y|Z], X=1, Y=2, Z=[3,4,5].
+assert_fails f=[3,2|Y].
+")
+
+(str-test concat-list "
+concat([X|Y], Z) := [X|concat(Y,Z)].
+concat(X, []) := X.
+concat([], Y) := Y.
+
+
+
+assert concat([1,2,3], []) = [1,2,3].
+assert concat([], [1,2,3]) = [1,2,3].
+assert_fails concat([1,2,3], []) = [1,2,3,4].
+")
+
 
 (str-test compiler-expression-export "
 :- export foo/1.
@@ -92,7 +110,9 @@ foo(X) = 123.
 
 (str-test colon-aggregator "
 z := 1.
-%debug_repl z.
 assert z = 1.
 
+z := 2.
+assert z = 2.
+assert_fails z = 1.
 ")

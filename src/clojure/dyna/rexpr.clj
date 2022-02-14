@@ -94,7 +94,7 @@
            (cache-field ~'cached-exposed-variables
                         (set
                          (filter is-variable?
-                                 (difference (union (get-variables ~'this)
+                                 (difference (union (set (get-variables ~'this))
                                                     ~@(keep
                                                        #(if (= :rexpr (car %))
                                                           `(exposed-variables ~(cdar %)))

@@ -9,6 +9,10 @@
 ;; this is the current context which is dynamically rebound depending on what is currently running
 ;; this means that we are not passing this value around, which simplifies the calling api a bit
 (def ^{:dynamic true :private true} *context*)
+
+;; global variable which sets the full-context variable on the context.  The
+;; full context tracks /all/ conjunctive constraints rather than just the easy
+;; constraints
 (def ^{:dynamic true :private true} *use-full-context* false)
 
 (defn- make-variable-assignment-conjunct [value-map]
@@ -31,7 +35,8 @@
   (ctx-get-value [this variable]
     (if (contains? value-map variable)
       (get value-map variable)
-      (if (not (nil? parent)) (ctx-get-value parent variable))))
+      (if (not (nil? parent))
+        (ctx-get-value parent variable))))
   (ctx-is-bound? [this variable]
     (or (not (nil? (get value-map variable)))
         (and (not (nil? parent)) (ctx-is-bound? parent variable))))
@@ -147,11 +152,19 @@
 
 (defn make-nested-context-aggregator [rexpr incoming-var is-conjunctive-aggregator]
   (assert (bound? #'*context*))
-  (context. *context* *use-full-context*
-            (if is-conjunctive-aggregator
-              :aggregator-conjunctive  ;; this would mean that we can push through assignments of variables to variables which are outside of this expression.  If something is
-              :aggregator)
-            rexpr #{rexpr} {incoming-var nil}))
+  (let [pcontext *context*]
+    (context. pcontext *use-full-context*
+              (if is-conjunctive-aggregator
+                :aggregator-conjunctive  ;; this would mean that we can push through assignments of variables to variables which are outside of this expression.  If something is
+                :aggregator)
+              rexpr #{rexpr}
+              (if (ctx-is-bound? pcontext incoming-var)
+                {}  ;; the incoming variable is already bound, so we will want
+                    ;; to read the value out of the parent context instead of
+                    ;; creating a local slot for this variable.  This can
+                    ;; happenin the case that the incoming
+                {incoming-var nil})
+              )))
 
 (defmethod print-method context [this ^java.io.Writer w]
   (.write w (.toString ^Object this)))

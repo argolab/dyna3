@@ -251,8 +251,8 @@
                                                disj))
                                            disj))))]
            (if (empty? body1)
-             (do (debug-repl)
-                 (make-unify result-variable (make-constant @agg-val)))  ;; there is nothing else
+             (do ;(debug-repl)
+               (make-unify result-variable (make-constant ((:lower-value aop identity) @agg-val))))  ;; there is nothing else
              ;; that remains, so just
              ;; return the result of aggregation
              ;; make a new aggregator with the body which has combined expressions together
@@ -266,6 +266,7 @@
   :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:unchecked body-is-conjunctive) (:rexpr R))
   (let [aop (get @aggregators operator)
         ctx (context/make-nested-context-aggregator rexpr incoming-variable body-is-conjunctive)]
+    (debug-repl)
     (let [nR (context/bind-context ctx (simplify R))]
       (assert (= true body-is-conjunctive))
       (assert (not (nil? nR)))
@@ -283,8 +284,10 @@
                                              ((:many-items aop)
                                               (get-value-in-context incoming-variable ctx)
                                               (:mult nR))))))
-          (make-aggregator operator result-variable incoming-variable body-is-conjunctive
-                           (make-conjunct [(make-unify incoming-variable
-                                                       (make-constant (get-value-in-context incoming-variable ctx)))
-                                           nR])))
+          (let [incom-val (get-value-in-context incoming-variable ctx)]
+            (when (nil? incom-val) (debug-repl))
+            (make-aggregator operator result-variable incoming-variable body-is-conjunctive
+                             (make-conjunct [(make-unify incoming-variable
+                                                         (make-constant incom-val))
+                                             nR]))))
         (make-aggregator operator result-variable incoming-variable body-is-conjunctive nR)))))
