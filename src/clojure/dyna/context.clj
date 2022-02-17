@@ -197,6 +197,9 @@
      (do ~@args)))
 
 
+(swap! debug-useful-variables assoc 'context get-context)
+
+
 
 ;; there could be some nested variables which are array list based
 ;; those variables would not have the

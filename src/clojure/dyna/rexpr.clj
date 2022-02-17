@@ -24,9 +24,13 @@
 (def rexpr-containers (atom #{}))
 (def rexpr-constructors (atom {}))
 
+(def ^:dynamic *current-matched-rexpr* nil)
+
+(when system/track-where-rexpr-constructed  ;; meaning that the above variable will be defined
+  (swap! debug-useful-variables assoc 'rexpr (fn [] *current-matched-rexpr*)))
+
 (defn construct-rexpr [name & args]
   (apply (get @rexpr-constructors name) args))
-
 
 (defmacro def-base-rexpr [name args & optional]
   (let [vargroup (partition 2 args)
@@ -37,7 +41,7 @@
                 ~(symbol (str "make-no-simp-" name)) ;; this should really be something that is "require context"
                 ~(symbol (str "is-" name "?")))
        (deftype-with-overrides ~(symbol rname) ~(vec (concat (quote [^int cached-hash-code ^:unsynchronized-mutable cached-exposed-variables])
-                                                             (if system/track-where-rexpr-constructed (quote [traceback-to-construction]))
+                                                             (if system/track-where-rexpr-constructed (quote [traceback-to-construction traceback-to-rexpr]))
                                                              (map cdar vargroup)))
          ~opt
          clojure.lang.ILookup
@@ -47,7 +51,10 @@
                               `(~idx ~(cdar var))))
             ~@(apply concat (for [var vargroup]
                               `(~(keyword (cdar var)) ~(cdar var))))
-            ~@(if system/track-where-rexpr-constructed `(:where-constructed ~'traceback-to-construction :constructed-from ~'traceback-to-construction ))
+            ~@(if system/track-where-rexpr-constructed `(:where-constructed ~'traceback-to-construction
+                                                         :constructed-from ~'traceback-to-construction
+                                                         :constructing-rexpr ~'traceback-to-rexpr
+                                                         ))
             ~'not-found))
          ~'(valAt [this name] (let [r (.valAt this name :not-found-result)]
                                 (assert (not= :not-found-result r))
@@ -189,6 +196,7 @@
                                     `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
           nil                           ; the cached unique variables
           ~(if system/track-where-rexpr-constructed `(Throwable.))
+          ~(if system/track-where-rexpr-constructed `dyna.rexpr/*current-matched-rexpr*)
           ~@(map cdar vargroup))
          )
 
@@ -211,6 +219,7 @@
                                     `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
                               nil       ; the cached unique variables
                               ~(if system/track-where-rexpr-constructed `(Throwable.))
+                              ~(if system/track-where-rexpr-constructed `dyna.rexpr/*current-matched-rexpr*)
                               ~@(map cdar vargroup))))
        (swap! rexpr-constructors assoc ~(str name) ~(symbol (str "make-" name)))
        (defn ~(symbol (str "is-" name "?")) ~'[rexpr]
@@ -598,7 +607,13 @@
                      (if (seq? v) ;; if this is something like (:ground v0) then we just want the v0 part
                        (cdar v)
                        v))
-        res (gensym 'res)]
+        res (gensym 'res)
+
+        do-rewrite-body `(let [~res (do ~body)]
+                           ~(when system/print-rewrites-performed
+                              `(when (and (not (nil? ~res)) (not= ~res ~'rexpr))
+                                 (print ~(str "Performed rewrite:"  (meta from-file) "\nOLD: ") ~'rexpr "NEW: " ~res "CONTEXT:" (context/get-context))))
+                           ~res)]
 
     `(fn ~'[rexpr]
        (let [~(vec named-args) (get-arguments ~'rexpr)] ; unsure if using the global function vs the .func is better?
@@ -612,11 +627,10 @@
                               ~arg)) named-args (for [m (cdr matcher)]
                                                   (if (seq? m) (car m) m))))
            ; call the implementation of the rewrite function
-           (let [~res (do ~body)]
-             ~(when system/print-rewrites-performed
-                `(when (and (not (nil? ~res)) (not= ~res ~'rexpr))
-                   (print ~(str "Performed rewrite:"  (meta from-file) "\nOLD: ") ~'rexpr "NEW: " ~res "CONTEXT:" (context/get-context))))
-             ~res)
+           ~(if system/track-where-rexpr-constructed
+              `(binding [dyna.rexpr/*current-matched-rexpr* ~'rexpr]
+                 ~do-rewrite-body)
+              ~do-rewrite-body)
            ; return that there is nothing
            nil)))))
 
@@ -699,6 +713,8 @@
     (ctx-add-rexpr! (context/get-context) ret)  ;; add the R-expr to the context as this is a conjunct that we might want to use
     ret))
 
+(swap! debug-useful-variables assoc simplify (fn [] simplify))
+
 (defn simplify-construct [rexpr]
   (debug-try
    (let [typ (type rexpr)
@@ -769,7 +785,9 @@
   (and (is-variable? var) (not (is-bound? var))))
 
 (def-rewrite-matcher :free [var-name]
-                     (and (is-variable? var-name) (not (is-variable-set? var-name)) var-name))
+  (and (is-variable? var-name)
+       (not (is-variable-set? var-name))
+       var-name))
 
 
 (def-rewrite-matcher :rexpr [rexpr] (rexpr? rexpr))
@@ -879,8 +897,11 @@
 (def-rewrite
   :match (unify-structure (:any out) (:unchecked file-name) (:ground dynabase) (:unchecked name-str) (:ground-var-list arguments))
   (let [dbval (get-value dynabase)
-        arg-vals (map get-value arguments)]
-    (make-unify out (make-constant (DynaTerm. name-str dbval file-name arg-vals)))))
+        arg-vals (map get-value arguments)
+        sterm (DynaTerm. name-str dbval file-name arg-vals)]
+    (when (is-ground? out)
+      (debug-repl "unify-struct"))
+    (make-unify out (make-constant sterm))))
 
 (def-rewrite
   :match (unify-structure (:ground out) (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:any-list arguments))
@@ -907,7 +928,10 @@
 (def-rewrite
   :match (conjunct (:rexpr-list children))  ;; the conjuncts and the disjuncts are going to have to have some expression wihch
   :run-at :standard
-  (make-conjunct (doall (map simplify children))))
+  (let [res (make-conjunct (doall (map simplify children)))]
+    (when (is-multiplicity? res)
+      (debug-repl "conj mult"))
+    res))
 
 (def-rewrite
   ; in the case that there is only 1 argument, this will just run that single argument
@@ -1016,9 +1040,10 @@
 
 (def-rewrite
   ;; proj(A, 1) -> inf
-  :match (proj (:any A) (is-multiplicity? M))
+  :match (proj (:free A) (is-multiplicity? M))
   :run-at :construction
-  (if (not= (get-argument M 0) 0)
+  (when (not= (get-argument M 0) 0)
+    (debug-repl "should not happen")
     (make-multiplicity ##Inf)))
 
 (def-rewrite
@@ -1036,7 +1061,7 @@
             ;; vvv (context/get-inner-values ctx)
             ;; all-bindings (context/get-all-bindings ctx)
             ]
-          ;(debug-repl) ;; this is going to have to propagate the value of the new variable into the body
+          (debug-repl "proj") ;; this is going to have to propagate the value of the new variable into the body
           ;; this is either already done via the context?  Or this is going to be slow if we have a large expression where we have to do lots of
           ;; replacements of the variables
         replaced-R)

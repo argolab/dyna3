@@ -60,11 +60,15 @@
 
 ;; the system.out might be getting messed with.  The system/in is not getting echoed back
 
+(def debug-useful-variables (atom {}))
+
 (defmacro debug-repl
   "Starts a REPL with the local bindings available."
   ([] `(debug-repl "dr"))
   ([prompt]
-   `(let [local-bindings# (debugger-get-local-bindings)]
+   `(let [local-bindings# (merge (into {} (for [[k# v#] @~'dyna.utils/debug-useful-variables]
+                                             [k# (v#)]))
+                                 (debugger-get-local-bindings))]
       (.printStackTrace (Throwable. "Entering Debugger") System/out)
       (aprint local-bindings#)
       (clojure.main/repl
@@ -78,7 +82,7 @@
                                                                 fresh-request#)
                        (contains? ~'#{'locals} res#) (do (aprint local-bindings#)
                                                          fresh-request#)
-                       (contains? ~'#{'locals-names} res#) (do (print (keys local-bindings#))
+                       (contains? ~'#{'locals-names} res#) (do (print (keys local-bindings#) "\n")
                                                                fresh-request#)
                        ;; TODO: this should attempt to lookup names in some context
                        :else res#)))

@@ -87,6 +87,20 @@ assert f=[X,Y|Z], X=1, Y=2, Z=[3,4,5].
 assert_fails f=[3,2|Y].
 ")
 
+(str-test list-length "
+simple_list_length([]) := 0.
+simple_list_length([X]) := 1.
+
+debug_repl simple_list_length([]).
+
+list_length([]) := 0.
+list_length([X|Y]) := list_lenght(Y) + 1.
+
+%assert list_length([1,2,3]) = 3.
+%print list_length([]).
+%print list_length([1,2,3]).
+")
+
 (str-test concat-list "
 concat([X|Y], Z) := [X|concat(Y,Z)].
 concat(X, []) := X.
