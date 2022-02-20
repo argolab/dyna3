@@ -20,10 +20,10 @@
  proj
  aggregator
  if
- user-call
- )
+ user-call)
 
 (declare make-variable
+         make-unique-variable
          is-variable?
          is-variable-set?
          make-constant

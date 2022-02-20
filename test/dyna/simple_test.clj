@@ -142,5 +142,6 @@ partition([X|Xs], Pivot, [X|S], B) :-
 partition([X|Xs], Pivot, S, [X|B]) :-
     partition(Xs, Pivot, S, B) for X >= Pivot.
 
-assert partition([], [], Y, Z), Z = [].
+%assert partition([], [], Y, Z), Z = [].
+assert partition([],0,[],Z).
 ")

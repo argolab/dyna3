@@ -172,6 +172,37 @@
                                                           (cdar v))))
               )))
 
+         (~'remap-variables-handle-hidden ~'[this variable-map-in]
+          ;; this is not allowed to stop early, as in the case that there is  somethign which
+          (let [~'variable-map (assoc ~'variable-map-in  ;; generate new names for
+                                      ~@(apply concat (for [v vargroup]
+                                                        (when (= :hidden-var (car v))
+                                                          [(cdar v) `(make-variable (gensym ~(str "remap-hidden-" name "-" (cdar v))))]))))]
+            (let ~(vec (apply concat (for [v vargroup]
+                                       [(symbol (str "new-" (cdar v)))
+                                        (case (car v)
+                                          :var `(get ~'variable-map ~(cdar v) ~(cdar v))
+                                          :value `(get ~'variable-map ~(cdar v) ~(cdar v))
+                                          :hidden-var `(get ~'variable-map ~(cdar v) ~(cdar v))
+                                          :var-list `(map #(get ~'variable-map % %) ~(cdar v))
+                                          :var-map `(into {} (for [~'[kk vv] ~(cdar v)] [~'kk (get ~'variable-map ~'vv ~'vv)]))
+                                          :var-set-map `(into #{} (for [~'s ~(cdar v)]
+                                                                    (into {} (for [~'[kk vv] ~'s] [~'kk (get ~'variable-map ~'vv ~'vv)]))))
+                                          :rexpr `(remap-variables ~(cdar v) ~'variable-map)
+                                          :rexpr-list `(map #(remap-variables % ~'variable-map) ~(cdar v))
+                                          (cdar v) ;; the default is that this is the same
+                                          )])))
+              (let [result# (~(symbol (str "make-" name)) ~@(for [v vargroup]
+                                                              (symbol (str "new-" (cdar v)))))]
+                (if (= result# ~'this) ;; because something internal might need
+                                       ;; to rename its variables, we can't stop
+                                       ;; early, but we can check that the
+                                       ;; result is different before we return
+                                       ;; something new, so hopefully avoid
+                                       ;; creating too many similar objects
+                  ~'this
+                  result#)))))
+
          Object
          (equals ~'[this other]
            (or (identical? ~'this ~'other)
@@ -278,6 +309,13 @@
 
 (defmethod print-method variable-rexpr [^variable-rexpr this ^java.io.Writer w]
   (.write w (str "(variable " (.varname this) ")")))
+
+;; we can just use (Object.) to create a unique object name.  This will be aster
+;; than having a global counter, but will be "more annoying" to print stuff out...
+(defn make-unique-variable
+  ([] (make-variable (gensym 'unique-var)))
+  ([base-name] (variable-rexpr. (gensym base-name))))
+(intern 'dyna.rexpr-constructors 'make-unique-variable make-unique-variable)
 
 (defrecord constant-value-rexpr [value]
   RexprValue
@@ -452,7 +490,10 @@
 
 
 (def-base-rexpr proj [:hidden-var var
-                      :rexpr body])
+                      :rexpr body]
+  (remap-variables-handle-hidden [this variable-map]
+                                 (let [new-hidden-name (make-variable (gensym 'proj-hidden))]
+                                   (make-proj new-hidden-name (remap-variables-handle-hidden body (assoc variable-map var new-hidden-name))))))
 
 (def-base-rexpr aggregator [:str operator
                             :var result

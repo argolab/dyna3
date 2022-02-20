@@ -361,7 +361,7 @@ termBody[String aname] returns[DynaTerm rterm]
             })?
       {
 
-        if(":-".equals($aname)) {
+        if(":-".equals($aname) || "assert=".equals($aname)) {
             // then we want to make the final result be true regardless of what the expression represents
             // this should go before with_key as it is possible that we want some witness to the result
             $rterm = DynaTerm.create(",", $rterm, DynaTerm.create("\$constant", true));

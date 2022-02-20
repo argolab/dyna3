@@ -169,10 +169,14 @@
                                                    ;; so maybe keeping this something that can be represented as clojure code is better
                                                    [k (make-variable (gensym 'remaped-var))]))))
                          var-map)
-            variable-map-rr (context/bind-no-context
+            variable-map-rr-old (context/bind-no-context
                              (remap-variables
                               (rewrite-user-call-depth rexpr)
-                              var-map-all))]
+                              var-map-all))
+            variable-map-rr (context/bind-no-context
+                             (remap-variables-handle-hidden (rewrite-user-call-depth rexpr)
+                                                            var-map))
+            ]
         (depend-on-assumption (:def-assumption ut))  ;; this should depend on the representational assumption or something.  Like there can be a composit R-expr, but getting optimized does not have to invalidate everything, so there can be a "soft" depend or something
         (dyna-debug (let [exp-var (exposed-variables variable-map-rr)]
                       (when-not (subset? exp-var (set (vals var-map)))

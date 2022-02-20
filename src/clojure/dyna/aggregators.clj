@@ -294,7 +294,7 @@
           (let [incom-val (get-value-in-context incoming-variable ctx)]
             (when (nil? incom-val) (debug-repl))
             (make-aggregator operator result-variable incoming-variable body-is-conjunctive
-                             (make-conjunct [(make-unify incoming-variable
+                             (make-conjunct [(make-no-simp-unify incoming-variable
                                                          (make-constant incom-val))
                                              nR]))))
         (make-aggregator operator result-variable incoming-variable body-is-conjunctive nR)))))

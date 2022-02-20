@@ -813,7 +813,7 @@
 
 (def-rewrite
   :match (eval-from-ast (:any out-variable) (:ground ast) (:unchecked variable-name-mapping) (:unchecked source-file))
-  :run-at :construction ;; this should run at both standard time and construction
+  :run-at [:standard :construction] ;; this should run at both standard time and construction
                                         ;:run-at :standard-and-construction ;; this should run when it is constructed and when it might have a ground variable
   (let [a (get-value ast)]
     (convert-from-ast a out-variable variable-name-mapping source-file)))
