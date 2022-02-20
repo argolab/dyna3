@@ -91,26 +91,16 @@ assert_fails f=[3,2|Y].
 simple_list_length([]) := 0.
 simple_list_length([X]) := 1.
 
-debug_repl simple_list_length([]).
+assert 0 = simple_list_length([]).
+assert 1 = simple_list_length([1]).
 
 list_length([]) := 0.
-list_length([X|Y]) := list_lenght(Y) + 1.
+list_length([X|Y]) := list_length(Y) + 1.
 
-%assert list_length([1,2,3]) = 3.
-%print list_length([]).
-%print list_length([1,2,3]).
-")
+assert 0 = list_length([]).
+assert 1 = list_length([1]).
 
-(str-test concat-list "
-concat([X|Y], Z) := [X|concat(Y,Z)].
-concat(X, []) := X.
-concat([], Y) := Y.
-
-
-
-assert concat([1,2,3], []) = [1,2,3].
-assert concat([], [1,2,3]) = [1,2,3].
-assert_fails concat([1,2,3], []) = [1,2,3,4].
+assert 3 = list_length([1,2,3]).
 ")
 
 
@@ -129,4 +119,28 @@ assert z = 1.
 z := 2.
 assert z = 2.
 assert_fails z = 1.
+")
+
+
+
+(str-test concat-list "
+concat([X|Y], Z) := [X|concat(Y,Z)].
+concat(X, []) := X.
+concat([], Y) := Y.
+
+assert concat([1,2,3], []) = [1,2,3].
+assert concat([], [1,2,3]) = [1,2,3].
+assert_fails concat([1,2,3], []) = [1,2,3,4].
+
+assert concat([1,2,3], [4,5,6]) = [1,2,3,4,5,6].
+")
+
+(str-test partition-list-test "
+partition([], _, [], []).
+partition([X|Xs], Pivot, [X|S], B) :-
+    partition(Xs, Pivot, S, B) for X < Pivot.
+partition([X|Xs], Pivot, S, [X|B]) :-
+    partition(Xs, Pivot, S, B) for X >= Pivot.
+
+assert partition([], [], Y, Z), Z = [].
 ")

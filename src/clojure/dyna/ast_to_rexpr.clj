@@ -508,7 +508,7 @@
                                                       (convert-from-ast expression (make-constant true) variable-name-mapping source-file))
                                 result (simplify-top rexpr)]
                             (when-not (= wants-to-succeed (= result (make-multiplicity 1)))
-                              (dyna-debug (debug-repl)) ;; when in debug mode, stop here when an assert fails
+                              (dyna-debug (debug-repl "user program assert failed")) ;; when in debug mode, stop here when an assert fails
                               (throw (DynaUserAssert. source-file line-number text-rep result)))
                             (make-unify out-variable (make-constant true))) ;; if the assert fails, then it will throw some exception
 
@@ -537,7 +537,7 @@
                                      rexpr (convert-from-ast expression result-variable variable-map source-file)
                                      ctx (context/make-empty-context rexpr)
                                      result (context/bind-context-raw ctx (simplify-fully rexpr))]
-                                 (debug-repl)
+                                 (debug-repl "user program debug repl")
                                  (make-unify out-variable (make-constant true)))
 
             ["$query" 2] (let [[expression text-rep] (.arguments ast)

@@ -5,6 +5,7 @@
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
   (:require [dyna.assumptions :refer [invalidate! make-assumption depend-on-assumption]])
+  (:require [clojure.set :refer [subset?]])
   (:import [dyna.rexpr user-call-rexpr]))
 
 
@@ -141,6 +142,11 @@
 (def-rewrite
   :match (user-call (:unchecked name) (:unchecked var-map) (#(< % @system/user-recursion-limit) call-depth) (:unchecked parent-call-arguments))
   (let [ut (get-user-term name)]
+    ;; (if (.contains (str name) "list_length")
+    ;;   (debug-repl "ucall"))
+    (if (nil? ut)
+      (dyna-warning (str "Did not find method " (:name name) "/" (:arity name) " from file " (:source-file name))))
+
     (when ut  ;; this should really be a warning or something in the case that it can't be found. Though we might also need to create some assumption that nothing is defined...
       (let [rexprs (:rexprs ut)
             rexpr (combine-user-rexprs rexprs)
@@ -168,4 +174,7 @@
                               (rewrite-user-call-depth rexpr)
                               var-map-all))]
         (depend-on-assumption (:def-assumption ut))  ;; this should depend on the representational assumption or something.  Like there can be a composit R-expr, but getting optimized does not have to invalidate everything, so there can be a "soft" depend or something
+        (dyna-debug (let [exp-var (exposed-variables variable-map-rr)]
+                      (when-not (subset? exp-var (set (vals var-map)))
+                        (debug-repl "should not happen, extra exposed variables"))))
         variable-map-rr))))

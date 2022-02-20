@@ -14,9 +14,8 @@ concat([], Y) := Y.
 concat(X, []) := X.
 concat([X|Xs], Y) := [X|concat(Xs, Y)].
 
-
-debug_repl concat([1,2], [3,4]).
-
 %assert concat([1,2], [3,4]) = [1,2,3,4].
+
+print quicksort([2,3,4,1]).
 
 %assert quicksort([2,3,4,1]) = [1,2,3,4].

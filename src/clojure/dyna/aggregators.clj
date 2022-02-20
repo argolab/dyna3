@@ -107,10 +107,13 @@
                            (make-lessthan-eq result-variable (make-constant current-value)))
     :rexpr-binary-op make-min))
 
+
+(def-aggregator ":-"
+  :identity false
+  :combine (fn [a b] (or a b))
+  :saturate #(= true %))
+
 (comment
-  (def-aggregator ":-"
-    :combine (fn [a b] (or a b))
-    :saturate #(= true %))
   ;; this aggregator is already going to have that the incoming variable is unified with the expression which corresponds with
 
   (def-aggregator "|="
@@ -191,7 +194,8 @@
         ;;(debug-repl)
       (when-not (or (is-constant? incoming-variable)
                     ;;(let [eee (exposed-variables R)])
-                    (contains? (exposed-variables R) incoming-variable)) ;; check that the variable is in the body of the expression
+                    (contains? (exposed-variables R) incoming-variable)
+                    (is-empty-rexpr? R)) ;; check that the variable is in the body of the expression
         (debug-repl)
         (assert false))
       nil)) ;; this is just a check, so we make no rewrites in this case
@@ -206,7 +210,7 @@
   (when (and (is-unify? R)
              (= (:a R) incoming-variable)
              (is-bound? (:b R))) ;; I think that we don't need to care if the other side of the unfication is ground, though maybe only if the body is conjunctive, or we can always remove the aggregator
-    (do (debug-repl)
+    (do ;(debug-repl)
         (if body-is-conjunctive
           (let [agg (get @aggregators operator)
                 lower (:lower-value agg identity)]
@@ -266,10 +270,13 @@
   :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:unchecked body-is-conjunctive) (:rexpr R))
   (let [aop (get @aggregators operator)
         ctx (context/make-nested-context-aggregator rexpr incoming-variable body-is-conjunctive)]
-    (debug-repl)
+    (when (nil? aop)
+      (debug-repl "aggregator operator not found"))
+    ;(debug-repl)
     (let [nR (context/bind-context ctx (simplify R))]
       (assert (= true body-is-conjunctive))
       (assert (not (nil? nR)))
+      (debug-repl "agg1")
       (if (is-bound-in-context? incoming-variable ctx)
         (if (is-multiplicity? nR)
           ;; then we need to multiply in the result
@@ -279,7 +286,7 @@
                 (make-unify result-variable (make-constant (:identity aop))))
             1 (let [val (get-value-in-context incoming-variable ctx)]
                 (make-unify result-variable (make-constant ((:lower-value aop identity) val))))
-            (do (debug-repl)
+            (do ;(debug-repl)
                 (make-unify result-variable (make-constant
                                              ((:many-items aop)
                                               (get-value-in-context incoming-variable ctx)

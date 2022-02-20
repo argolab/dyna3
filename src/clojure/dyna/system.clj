@@ -58,7 +58,7 @@
 ;;                    :lock (Object.)})
 
 ;; how many times a user-defined function can be expanded before we stop expanding
-(def ^:dynamic user-recursion-limit (atom default-recursion-limit))
+(def ^:dynamic user-recursion-limit (atom default-recursion-limit))  ;; this does not need to really be an atom?  it can just hold the value directly
 
 ;; if a query is made, where it should get printed to
 (def ^:dynamic query-output println)

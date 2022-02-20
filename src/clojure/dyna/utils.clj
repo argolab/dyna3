@@ -66,9 +66,14 @@
   "Starts a REPL with the local bindings available."
   ([] `(debug-repl "dr"))
   ([prompt]
-   `(let [local-bindings# (merge (into {} (for [[k# v#] @~'dyna.utils/debug-useful-variables]
-                                             [k# (v#)]))
-                                 (debugger-get-local-bindings))]
+   `(let [local-bindings# (debugger-get-local-bindings)
+          all-bindings#  (merge (into {} (for [[k# v#] @~'dyna.utils/debug-useful-variables]
+                                           [k# (v#)]))
+                                (into {} (for [[k# v#] (ns-publics 'dyna.rexpr-constructors)]
+                                           [k# (var-get v#)]))
+                                (into {} (for [[k# v#] (ns-publics 'dyna.base-protocols)]
+                                           [k# (var-get v#)]))
+                                 local-bindings#)]
       (.printStackTrace (Throwable. "Entering Debugger") System/out)
       (aprint local-bindings#)
       (clojure.main/repl
@@ -87,7 +92,7 @@
                        ;; TODO: this should attempt to lookup names in some context
                        :else res#)))
        :prompt #(print ~prompt "=> ")
-       :eval (partial ~eval-with-locals local-bindings#)))))
+       :eval (partial ~eval-with-locals all-bindings#)))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -197,5 +202,13 @@
     `(try ~@args)
     (first args)))
 
+
+(def ^{:private true} warnings-shown-so-far (atom {}))
+
 (defn dyna-warning [msg]
-  (println "WARNING" msg))
+  (let [shown-count (get @warnings-shown-so-far msg 0)]
+    (when (< shown-count 3)
+      (swap! warnings-shown-so-far update msg inc)
+      (println "=============================================")
+      (println "WARNING" msg)
+      (println "============================================="))))

@@ -25,9 +25,13 @@
 (def rexpr-constructors (atom {}))
 
 (def ^:dynamic *current-matched-rexpr* nil)
+(def ^:dynamic *current-top-level-rexpr* nil)
 
 (when system/track-where-rexpr-constructed  ;; meaning that the above variable will be defined
-  (swap! debug-useful-variables assoc 'rexpr (fn [] *current-matched-rexpr*)))
+  (swap! debug-useful-variables assoc
+         'rexpr (fn [] *current-matched-rexpr*)
+         'rexpr-top-level (fn [] *current-top-level-rexpr*)
+         ))
 
 (defn construct-rexpr [name & args]
   (apply (get @rexpr-constructors name) args))
@@ -51,10 +55,10 @@
                               `(~idx ~(cdar var))))
             ~@(apply concat (for [var vargroup]
                               `(~(keyword (cdar var)) ~(cdar var))))
-            ~@(if system/track-where-rexpr-constructed `(:where-constructed ~'traceback-to-construction
-                                                         :constructed-from ~'traceback-to-construction
+            ~@(if system/track-where-rexpr-constructed `[:constructed-where ~'traceback-to-construction
+                                                         :where-constructed ~'traceback-to-construction
                                                          :constructing-rexpr ~'traceback-to-rexpr
-                                                         ))
+                                                         :constructed-from ~'traceback-to-rexpr])
             ~'not-found))
          ~'(valAt [this name] (let [r (.valAt this name :not-found-result)]
                                 (assert (not= :not-found-result r))
@@ -713,7 +717,7 @@
     (ctx-add-rexpr! (context/get-context) ret)  ;; add the R-expr to the context as this is a conjunct that we might want to use
     ret))
 
-(swap! debug-useful-variables assoc simplify (fn [] simplify))
+(swap! debug-useful-variables assoc 'simplify (fn [] simplify))
 
 (defn simplify-construct [rexpr]
   (debug-try
@@ -736,13 +740,20 @@
 
 ;; the context is assumed to be already constructed outside of this function
 ;; this will need for something which needs for the given functionq
-(defn simplify-fully [rexpr]
-  (let [prev (atom nil)
-        cr (atom rexpr)]
-    (while (not= @cr @prev)
-      (reset! prev @cr)
-      (swap! cr simplify))
-    @cr))
+(if system/track-where-rexpr-constructed
+  (defn simplify-fully [rexpr]
+    (loop [cr rexpr]
+      (let [nr (binding [*current-top-level-rexpr* cr]
+                 (simplify cr))]
+        (if (not= cr nr)
+          (recur nr)
+          nr))))
+  (defn simplify-fully [rexpr]
+    (loop [cr rexpr]
+      (let [nr (simplify cr)]
+        (if (not= cr nr)
+          (recur nr)
+          nr)))))
 
 (defn simplify-top [rexpr]
   (let [ctx (context/make-empty-context rexpr)]
@@ -794,6 +805,8 @@
 
 (def-rewrite-matcher :rexpr-list [rexpr-list]
                      (and (seqable? rexpr-list) (every? rexpr? rexpr-list)))
+
+(def-rewrite-matcher :empty-rexpr [rexpr] (is-empty-rexpr? rexpr))
 
 
 ;; something that has a name first followed by a number of different unified expressions
@@ -852,7 +865,7 @@
   ;; the matched variable should have what value is the result of the matched expression.
   :match (unify (:ground A) (:ground B))
   :run-at :construction
-  (if (= A B)
+  (if (= (get-value A) (get-value B))
     (make-multiplicity 1)
     (make-multiplicity 0)))
 
@@ -899,19 +912,20 @@
   (let [dbval (get-value dynabase)
         arg-vals (map get-value arguments)
         sterm (DynaTerm. name-str dbval file-name arg-vals)]
-    (when (is-ground? out)
-      (debug-repl "unify-struct"))
+    ;;(debug-repl "uf1")
     (make-unify out (make-constant sterm))))
 
 (def-rewrite
   :match (unify-structure (:ground out) (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:any-list arguments))
   (let [out-val (get-value out)]
-    (if-not (or (instance? DynaTerm out-val)
-                (not= (.name ^DynaTerm out-val) name-str)
-                (not= (.arity ^DynaTerm out-val) (count arguments)))
+    (if (or (not (instance? DynaTerm out-val))
+            (not= (.name ^DynaTerm out-val) name-str)
+            (not= (.arity ^DynaTerm out-val) (count arguments)))
       (make-multiplicity 0) ;; the types do not match, so this is nothing
-      (make-conjunct (into [] (map (fn [a b] (make-unify a (make-constant b)))
-                                   arguments (.arguments ^DynaTerm out-val)))))))
+      (let [conj-map (into [] (map (fn [a b] (make-unify a (make-constant b)))
+                                   arguments (.arguments ^DynaTerm out-val)))]
+        ;(debug-repl "uf2")
+        (make-conjunct conj-map)))))
 
 (def-rewrite
   :match (unify-structure-get-meta (:ground struct) (:any dynabase) (:any from-file))
@@ -929,8 +943,6 @@
   :match (conjunct (:rexpr-list children))  ;; the conjuncts and the disjuncts are going to have to have some expression wihch
   :run-at :standard
   (let [res (make-conjunct (doall (map simplify children)))]
-    (when (is-multiplicity? res)
-      (debug-repl "conj mult"))
     res))
 
 (def-rewrite
@@ -1061,7 +1073,7 @@
             ;; vvv (context/get-inner-values ctx)
             ;; all-bindings (context/get-all-bindings ctx)
             ]
-          (debug-repl "proj") ;; this is going to have to propagate the value of the new variable into the body
+          ;(debug-repl "proj") ;; this is going to have to propagate the value of the new variable into the body
           ;; this is either already done via the context?  Or this is going to be slow if we have a large expression where we have to do lots of
           ;; replacements of the variables
         replaced-R)
