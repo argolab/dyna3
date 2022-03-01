@@ -81,7 +81,9 @@
                     (into {} (for [[k v] variable-name-mapping]
                                [k (get variable-map v v)]))
                     source-file ;; this is just some constant
-                    )))
+                    ))
+  (remap-variables-handle-hidden [this variable-map]
+                                 (remap-variables this variable-map)))
 
 
 (declare import-file-url)
@@ -351,7 +353,7 @@
 
             ["$define_term" 4] (let [[head dynabase aggregator body] (.arguments ^DynaTerm ast)
                                      new-body (make-comma-conjunct
-                                               (apply make-comma-conjunct (for [[arg idx] (zipmap (.arguments ^DynaTerm head) (range))]
+                                               (apply make-comma-conjunct (for [[idx arg] (zipmap  (range) (.arguments ^DynaTerm head))]
                                                                             (DynaTerm. "$unify" [(DynaTerm. "$variable" [(str "$" idx)])
                                                                                                  arg])))
                                                (DynaTerm. "$unify" [(DynaTerm. "$variable" ["$self"])

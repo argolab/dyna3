@@ -268,7 +268,7 @@ term returns[DynaTerm rterm = null]
             String ttext = $t.ctx.start.getInputStream().getText(new Interval($t.ctx.start.getStartIndex(), $t.ctx.stop.getStopIndex()));
             $rterm = DynaTerm.create("\$assert", $t.rterm, ttext, $t.ctx.getStart().getLine(), true);
         }
-    | 'assert_fails'
+    | ('assert_fails'|'assert_fail')
         t=termBody["assert="] EndTerm
         {
             // this is something that should fail with the unification.  So that we can test that something should also return multiplicity 0.

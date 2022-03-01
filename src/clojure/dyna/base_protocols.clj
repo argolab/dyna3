@@ -56,6 +56,9 @@
 
 
 
-(defrecord Dynabase [access-map])
+(defrecord Dynabase [access-map]
+  Object
+  (toString [this]
+    (str "(Dynabase " access-map ")")))
 
 (def undefined-dynabase (Dynabase. nil))

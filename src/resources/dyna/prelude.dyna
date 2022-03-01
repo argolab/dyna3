@@ -1,9 +1,9 @@
-:- export key/1.
+% :- export key/1.
 
-:- dispose key(quote1).
-:- make_system_term key/1.
-key(QuotedName) = $reflect(QuotedName, Dynabase, Name, _),
-                  $get_key_for_expression(Dynabase, Name, QuotedName).
+% :- dispose key(quote1).
+% :- make_system_term key/1.
+% key(QuotedName) = $reflect(QuotedName, Dynabase, Name, _),
+%                   $get_key_for_expression(Dynabase, Name, QuotedName).
 
 
 :- export list/1.

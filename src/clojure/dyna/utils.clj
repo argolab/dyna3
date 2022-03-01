@@ -62,37 +62,71 @@
 
 (def debug-useful-variables (atom {}))
 
+(defn- debug-repl-fn [prompt local-bindings ^Throwable traceback]
+  (let [all-bindings  (merge (into {} (for [[k v] @debug-useful-variables]
+                                        [k (v)]))
+                             (into {} (for [[k v] (ns-publics 'dyna.rexpr-constructors)]
+                                        [k (var-get v)]))
+                             (into {} (for [[k v] (ns-publics 'dyna.base-protocols)]
+                                        [k (var-get v)]))
+                             local-bindings)]
+    (.printStackTrace traceback System/out)
+    (aprint local-bindings)
+    (clojure.main/repl
+     :read (fn [fresh-request exit-request]
+             (let [res (clojure.main/repl-read fresh-request exit-request)]
+                                        ;(println "===========\n" res# "\n" (type res#) "\n==========")
+               (cond (contains? #{'quit 'exit} res) (do (System/exit 0)
+                                                        fresh-request)
+                     (contains? #{'c 'continue} res) exit-request  ;; exit the eval loop
+                     (contains? #{'bt 'backtrace} res) (do (.printStackTrace traceback System/out)
+                                                           fresh-request)
+                     (contains? #{'locals} res) (do (aprint local-bindings)
+                                                    fresh-request)
+                     (contains? #{'locals-names} res) (do (print (keys local-bindings) "\n")
+                                                          fresh-request)
+                     ;; TODO: this should attempt to lookup names in some context
+                     :else res)))
+     :prompt #(print prompt "=> ")
+     :eval (partial eval-with-locals all-bindings))))
+
+
 (defmacro debug-repl
   "Starts a REPL with the local bindings available."
   ([] `(debug-repl "dr"))
-  ([prompt]
-   `(let [local-bindings# (debugger-get-local-bindings)
-          all-bindings#  (merge (into {} (for [[k# v#] @~'dyna.utils/debug-useful-variables]
-                                           [k# (v#)]))
-                                (into {} (for [[k# v#] (ns-publics 'dyna.rexpr-constructors)]
-                                           [k# (var-get v#)]))
-                                (into {} (for [[k# v#] (ns-publics 'dyna.base-protocols)]
-                                           [k# (var-get v#)]))
-                                 local-bindings#)]
-      (.printStackTrace (Throwable. "Entering Debugger") System/out)
-      (aprint local-bindings#)
-      (clojure.main/repl
-       :read (fn [fresh-request# exit-request#]
-               (let [res# (clojure.main/repl-read fresh-request# exit-request#)]
-                 ;(println "===========\n" res# "\n" (type res#) "\n==========")
-                 (cond (contains? ~'#{'quit 'exit} res#) (do (System/exit 0)
-                                                             fresh-request#)
-                       (contains? ~'#{'c 'continue} res#) exit-request#  ;; exit the eval loop
-                       (contains? ~'#{'bt 'backtrace} res#) (do (.printStackTrace (Throwable. "Entering Debugger") System/out)
-                                                                fresh-request#)
-                       (contains? ~'#{'locals} res#) (do (aprint local-bindings#)
-                                                         fresh-request#)
-                       (contains? ~'#{'locals-names} res#) (do (print (keys local-bindings#) "\n")
-                                                               fresh-request#)
-                       ;; TODO: this should attempt to lookup names in some context
-                       :else res#)))
-       :prompt #(print ~prompt "=> ")
-       :eval (partial ~eval-with-locals all-bindings#)))))
+  ([prompt] `(~debug-repl-fn ~prompt (debugger-get-local-bindings) (Throwable. "Entering Debugger"))))
+
+;; (defmacro debug-repl
+;;   "Starts a REPL with the local bindings available."
+;;   ([] `(debug-repl "dr"))
+;;   ([prompt]
+;;    `(let [local-bindings# (debugger-get-local-bindings)
+;;           all-bindings#  (merge (into {} (for [[k# v#] @~'dyna.utils/debug-useful-variables]
+;;                                            [k# (v#)]))
+;;                                 (into {} (for [[k# v#] (ns-publics 'dyna.rexpr-constructors)]
+;;                                            [k# (var-get v#)]))
+;;                                 (into {} (for [[k# v#] (ns-publics 'dyna.base-protocols)]
+;;                                            [k# (var-get v#)]))
+;;                                  local-bindings#)]
+;;       (.printStackTrace (Throwable. "Entering Debugger") System/out)
+;;       (aprint local-bindings#)
+;;       (clojure.main/repl
+;;        :read (fn [fresh-request# exit-request#]
+;;                (let [res# (clojure.main/repl-read fresh-request# exit-request#)]
+;;                  ;(println "===========\n" res# "\n" (type res#) "\n==========")
+;;                  (cond (contains? ~'#{'quit 'exit} res#) (do (System/exit 0)
+;;                                                              fresh-request#)
+;;                        (contains? ~'#{'c 'continue} res#) exit-request#  ;; exit the eval loop
+;;                        (contains? ~'#{'bt 'backtrace} res#) (do (.printStackTrace (Throwable. "Entering Debugger") System/out)
+;;                                                                 fresh-request#)
+;;                        (contains? ~'#{'locals} res#) (do (aprint local-bindings#)
+;;                                                          fresh-request#)
+;;                        (contains? ~'#{'locals-names} res#) (do (print (keys local-bindings#) "\n")
+;;                                                                fresh-request#)
+;;                        ;; TODO: this should attempt to lookup names in some context
+;;                        :else res#)))
+;;        :prompt #(print ~prompt "=> ")
+;;        :eval (partial ~eval-with-locals all-bindings#)))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -194,11 +228,11 @@
 
 
 (defmacro dyna-debug [& args]
-  (if true;(java.lang.Boolean/getBoolean "dyna.debug")
+  (if (= "true" (System/getProperty "dyna.debug" "true"))
     `(do ~@args)))
 
 (defmacro debug-try [& args]
-  (if true;;(java.lang.Boolean/getBoolean "dyna.debug")
+  (if (= "true" (System/getProperty "dyna.debug" "true"))
     `(try ~@args)
     (first args)))
 

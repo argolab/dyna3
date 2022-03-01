@@ -111,7 +111,9 @@
 (def-aggregator ":-"
   :identity false
   :combine (fn [a b] (or a b))
-  :saturate #(= true %))
+  :saturate #(= true %)
+  :add-to-out-rexpr (fn [current-value result-variable]  ;; want to force the result to be true
+                      (make-unify result-variable (make-constant true))))
 
 (comment
   ;; this aggregator is already going to have that the incoming variable is unified with the expression which corresponds with
@@ -157,8 +159,7 @@
                          valvar (make-variable (gensym))]
                      (fn [current-value incoming-variable]
                        (let [[line val] (.arguments ^DynaTerm current-value)]
-                         (make-proj-many [linevar valvar] (make-conjunct [
-                                                                          (make-unify-structure incoming-variable (make-constant nil)
+                         (make-proj-many [linevar valvar] (make-conjunct [(make-unify-structure incoming-variable (make-constant nil)
                                                                                                 "$colon_line_tracking" [linevar valvar])
                                                                           (make-lessthan-eq (make-constant line) linevar)])))))
   :add-to-out-rexpr (fn [current-value result-variable]
@@ -276,7 +277,7 @@
     (let [nR (context/bind-context ctx (simplify R))]
       (assert (= true body-is-conjunctive))
       (assert (not (nil? nR)))
-      (debug-repl "agg1")
+      ;;(debug-repl "agg1")
       (if (is-bound-in-context? incoming-variable ctx)
         (if (is-multiplicity? nR)
           ;; then we need to multiply in the result
@@ -292,9 +293,9 @@
                                               (get-value-in-context incoming-variable ctx)
                                               (:mult nR))))))
           (let [incom-val (get-value-in-context incoming-variable ctx)]
-            (when (nil? incom-val) (debug-repl))
+            (dyna-debug (when (nil? incom-val) (debug-repl)))
             (make-aggregator operator result-variable incoming-variable body-is-conjunctive
                              (make-conjunct [(make-no-simp-unify incoming-variable
-                                                         (make-constant incom-val))
+                                                                 (make-constant incom-val))
                                              nR]))))
         (make-aggregator operator result-variable incoming-variable body-is-conjunctive nR)))))

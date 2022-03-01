@@ -68,6 +68,13 @@
         value {:source-file source-file
                :dynabase dynabase
                :rexpr rexpr}]
+    (dyna-debug
+     (let [exp-vars (exposed-variables rexpr)]
+       (when-not (and (subset? exp-vars (into #{} (for [i (range (+  1 arity))]
+                                                    (make-variable (str "$" i)))))
+                      (contains? exp-vars (make-variable (str "$" arity))))
+         (debug-repl "add to user term error")
+         (assert false))))
     (let [[old-defs new-defs]
           (swap-vals! system/user-defined-terms (fn [old]
                                                   (let [v (get old object-name)
@@ -112,7 +119,7 @@
                              (map :rexpr term-bodies))
            strip-agg (fn [in-var r]
                        (if (is-aggregator? r)
-                         (remap-variables (:body r)
+                         (remap-variables-handle-hidden (:body r)
                                           {(:incoming r) in-var})
                          r))
            make-aggs (fn [op out-var in-var rexprs]
@@ -135,15 +142,13 @@
        (if (> (count groupped-aggs) 1)
          (let [intermediate-var (make-variable (gensym 'comb2_incoming_var))]
            (make-aggs "only_one_contrib" (first out-vars) intermediate-var
-                      (map #(remap-variables % {(first out-vars) intermediate-var}) (vals groupped-aggs))))
+                      (map #(remap-variables-handle-hidden % {(first out-vars) intermediate-var}) (vals groupped-aggs))))
          (first (vals groupped-aggs)))))))
 
 
 (def-rewrite
   :match (user-call (:unchecked name) (:unchecked var-map) (#(< % @system/user-recursion-limit) call-depth) (:unchecked parent-call-arguments))
   (let [ut (get-user-term name)]
-    ;; (if (.contains (str name) "list_length")
-    ;;   (debug-repl "ucall"))
     (if (nil? ut)
       (dyna-warning (str "Did not find method " (:name name) "/" (:arity name) " from file " (:source-file name))))
 
@@ -159,20 +164,20 @@
                                           ;(debug-repl)
                                           new-call)
                                         (rewrite-rexpr-children rexpr rucd)))
-            all-variables (get-all-variables-rec rexpr)
-            var-map-all (merge
-                         (into {} (remove nil? (for [k all-variables]
-                                                 (when-not (contains? k var-map)
-                                                   ;; these remapped variables could just be a unique object, where the object
-                                                   ;; would use its hascode and define equals as the identity.
-                                                   ;; but that would prevent it from creating a representation for the variable that could be used later
-                                                   ;; so maybe keeping this something that can be represented as clojure code is better
-                                                   [k (make-variable (gensym 'remaped-var))]))))
-                         var-map)
-            variable-map-rr-old (context/bind-no-context
-                             (remap-variables
-                              (rewrite-user-call-depth rexpr)
-                              var-map-all))
+            ;; all-variables (get-all-variables-rec rexpr)
+            ;; var-map-all (merge
+            ;;              (into {} (remove nil? (for [k all-variables]
+            ;;                                      (when-not (contains? k var-map)
+            ;;                                        ;; these remapped variables could just be a unique object, where the object
+            ;;                                        ;; would use its hascode and define equals as the identity.
+            ;;                                        ;; but that would prevent it from creating a representation for the variable that could be used later
+            ;;                                        ;; so maybe keeping this something that can be represented as clojure code is better
+            ;;                                        [k (make-variable (gensym 'remaped-var))]))))
+            ;;              var-map)
+            ;; variable-map-rr-old (context/bind-no-context
+            ;;                  (remap-variables
+            ;;                   (rewrite-user-call-depth rexpr)
+            ;;                   var-map-all))
             variable-map-rr (context/bind-no-context
                              (remap-variables-handle-hidden (rewrite-user-call-depth rexpr)
                                                             var-map))

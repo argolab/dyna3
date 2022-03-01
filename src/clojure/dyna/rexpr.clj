@@ -26,12 +26,14 @@
 
 (def ^:dynamic *current-matched-rexpr* nil)
 (def ^:dynamic *current-top-level-rexpr* nil)
+(def ^:dynamic *current-simplify-stack* [])
 
 (when system/track-where-rexpr-constructed  ;; meaning that the above variable will be defined
   (swap! debug-useful-variables assoc
          'rexpr (fn [] *current-matched-rexpr*)
          'rexpr-top-level (fn [] *current-top-level-rexpr*)
-         ))
+         'top-level-rexpr (fn [] *current-top-level-rexpr*)
+         'simplify-stack (fn [] *current-simplify-stack*)))
 
 (defn construct-rexpr [name & args]
   (apply (get @rexpr-constructors name) args))
@@ -174,10 +176,13 @@
 
          (~'remap-variables-handle-hidden ~'[this variable-map-in]
           ;; this is not allowed to stop early, as in the case that there is  somethign which
-          (let [~'variable-map (assoc ~'variable-map-in  ;; generate new names for
-                                      ~@(apply concat (for [v vargroup]
-                                                        (when (= :hidden-var (car v))
-                                                          [(cdar v) `(make-variable (gensym ~(str "remap-hidden-" name "-" (cdar v))))]))))]
+          (let [~'variable-map ~(if (some #{:hidden-var} (map car vargroup))
+                                  `(assoc ~'variable-map-in ;; generate new names for
+                                          ~@(apply concat (for [v vargroup]
+                                                            (when (= :hidden-var (car v))
+                                                              [(cdar v) `(make-variable (gensym ~(str "remap-hidden-" name "-" (cdar v))))]))))
+                                  'variable-map-in  ;; there is nothing new for this, so can't use assoc
+                                  )]
             (let ~(vec (apply concat (for [v vargroup]
                                        [(symbol (str "new-" (cdar v)))
                                         (case (car v)
@@ -493,7 +498,12 @@
                       :rexpr body]
   (remap-variables-handle-hidden [this variable-map]
                                  (let [new-hidden-name (make-variable (gensym 'proj-hidden))]
-                                   (make-proj new-hidden-name (remap-variables-handle-hidden body (assoc variable-map var new-hidden-name))))))
+                                   (make-proj new-hidden-name (remap-variables-handle-hidden body (assoc variable-map var new-hidden-name)))))
+  (remap-variables [this variable-map]
+                   (dyna-debug (when-not (not (some #{var} (vals variable-map)))
+                                 (debug-repl "bad remap")))
+
+                   (make-proj var (remap-variables body variable-map))))
 
 (def-base-rexpr aggregator [:str operator
                             :var result
@@ -675,7 +685,7 @@
            ~(if system/track-where-rexpr-constructed
               `(binding [dyna.rexpr/*current-matched-rexpr* ~'rexpr]
                  ~do-rewrite-body)
-              ~do-rewrite-body)
+              do-rewrite-body)
            ; return that there is nothing
            nil)))))
 
@@ -796,6 +806,14 @@
           (recur nr)
           nr)))))
 
+(when system/track-where-rexpr-constructed
+  (let [orig-simplify simplify
+        orig-simplify-construct simplify-construct]
+    (defn simplify [rexpr] (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
+                             (orig-simplify rexpr)))
+    (defn simplify-construct [rexpr] (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
+                                       (orig-simplify-construct rexpr)))))
+
 (defn simplify-top [rexpr]
   (let [ctx (context/make-empty-context rexpr)]
     (context/bind-context ctx
@@ -833,7 +851,7 @@
                                         ; though we might not want to have the matchers identifying a given expression
   (is-ground? var-name))
 
-(def-rewrite-matcher :not-ground [var]
+(def-rewrite-matcher :not-ground [var] ;; TODO: I think I can just use :free instead of :not-ground, through the is only used by the unification construction
   (and (is-variable? var) (not (is-bound? var))))
 
 (def-rewrite-matcher :free [var-name]
@@ -905,7 +923,7 @@
 (def-rewrite
   ;; the matched variable should have what value is the result of the matched expression.
   :match (unify (:ground A) (:ground B))
-  :run-at :construction
+  :run-at [:standard :construction]
   (if (= (get-value A) (get-value B))
     (make-multiplicity 1)
     (make-multiplicity 0)))
@@ -933,6 +951,7 @@
   :run-at [:standard :construction] ; this will want to run at construction and when it encounters the value so that we can use it as early as possible
   (when (context/has-context)
     ;;(debug-repl)
+    (assert (not (is-ground? A))) ;; otherwise the setting the value into the context should fail
     (set-value! A (get-value B))
     (make-multiplicity 1)))
 
@@ -949,15 +968,19 @@
   (make-iterator A [(get-value B)]))
 
 (def-rewrite
-  :match (unify-structure (:any out) (:unchecked file-name) (:ground dynabase) (:unchecked name-str) (:ground-var-list arguments))
+  :match (unify-structure (:free out) (:unchecked file-name) (:ground dynabase) (:unchecked name-str) (:ground-var-list arguments))
+  :run-at [:construction :standard]
   (let [dbval (get-value dynabase)
         arg-vals (map get-value arguments)
         sterm (DynaTerm. name-str dbval file-name arg-vals)]
-    ;;(debug-repl "uf1")
-    (make-unify out (make-constant sterm))))
+    (when (is-ground? out)
+        (debug-repl "uf1"))
+    (let [res (make-unify out (make-constant sterm))]
+      res)))
 
 (def-rewrite
   :match (unify-structure (:ground out) (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:any-list arguments))
+  :run-at [:construction :standard]
   (let [out-val (get-value out)]
     (if (or (not (instance? DynaTerm out-val))
             (not= (.name ^DynaTerm out-val) name-str)
@@ -965,8 +988,9 @@
       (make-multiplicity 0) ;; the types do not match, so this is nothing
       (let [conj-map (into [] (map (fn [a b] (make-unify a (make-constant b)))
                                    arguments (.arguments ^DynaTerm out-val)))]
-        ;(debug-repl "uf2")
+        (when-not conj-map (debug-repl "uf2"))
         (make-conjunct conj-map)))))
+
 
 (def-rewrite
   :match (unify-structure-get-meta (:ground struct) (:any dynabase) (:any from-file))
@@ -981,7 +1005,7 @@
 
 
 (def-rewrite
-  :match (conjunct (:rexpr-list children))  ;; the conjuncts and the disjuncts are going to have to have some expression wihch
+  :match (conjunct (:rexpr-list children))
   :run-at :standard
   (let [res (make-conjunct (doall (map simplify children)))]
     res))
@@ -1036,6 +1060,18 @@
   (apply union (map find-iterators children)))
 
 
+
+;; (def-rewrite
+;;   :match (disjunct (:rexpr-list children))
+;;   :is-debug-rewrite true
+;;   :run-at :construction
+;;   (do
+;;     (let [args-set (into #{} (map exposed-variables children))]
+;;       (when-not (= 1 (count args-set))
+;;         (debug-repl "different exposed args disjunct")))
+;;     nil))
+
+
 (def-rewrite
   :match (disjunct ((fn [x] (= 1 (count x))) children))
   :run-at :construction
@@ -1081,9 +1117,8 @@
                                                      child-rexpr)))]
     ;; the intersected context is what can be passed up to the parent, we are going to have to make new contexts for the children
     (ctx-add-context! outer-context intersected-ctx)
-    ;(debug-repl)
+    ;(debug-repl "disjunct standard")
     (make-disjunct children-with-contexts)))
-
 
 (def-rewrite
   ;; this is proj(A, 0) -> 0
@@ -1173,3 +1208,13 @@
   [function result args]
   (assert (fn? function))
   (make-simple-function-call function result args))
+
+
+
+;; (def-rewrite
+;;   :match (multiplicity (:unchecked mult))
+;;   :run-at :construction
+;;   (do
+;;     (when (= 0 mult)
+;;       (debug-repl "zero mult"))
+;;     nil))

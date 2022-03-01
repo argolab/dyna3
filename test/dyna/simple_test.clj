@@ -135,13 +135,48 @@ assert_fails concat([1,2,3], []) = [1,2,3,4].
 assert concat([1,2,3], [4,5,6]) = [1,2,3,4,5,6].
 ")
 
+
+(str-test list-val-inequality "
+ineq([X|Y], Z, 2) :- X < Z.
+ineq([X|Y], Z, 3) :- X > Z.
+
+rr(A, B) := W for ineq(A, B, W).  %  force the third argument to be the result instead of driving the query
+
+assert ineq([1], 2, 2).
+assert_fails ineq([2], 2, 2).
+assert ineq([3], 2, 3).
+
+assert rr([1], 2) = 2.
+debug_repl rr([2], 2).
+")
+
+(str-test list-copy "
+list_copy([], []).
+list_copy([A|B], [A|C]) :- list_copy(B, C).
+
+assert list_copy([1,2,3], [1,2,3]).
+assert_fail X=[1], Y=[], list_copy(X, Y).
+assert_fail X=[1,2,3,4], Y=[1,2,3], list_copy(X, Y).
+
+rr(X) := Y for list_copy(X, Y).
+assert rr([1,2,3]) = [1,2,3].
+")
+
 (str-test partition-list-test "
 partition([], _, [], []).
+
 partition([X|Xs], Pivot, [X|S], B) :-
     partition(Xs, Pivot, S, B) for X < Pivot.
+
 partition([X|Xs], Pivot, S, [X|B]) :-
     partition(Xs, Pivot, S, B) for X >= Pivot.
 
+%%%%%%%%%%%%%%%%%%%
+
 %assert partition([], [], Y, Z), Z = [].
-assert partition([],0,[],Z).
+%assert partition([],0,[],Z).
+%assert partition([1,2,3], 2, [1], [2,3]).
+
+%debug_repl partition([1], 2, X, Y), X.
+debug_repl partition([1], 2, A, B), A.
 ")

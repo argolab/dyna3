@@ -153,7 +153,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-jvm_args+="-Xmx$memory -Ddyna.print_rewrites_performed=$debug_mode"
+jvm_args+="-Xmx$memory -Ddyna.print_rewrites_performed=$debug_mode -Ddyna.debug=$debug_mode"
 
 if [ -z "$dyna_args" ]; then
    welcome_message
