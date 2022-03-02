@@ -74,7 +74,9 @@
                                                     (make-variable (str "$" i)))))
                       (contains? exp-vars (make-variable (str "$" arity))))
          (debug-repl "add to user term error")
-         (assert false))))
+         (assert false)))
+     (when-not (is-aggregator? rexpr)
+       (debug-repl "adding without aggregator")))
     (let [[old-defs new-defs]
           (swap-vals! system/user-defined-terms (fn [old]
                                                   (let [v (get old object-name)
@@ -112,7 +114,9 @@
   (context/bind-no-context ;; this is something that should be the same regardless of whatever nested context we are in
    (if (= 1 (count term-bodies))
      (:rexpr (first term-bodies))
-     (let [out-vars (into #{} (map #(:result (:rexpr %)) term-bodies))
+     (let [out-vars (try (into #{} (map #(:result (:rexpr %))
+                                        term-bodies))
+                         (catch AssertionError e (debug-repl "assert error")))
            grouped (group-by (fn [rexpr]
                                (if (is-aggregator? rexpr)
                                  (:operator rexpr)))

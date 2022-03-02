@@ -119,6 +119,11 @@ assert z = 1.
 z := 2.
 assert z = 2.
 assert_fails z = 1.
+
+f(X) := 1 for X > 0.
+
+assert f(1) = 1.
+assert_fail _ is f(-1).
 ")
 
 

@@ -174,6 +174,27 @@
                                                           (cdar v))))
               )))
 
+         (~'rewrite-rexpr-children-no-simp ~'[this remap-function]
+          (let ~(vec (apply concat
+                            (for [v vargroup]
+                              (when (contains? #{:rexpr :rexpr-list} (car v))
+                                [(symbol (str "new-" (cdar v)))
+                                 (case (car v)
+                                   :rexpr `(~'remap-function ~(cdar v))
+                                   :rexpr-list `(map ~'remap-function ~(cdar v)))]
+                                ))))
+            (if (and ~@(for [v vargroup]
+                         (when (contains? #{:rexpr :rexpr-list} (car v))
+                           `(= ~(cdar v) ~(symbol (str "new-" (cdar v)))))))
+              ~'this ;; return unchanged
+              ;; this might want to use the simplification method on the returned result.  That will let it get the at construction
+              ;; time rewrites
+              (~(symbol (str "make-no-simp-" name)) ~@(for [v vargroup]
+                                                        (if (contains? #{:rexpr :rexpr-list} (car v))
+                                                          (symbol (str "new-" (cdar v)))
+                                                          (cdar v))))
+              )))
+
          (~'remap-variables-handle-hidden ~'[this variable-map-in]
           ;; this is not allowed to stop early, as in the case that there is  somethign which
           (let [~'variable-map ~(if (some #{:hidden-var} (map car vargroup))
@@ -193,8 +214,8 @@
                                           :var-map `(into {} (for [~'[kk vv] ~(cdar v)] [~'kk (get ~'variable-map ~'vv ~'vv)]))
                                           :var-set-map `(into #{} (for [~'s ~(cdar v)]
                                                                     (into {} (for [~'[kk vv] ~'s] [~'kk (get ~'variable-map ~'vv ~'vv)]))))
-                                          :rexpr `(remap-variables ~(cdar v) ~'variable-map)
-                                          :rexpr-list `(map #(remap-variables % ~'variable-map) ~(cdar v))
+                                          :rexpr `(remap-variables-handle-hidden ~(cdar v) ~'variable-map)
+                                          :rexpr-list `(map #(remap-variables-handle-hidden % ~'variable-map) ~(cdar v))
                                           (cdar v) ;; the default is that this is the same
                                           )])))
               (let [result# (~(symbol (str "make-" name)) ~@(for [v vargroup]

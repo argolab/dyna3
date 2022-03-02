@@ -90,8 +90,9 @@
 
 
 
-;; would like to remove excess proj statements unifications with constants and other variables
-;; in the case that the variables
+;; would like to remove excess proj statements which unify with a constant and
+;; unifications between two variables, as we can just select one of the
+;; variables and remove the other from the expression
 (defn optimize-rexpr
   ([rexpr] (let [[unified-vars new-rexpr] (optimize-rexpr rexpr #{})]
              new-rexpr))
@@ -108,7 +109,9 @@
                                                  ;; then there is some variable that we can use to replace this statement
                                                  ;; if it is a constant, then we can do the replacement such that it will avoid
                                                  (let [const (some is-constant? self-var)
-                                                       replace-with (if const (first (filter is-constant? self-var)) (first self-var))]
+                                                       replace-with (if const
+                                                                      (first (filter is-constant? self-var))
+                                                                      (first self-var))]
                                                    (remap-variables nested-rexpr {ufv replace-with}))
 
                                                  (if (= nested-rexpr prexpr)
@@ -127,7 +130,7 @@
                                   rexpr) ;; there is no change to the expression here
               (is-disjunct? rexpr) rexpr ;; we do not evaluate disjunctions for variables which might get unified together
               :else ;; otherwise we should check all of the children of the expression to see if there is some structure
-              (rewrite-rexpr-children rexpr
+              (rewrite-rexpr-children-no-simp rexpr
                                       (fn [r]
                                         (let [[unifies nr] (optimize-rexpr r proj-out-vars)]
                                           (doseq [[k v] unifies]
@@ -353,7 +356,7 @@
 
             ["$define_term" 4] (let [[head dynabase aggregator body] (.arguments ^DynaTerm ast)
                                      new-body (make-comma-conjunct
-                                               (apply make-comma-conjunct (for [[idx arg] (zipmap  (range) (.arguments ^DynaTerm head))]
+                                               (apply make-comma-conjunct (for [[idx arg] (zipmap (range) (.arguments ^DynaTerm head))]
                                                                             (DynaTerm. "$unify" [(DynaTerm. "$variable" [(str "$" idx)])
                                                                                                  arg])))
                                                (DynaTerm. "$unify" [(DynaTerm. "$variable" ["$self"])
@@ -392,11 +395,11 @@
                                                                              (merge project-variables-map
                                                                                     argument-variables)
                                                                              source-file)
-                                                rexpr (make-aggregator aggregator
-                                                                       aggregator-result-variable
-                                                                       incoming-variable
-                                                                       true ;; meaning that the body is conjunctive, so if the result of the body is 0, the the aggregator will be 0 also (instead of identity)
-                                                                       (make-proj-many (vals project-variables-map)
+                                                rexpr (make-no-simp-aggregator aggregator
+                                                                               aggregator-result-variable
+                                                                               incoming-variable
+                                                                               true ;; meaning that the body is conjunctive, so if the result of the body is 0, the the aggregator will be 0 also (instead of identity)
+                                                                               (make-proj-many (vals project-variables-map)
                                                                                        body-rexpr))]
                                             (add-to-user-term source-file dynabase functor-name functor-arity
                                                               (optimize-rexpr rexpr))

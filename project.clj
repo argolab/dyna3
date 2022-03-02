@@ -9,7 +9,9 @@
                  [com.clojure-goes-fast/clj-java-decompiler "0.3.0"]
                  [org.antlr/antlr4-runtime "4.7.2"]
                  [org.jline/jline "3.20.0"]
-                 [robert/hooke "1.3.0"]]
+                 [robert/hooke "1.3.0"]
+                 [jise "0.1.0-SNAPSHOT"] ;; can get more control over the generated java classes
+                 ]
   :repl-options {:init-ns dyna.core}
   ;; :aot [dyna.interface
   ;;       dyna.parser_interface]
