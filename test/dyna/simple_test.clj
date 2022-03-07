@@ -10,7 +10,8 @@
   (eval-string "assert_fails 1 = 0.")
   (is true)
   (try (do
-         (eval-string "assert 1 = 0.") ;; this should fail, and it will run an assert
+         (binding [dyna.system/debug-on-assert-fail false]
+           (eval-string "assert 1 = 0.")) ;; this should fail, and it will run an assert
          (is false))
        (catch DynaUserAssert e
          (is (not= -1 (.indexOf (.toString e) "Assert "))))))
@@ -152,7 +153,6 @@ assert_fails ineq([2], 2, 2).
 assert ineq([3], 2, 3).
 
 assert rr([1], 2) = 2.
-debug_repl rr([2], 2).
 ")
 
 (str-test list-copy "
@@ -178,10 +178,22 @@ partition([X|Xs], Pivot, S, [X|B]) :-
 
 %%%%%%%%%%%%%%%%%%%
 
-%assert partition([], [], Y, Z), Z = [].
-%assert partition([],0,[],Z).
-%assert partition([1,2,3], 2, [1], [2,3]).
+assert partition([], [], Y, Z), Z = [].
+assert partition([],0,[],Z).
+assert partition([1,2,3], 2, [1], [2,3]).
+")
 
-%debug_repl partition([1], 2, X, Y), X.
-debug_repl partition([1], 2, A, B), A.
+
+(str-test min-aggregator "
+foo(X) min= X.
+foo(X) min= 7.
+
+assert foo(1) = 1.
+assert foo(10) = 7.
+
+mm(X) max= X.
+mm(X) max= 7.
+
+assert mm(10) = 10.
+assert mm(1) = 7.
 ")

@@ -576,51 +576,6 @@
 ;; represented by some expression.  This will correspond with
 
 
-
-;; multiple levels of matching variables should also be a thing that was
-;; integrated into the aggregator before, or the disjunction included that it
-;; was matching the expression
-
-(defn- recurse-values-depth [m depth]
-  (if (= depth 0)
-    (vals m)
-    (lazy-seq (map #(recurse-values-depth % (- depth 1)) (vals m)))))
-
-
-;; I suppose that in the case that there are non-ground disjunction-variables, then this would still need this structure
-;; once all of the disjunct variables are ground, then this can just rewrite as the wrapped R-expr.  I suppose that this can
-;; also consider which of the variables are forced to take a particular value.  Then those can be created as unification expressions
-;; such that it will take which of the values might corresponds with it having some of the different
-(def-base-rexpr disjunct-op [:var-list disjunction-variables
-                             ;:disjunct-trie rexprs
-                             :unchecked rexprs
-                             ]
-  ;; (primitive-rexpr [this] (assert false))
-  ;; (get-children [this] (assert false))
-  ;; (primitive-rexpr [this] ;; this would have to construct many disjuncts for the given expression.
-  ;;                  )
-
-  ;; this will need to walk through all of the rexprs trie and find the depth in
-  ;; which an expression corresponds with it.  I suppose that we do not need to
-  ;; have a list of disjuncts, as those can just be other disjunctive R-exprs in
-  ;; the case that there is more than 1 thing
-  (get-children [this] (recurse-values-depth rexprs (count disjunction-variables)))
-
-  (remap-variables
-   [this variable-renaming-map]
-   (if (empty? variable-renaming-map) this
-       (let [new-disjuncts (map #(get variable-renaming-map % %) disjunction-variables)]
-         ;; if one of the variables is a constant, then we can avoid keeping the entire structure
-         ;; also we might want to have some of the expressions
-
-         (assert false)
-         )
-       )
-   )
-
-  )
-
-
 (defn make-proj-many [vars R]
   (if (empty? vars)
     R
@@ -805,6 +760,7 @@
 
    (catch StackOverflowError e
      (do (println "Stack overflow when trying to construct " rexpr)
+         ;(debug-repl "stack overflow")
          (throw e)))))
 
 
@@ -838,7 +794,8 @@
 (defn simplify-top [rexpr]
   (let [ctx (context/make-empty-context rexpr)]
     (context/bind-context ctx
-                          (simplify-fully rexpr))))
+                          (try (simplify-fully rexpr)
+                               (catch UnificationFailure e (make-multiplicity 0))))))
 
 (defn simplify-rexpr-query [query-id rexpr]
   ;; TODO: we might want to make this construct some table for the expression.  So what representation would come back from the expression
@@ -1129,7 +1086,8 @@
   (let [outer-context (context/get-context)
         new-children (doall (for [child children]
                               (let [ctx (context/make-nested-context-disjunct child)
-                                    new-rexpr (context/bind-context-raw ctx (simplify child))]
+                                    new-rexpr (context/bind-context-raw ctx (try (simplify child)
+                                                                                 (catch UnificationFailure e (make-multiplicity 0))))]
                                 [new-rexpr ctx])))
         intersected-ctx (reduce ctx-intersect (map second new-children))
         children-with-contexts (doall
@@ -1204,9 +1162,16 @@
   :match (user-call (:unchecked name) (:unchecked var-map) (:unchecked call-depth) (:unchecked parent-call-arguments))
   :run-at :construction
   (let [n [(:name name) (:arity name)] ;; this is how the name for built-in R-exprs are represented.  There is no info about the file
-        s (get @system/system-defined-user-term n)]
+        s (or (get @system/system-defined-user-term n)
+              (get @system/globally-defined-user-term n))]
     (when s
-      (remap-variables s var-map))))
+      (when (.contains (str name) "foo")
+        (debug-repl "fail foo builtin??"))
+      (debug-try (remap-variables s var-map)
+           (catch Exception error
+             (try (debug-repl "user call overflow")
+                  (catch Exception error2 (throw error)))
+             (throw error))))))
 
 ;; does this want to allow for user defined system terms to expand, if something is recursive, then we don't want to expand those eagerly.  Also, we will want for those to still be stack depth limited
 ;; I suppose that we could have the things which bottom out in built-ins would have it can still expand these early

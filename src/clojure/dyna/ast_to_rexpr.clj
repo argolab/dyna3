@@ -17,12 +17,13 @@
 
 
 
-(def pending-parser-work (atom clojure.lang.PersistentQueue/EMPTY))
+;; (comment
+;;   (def pending-parser-work (atom clojure.lang.PersistentQueue/EMPTY))
 
-(defn push-parser-work [w] (swap! pending-parser-work conj w))
-(defn pop-parser-work []
-  (let [[old new] (swap-vals! pending-parser-work pop)]
-    (peek old)))
+;;   (defn push-parser-work [w] (swap! pending-parser-work conj w))
+;;   (defn pop-parser-work []
+;;     (let [[old new] (swap-vals! pending-parser-work pop)]
+;;       (peek old))))
 
 
 ;; if we provide some way for a string to be converted into an AST, and then
@@ -92,7 +93,11 @@
 
 ;; would like to remove excess proj statements which unify with a constant and
 ;; unifications between two variables, as we can just select one of the
-;; variables and remove the other from the expression
+;; variables and remove the other from the expression.
+;;
+;; the reason we do this here instead of letting the standard simplification
+;; handle this is that the parser will generate many intermediate values that
+;; are "useless"
 (defn optimize-rexpr
   ([rexpr] (let [[unified-vars new-rexpr] (optimize-rexpr rexpr #{})]
              new-rexpr))
@@ -336,7 +341,7 @@
                                                                                                         (range (+ arity 1))))
                                                                                           0 #{})
                                                                     ]
-                                                                (swap! system/system-defined-user-term
+                                                                (swap! system/globally-defined-user-term
                                                                        assoc [name arity] rexpr))
 
 
@@ -513,7 +518,8 @@
                                                       (convert-from-ast expression (make-constant true) variable-name-mapping source-file))
                                 result (simplify-top rexpr)]
                             (when-not (= wants-to-succeed (= result (make-multiplicity 1)))
-                              (dyna-debug (debug-repl "user program assert failed")) ;; when in debug mode, stop here when an assert fails
+                              (if dyna.system/debug-on-assert-fail
+                                (debug-repl "user program assert failed")) ;; when in debug mode, stop here when an assert fails
                               (throw (DynaUserAssert. source-file line-number text-rep result)))
                             (make-unify out-variable (make-constant true))) ;; if the assert fails, then it will throw some exception
 

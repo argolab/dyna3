@@ -15,9 +15,15 @@
   (Integer/valueOf (System/getProperty "dyna.recursion_limit" "20")))
 
 
-;; terms which are included by the system.  These will get automattically replaced once the objects are created in the first place
-;; these should not be recursive statements or anything
+;; terms which are included by the system.  These will get automattically
+;; replaced once the objects are created in the first place these should not be
+;; recursive statements or anything
 (def system-defined-user-term (atom {}))
+
+;; terms which are also like the system defined user terms, but these are
+;; defined by the user using `:-make_system_term a/1.` These are assocated with
+;; the current running dyna system, so it is marked as dynamic
+(def ^:dynamic globally-defined-user-term (atom {}))
 
 ;; anytime that a user definition changes, there should be a corresponding
 ;; assumption which changes, there is going to need to be some atomic function
@@ -63,6 +69,8 @@
 ;; if a query is made, where it should get printed to
 (def ^:dynamic query-output println)
 
+(def ^:dynamic debug-on-assert-fail true)
+
 ;; this should ensure that there are system-defined-user-terms also.  could have some flag which is "system is inited" and that it would parse
 ;; the prelude in the case that it wasn't already inited or something?  It would want for
 (defn make-new-dyna-system []
@@ -73,6 +81,7 @@
    :user-recursion-limit (atom default-recursion-limit)
    :query-output println
    :system-is-inited (atom false)
+   :globally-defined-user-term (atom {})
    })
 
 
@@ -83,7 +92,8 @@
                imported-files (:imported-files state#)
                work-agenda (:work-agenda state#)
                user-recursion-limit (:user-recursion-limit state#)
-               query-output (:query-output state#)]
+               query-output (:query-output state#)
+               globally-defined-user-term (:globally-defined-user-term state#)]
        (when-not @(:system-is-inited state#)
          ((var-get #'dyna.core/init-system))
          (reset! (:system-is-inited state#) true))

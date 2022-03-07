@@ -6,11 +6,14 @@
                                          make-add make-times make-min make-max make-lor make-land
                                          make-not-equals]])
   (:require [dyna.term :refer :all])
-  (:import (dyna UnificationFailure DynaTerm DynaUserError))
+  (:import (dyna UnificationFailure DynaTerm DynaUserError ParserUtils))
   (:import [dyna.rexpr aggregator-rexpr])
   (:require [dyna.context :as context]))
 
 (def aggregators (atom {}))
+
+(defn is-aggregator-defined? [^String name]
+  (contains? @aggregators name))
 
 (defn def-aggregator [name & args]
   (let [kw-args (apply hash-map args)
@@ -46,13 +49,13 @@
 (comment (def-aggregator "prob+="
            :combine +))
 
-(comment
-  (def-aggregator "="
-    ;; in the case that there are two different, then that is an error, though not 100% sure where the unification failure is going to pop up in this case???
-    :combine (fn [a b]
-               (if (not= a b)
-                 (throw (UnificationFailure. "The equals aggregator (=) requires only one contribution"))
-                 a))))
+(def-aggregator "="
+  ;; in the case that there are two different, then that is an error, though not 100% sure where the unification failure is going to pop up in this case???
+  :combine (fn [a b]
+             (if (not= a b)
+               (throw (UnificationFailure. "The equals aggregator (=) requires only one contribution"))
+               a))
+  :identity DynaTerm/null_term)
 
 ;; used if there are multiple aggregators on a single rule which need to get combined together
 ;; this will throw an exception if we attempt to combine multiple expressions together at once
@@ -78,34 +81,35 @@
 ;; to avoid having to have some lambda names or something.  I suppoose that it
 ;; could have some current value expression with this looking through
 
-(comment
-  (def-aggregator "max="
-    :combine (fn [a b] (if (> (get-aggregated-value a) (get-aggregated-value b)) a b))
-    :allows-with-key true
-    ;; this will let us add expressions to the R-expr so that this can eleminate branches which are not useful
-    :add-to-rexpr-incoming (fn [current-value incoming-variable]  ;; this would mean that there needs to be some optional stuff for these, or some way in which assumptions can be tracked for these branches.  We don't want to store these expressions in the case that
-                             (make-lessthan-eq (make-constant current-value) incoming-variable))
-    :add-to-rexpr-result (fn [current-value result-variable]
-                           (make-lessthan-eq (make-constant current-value) result-variable))
-    :rexpr-binary-op make-max)
+(def-aggregator "max="
+  :combine (fn [a b] (if (> (get-aggregated-value a) (get-aggregated-value b)) a b))
+  :identity ##-Inf
+  :allows-with-key true
+  ;; this will let us add expressions to the R-expr so that this can eleminate branches which are not useful
+  :add-to-rexpr-incoming (fn [current-value incoming-variable]  ;; this would mean that there needs to be some optional stuff for these, or some way in which assumptions can be tracked for these branches.  We don't want to store these expressions in the case that
+                           (make-lessthan-eq (make-constant current-value) incoming-variable))
+  :add-to-rexpr-result (fn [current-value result-variable]
+                         (make-lessthan-eq (make-constant current-value) result-variable))
+  :rexpr-binary-op make-max)
 
 
-  (def-aggregator "min="
-    :combine (fn [a b] (if (< (get-aggregated-value a) (get-aggregated-value b)) a b))
-    :allows-with-key true
-    ;; this add-to-rexpr will have to know if with-key is included in the expression.
-    ;; this would mean that it somehow removes the unification in the case
-    :add-to-rexpr-incoming (fn [current-value incoming-variable]
-                             (make-lessthan-eq incoming-variable (make-constant current-value)))
-    ;; adding some information to the result of the expression would allow for
-    ;; this to indicate that the resulting value will at least be greater than
-    ;; what the current expression is.  having some lessthan expression added on
-    ;; the result side will allow for this to replicate alpha-beta pruning as a
-    ;; strategy These lessthan expressions should then be able to combine together
-    ;; to eleminate branches
-    :add-to-rexpr-result (fn [current-value result-variable]
-                           (make-lessthan-eq result-variable (make-constant current-value)))
-    :rexpr-binary-op make-min))
+(def-aggregator "min="
+  :combine (fn [a b] (if (< (get-aggregated-value a) (get-aggregated-value b)) a b))
+  :identity ##Inf
+  :allows-with-key true
+  ;; this add-to-rexpr will have to know if with-key is included in the expression.
+  ;; this would mean that it somehow removes the unification in the case
+  :add-to-rexpr-incoming (fn [current-value incoming-variable]
+                           (make-lessthan-eq incoming-variable (make-constant current-value)))
+  ;; adding some information to the result of the expression would allow for
+  ;; this to indicate that the resulting value will at least be greater than
+  ;; what the current expression is.  having some lessthan expression added on
+  ;; the result side will allow for this to replicate alpha-beta pruning as a
+  ;; strategy These lessthan expressions should then be able to combine together
+  ;; to eleminate branches
+  :add-to-rexpr-result (fn [current-value result-variable]
+                         (make-lessthan-eq result-variable (make-constant current-value)))
+  :rexpr-binary-op make-min)
 
 
 (def-aggregator ":-"
@@ -141,7 +145,7 @@
 ;; value with another expression as this will not know the "order" in which expressions are contributed
 ;; (def ^:private colon-equals-counter (atom 0))
 ;; (defn get-colon-equals-count [] (swap! colon-equals-counter inc))
-(defn get-colon-equals-count [] (DynaTerm/colon_line_counter))
+(defn get-colon-equals-count [] (ParserUtils/colon_line_counter))
 
 (def colon-identity-elem (DynaTerm. "$null" []))
 
@@ -274,7 +278,8 @@
     (when (nil? aop)
       (debug-repl "aggregator operator not found"))
     ;(debug-repl)
-    (let [nR (context/bind-context ctx (simplify R))]
+    (let [nR (context/bind-context ctx (try (simplify R)
+                                            (catch UnificationFailure e (make-multiplicity 0))))]
       (assert (= true body-is-conjunctive))
       (assert (not (nil? nR)))
       ;;(debug-repl "agg1")

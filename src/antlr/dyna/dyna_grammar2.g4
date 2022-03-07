@@ -12,6 +12,7 @@ package dyna;
 
 import java.math.BigInteger;
 import clojure.java.api.Clojure;
+import static dyna.ParserUtils.*;
 
 }
 
@@ -371,7 +372,7 @@ termBody[String aname] returns[DynaTerm rterm]
         }
         if(":=".equals($aname)) {
             $rterm = DynaTerm.create("\$quote1", DynaTerm.create("\$colon_line_tracking",
-                                                                 DynaTerm.create("\$constant", DynaTerm.colon_line_counter()),
+                                                                 DynaTerm.create("\$constant", colon_line_counter()),
                                                                  $rterm));
         }
       }
@@ -589,7 +590,7 @@ expressionRoot returns [DynaTerm rterm]
     | v=Variable {
             if($v.getText().equals("_")) {
                 // this is an anon variable that is not referenced from multiple places
-                $rterm = DynaTerm.create("\$variable", DynaTerm.gensym_variable_name());
+                $rterm = DynaTerm.create("\$variable", gensym_variable_name());
             } else {
                 $rterm = DynaTerm.create("\$variable", $v.getText());
             }
@@ -605,7 +606,7 @@ expressionRoot returns [DynaTerm rterm]
     //   }
     | a=array { $rterm = $a.rterm; }
     | ':' m=methodCall {  // for supporthing things like f(:int) => f(_:int)
-            $rterm = DynaTerm.create("\$variable", DynaTerm.gensym_variable_name());
+            $rterm = DynaTerm.create("\$variable", gensym_variable_name());
             $m.args.add($rterm);
             $rterm = DynaTerm.create(",", DynaTerm.create($m.name, $m.args), $rterm); }
     | mp=assocativeMap { $rterm=$mp.rterm; }
@@ -674,7 +675,7 @@ expressionTyped returns [DynaTerm rterm]
 locals [DynaTerm result_variable]
     : a=expressionAddBrakcetsCall {$rterm=$a.rterm;}
     | a=expressionAddBrakcetsCall {
-            $result_variable = DynaTerm.create("\$variable", DynaTerm.gensym_variable_name());
+            $result_variable = DynaTerm.create("\$variable", gensym_variable_name());
             $rterm = DynaTerm.create("\$unify", $result_variable, $a.rterm);
         }
         (':' b=expressionTypedUnioned {
@@ -724,7 +725,7 @@ locals[ArrayList<DynaTerm> expressions, ArrayList<String> ops]
                 // this isn't needed in the case that the nested expression is a variable or constant
                 // those can just get duplicated
                 if(!("\$variable".equals($expressions.get(i).name) || "\$constant".equals($expressions.get(i).name))) {
-                    DynaTerm tmp_var = DynaTerm.create("\$variable", DynaTerm.gensym_variable_name());
+                    DynaTerm tmp_var = DynaTerm.create("\$variable", gensym_variable_name());
                     DynaTerm uf = DynaTerm.create("\$unify", tmp_var, $expressions.get(i));
                     $rterm = $rterm == null ? uf : DynaTerm.create(",", $rterm, uf);
                     $expressions.set(i, tmp_var);
