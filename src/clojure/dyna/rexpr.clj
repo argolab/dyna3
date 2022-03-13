@@ -23,6 +23,7 @@
 
 (def rexpr-containers (atom #{}))
 (def rexpr-constructors (atom {}))
+(def rexpr-containers-signature (atom {}))
 
 (def ^:dynamic *current-matched-rexpr* nil)
 (def ^:dynamic *current-top-level-rexpr* nil)
@@ -43,9 +44,14 @@
         rname (str name "-rexpr")
         opt (if (not (nil? optional)) (vec optional) [])]
     `(do
+       (swap! rexpr-containers-signature assoc '~name (quote ~vargroup))
        (declare ~(symbol (str "make-" name))
                 ~(symbol (str "make-no-simp-" name)) ;; this should really be something that is "require context"
                 ~(symbol (str "is-" name "?")))
+       (intern 'dyna.rexpr-constructors '~(symbol (str "simplify-" name)) identity)
+       (intern 'dyna.rexpr-constructors '~(symbol (str "simplify-construct-" name)) identity)
+       (intern 'dyna.rexpr-constructors '~(symbol (str "simplify-inference-" name)) identity)
+
        (deftype-with-overrides ~(symbol rname) ~(vec (concat (quote [^int cached-hash-code ^:unsynchronized-mutable cached-exposed-variables])
                                                              (if system/track-where-rexpr-constructed (quote [traceback-to-construction traceback-to-rexpr]))
                                                              (map cdar vargroup)))
@@ -256,8 +262,7 @@
                                   (for [[var idx] (zipmap vargroup (range))]
                                     `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
           nil                           ; the cached unique variables
-          ~(if system/track-where-rexpr-constructed `(Throwable.))
-          ~(if system/track-where-rexpr-constructed `dyna.rexpr/*current-matched-rexpr*)
+          ~@(if system/track-where-rexpr-constructed `[(Throwable.) dyna.rexpr/*current-matched-rexpr*])
           ~@(map cdar vargroup))
          )
 
@@ -279,8 +284,7 @@
                                   (for [[var idx] (zipmap vargroup (range))]
                                     `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
                               nil       ; the cached unique variables
-                              ~(if system/track-where-rexpr-constructed `(Throwable.))
-                              ~(if system/track-where-rexpr-constructed `dyna.rexpr/*current-matched-rexpr*)
+                              ~@(if system/track-where-rexpr-constructed `[(Throwable.) dyna.rexpr/*current-matched-rexpr*])
                               ~@(map cdar vargroup))))
        (swap! rexpr-constructors assoc ~(str name) ~(symbol (str "make-" name)))
        (defn ~(symbol (str "is-" name "?")) ~'[rexpr]
@@ -291,6 +295,9 @@
        (intern 'dyna.rexpr-constructors '~(symbol (str "make-" name)) ~(symbol (str "make-" name)))
        (intern 'dyna.rexpr-constructors '~(symbol (str "make-no-simp-" name)) ~(symbol (str "make-no-simp-" name)))
        (intern 'dyna.rexpr-constructors '~(symbol (str "is-" name "?")) ~(symbol (str "is-" name "?")))
+       ;; (swap! rexpr-rewrites-func assoc ~(symbol (str name "-rexpr")) identity)
+       ;; (swap! rexpr-rewrites-construct-func assoc ~(symbol (str name "-rexpr")) identity)
+       ;; (swap! rexpr-rewrites-inference-func assoc ~(symbol (str name "-rexpr")) identity)
        )))
 
 
@@ -597,8 +604,22 @@
 (def rexpr-rewrites-construct (atom {})) ; run at the time of construction
 (def rexpr-rewrites-inference (atom {})) ; run to construct new objects, but there are
 
+(def rexpr-rewrites-func (atom {}))
+(def rexpr-rewrites-construct-func (atom {}))
+(def rexpr-rewrites-inference-func (atom {}))
+
 ;; functions which define how iterators are accessed for a given Rexpr
 (def rexpr-iterators-accessors (atom {}))
+
+;; make a linked list of functions which match against a given type
+(defn- combine-rewrite-function [first-function second-function]
+  (fn [rexpr]
+    (let [res (first-function rexpr)]
+      (if (or (nil? res) (= res rexpr))
+        (second-function rexpr) ;; second function will likely be the new added function
+        (do
+          (assert (rexpr? res))
+          res)))))
 
 
 (defmacro def-rewrite-matcher
@@ -620,24 +641,122 @@
    `(def-rewrite-matcher ~name ~var ~body identity)))
 
 
-(defn save-defined-rewrite
-  [collection functor-name rewriter]
-  (swap-vals! collection
-              (fn [old] (assoc old functor-name
-                               (conj (get old functor-name #{}) rewriter)))))
+;; (defn save-defined-rewrite
+;;   [collection functor-name rewriter]
+;;   (swap-vals! collection
+;;               (fn [old] (assoc old functor-name
+;;                                (conj (get old functor-name #{}) rewriter)))))
 
 
-(defn make-rewriter-function [matcher body from-file]
+
+;; (defn make-rewriter-function [matcher context-requires body from-file]
+;;   ;; this needs to go through and define something where the different functions
+;;   ;; are invoked on the relvant parts of the expression.  Because the
+;;   ;; expressions have different field values, and are not positional, this means
+;;   ;; that those matchers will have to extract the right values (or something
+;;   (let [n-args (- (count matcher) 1)
+;;         ;args (for [_ (range n-args)] (gensym))
+;;         named-args (for [v (cdr matcher)]
+;;                      (if (seq? v) ;; if this is something like (:ground v0) then we just want the v0 part
+;;                        (cdar v)
+;;                        v))
+;;         res (gensym 'res)
+
+;;         do-rewrite-body `(let [~res (do ~body)]
+;;                            ~(when system/print-rewrites-performed
+;;                               `(when (and (not (nil? ~res)) (not= ~res ~'rexpr))
+;;                                  (print ~(str "Performed rewrite:"  (meta from-file) "\nOLD: ") ~'rexpr "NEW: " ~res "CONTEXT:" (context/get-context))))
+;;                            ~res)]
+
+;;     `(fn ~'[rexpr]
+;;        (let [~(vec named-args) (get-arguments ~'rexpr)] ; unsure if using the global function vs the .func is better?
+;;          (if (and ~@(map (fn [arg mat]
+;;                            `(~(let [matr (get @rexpr-matchers mat mat)]
+;;                                 (when (keyword? matr)
+;;                                   (debug-repl)
+;;                                   (assert false)
+;;                                   )  ;; if this is a keyword, then there is a typo or something and this should not be what is matched
+;;                                 matr)
+;;                               ~arg)) named-args (for [m (cdr matcher)]
+;;                                                   (if (seq? m) (car m) m)))
+;;                     ;; ~@(when-not (nil? context-requires)
+;;                     ;;     ;; TODO: this needs to check the context contains the right values
+;;                     ;;     `(assert false))
+;;                     )
+;;            ~(if system/track-where-rexpr-constructed
+;;               `(binding [dyna.rexpr/*current-matched-rexpr* ~'rexpr]
+;;                  ~do-rewrite-body)
+;;               do-rewrite-body)
+;;            nil ;; there is nothing rewritten
+;;            )))))
+
+(declare make-matching-function
+         make-rexpr-matching-function
+         make-context-matching-function)
+
+
+(defn- make-context-matching-function [present-variables context-match body]
+  `(???)) ;; this will need to look through the context to find which
+          ;; expressions could possible match.  Something like there should be
+          ;; some index for the differen types, but given how the structure is
+          ;; going to be adding items as it scans through the structure.  if
+          ;; there is something which might be found.  I suppose that this could
+;; also just use a single set, but then it would result in it having to scan through of all of the items.
+;; the context should provide the scan functions.  I suppose that the functions which match against the context could result in multiple things being found.  Through if there are multiple inferences at the same time, how would it work with
+
+
+(defn- make-rexpr-matching-function [source-variable present-variables matcher body]
+  (let [rexpr-match (if (map? matcher) (:rexpr matcher) matcher)
+        rexpr-type-matched (car rexpr-match)
+        match-args (vec (map (fn [a]
+                               (cond
+                                 (and (symbol? a) (contains? present-variables a)) (let [r (gensym 'match-equals-var)]
+                                                                                     [`(= ~a ~r) r nil])
+                                 (= a '_) [`true (gensym 'do-not-care) nil]
+                                 (symbol? a) [`true a nil]
+                                 (and (= 2 (count a)) (not (contains? @rexpr-containers (car a))) (symbol? (cdar a)))
+                                   (let [var (if (= (cdar a) '_) (gensym 'do-not-reuse) (cdar a))
+                                         checker (get @rexpr-matchers (car a) (car a))]
+                                     [`(~checker ~var) var nil])
+                                 :else [`true (gensym 'more-match) a]))
+                             (cdr rexpr-match)))
+        present-variables (union present-variables (into #{} (map cdar match-args)))
+        generate-body (loop [matchers (reverse match-args)
+                             body-fn body]
+                        (if (empty? matchers) body-fn
+                            (if (nil? (caddar matchers)) (recur (cdr matchers) body-fn)
+                                (recur (cdr matchers)
+                                       (fn [c-present-vars]
+                                         (make-rexpr-matching-function (cadar matchers) c-present-vars (caddar matchers) body-fn))))))]
+    `(when (~(symbol (str "is-" rexpr-type-matched "?")) ~source-variable)
+       (let [~(vec (map cdar match-args)) (get-arguments ~source-variable)]
+         (when (and ~@(remove true? (map car match-args)))
+           ~(if (and (map? matcher) (contains? matcher :context))
+              (make-context-matching-function present-variables (:context matcher) generate-body)
+              (generate-body present-variables)))))))
+
+(defn- match-rexpr-fn [source-variable matcher body]
+  (let [source (gensym 'source)]
+    `(let [~source ~source-variable] ;; copying the variable is probably not necessary in most cases???
+       ~(make-rexpr-matching-function source #{source source-variable} matcher (fn [pv] body)))))
+
+(defn- get-match-base-type [matcher]
+  (car (if (map? matcher) (:rexpr matcher) matcher)))
+
+(defmacro match-rexpr [source-variable matcher & body]
+  (match-rexpr-fn source-variable matcher `(do ~@body)))
+
+(defn make-rewriter-function [matcher context-requires body from-file]
   ;; this needs to go through and define something where the different functions
   ;; are invoked on the relvant parts of the expression.  Because the
   ;; expressions have different field values, and are not positional, this means
   ;; that those matchers will have to extract the right values (or something
-  (let [n-args (- (count matcher) 1)
+  (let [;;n-args (- (count matcher) 1)
         ;args (for [_ (range n-args)] (gensym))
-        named-args (for [v (cdr matcher)]
-                     (if (seq? v) ;; if this is something like (:ground v0) then we just want the v0 part
-                       (cdar v)
-                       v))
+        ;; named-args (for [v (cdr matcher)]
+        ;;              (if (seq? v) ;; if this is something like (:ground v0) then we just want the v0 part
+        ;;                (cdar v)
+        ;;                v))
         res (gensym 'res)
 
         do-rewrite-body `(let [~res (do ~body)]
@@ -646,65 +765,99 @@
                                  (print ~(str "Performed rewrite:"  (meta from-file) "\nOLD: ") ~'rexpr "NEW: " ~res "CONTEXT:" (context/get-context))))
                            ~res)]
 
-    `(fn ~'[rexpr]
-       (let [~(vec named-args) (get-arguments ~'rexpr)] ; unsure if using the global function vs the .func is better?
-         (if (and ~@(map (fn [arg mat]
-                           `(~(let [matr (get @rexpr-matchers mat mat)]
-                                (when (keyword? matr)
-                                  (debug-repl)
-                                  (assert false)
-                                  )  ;; if this is a keyword, then there is a typo or something and this should not be what is matched
-                                matr)
-                              ~arg)) named-args (for [m (cdr matcher)]
-                                                  (if (seq? m) (car m) m))))
-           ; call the implementation of the rewrite function
-           ~(if system/track-where-rexpr-constructed
-              `(binding [dyna.rexpr/*current-matched-rexpr* ~'rexpr]
-                 ~do-rewrite-body)
-              do-rewrite-body)
-           ; return that there is nothing
-           nil)))))
+    ;; `(fn (~'[rexpr]
+    ;;        (let [~(vec named-args) (get-arguments ~'rexpr)] ; unsure if using the global function vs the .func is better?
+    ;;          (if (and ~@(map (fn [arg mat]
+    ;;                            `(~(let [matr (get @rexpr-matchers mat mat)]
+    ;;                                 (when (keyword? matr)
+    ;;                                   (debug-repl)
+    ;;                                   (assert false)
+    ;;                                   )  ;; if this is a keyword, then there is a typo or something and this should not be what is matched
+    ;;                                 matr)
+    ;;                              ~arg)) named-args (for [m (cdr matcher)]
+    ;;                                                  (if (seq? m) (car m) m)))
+    ;;                   ~@(when-not (nil? context-requires)
+    ;;                       `(???) ;; TODO: check that the context contains the right information
+    ;;                       ))
+    ;;                                     ; call the implementation of the rewrite function
+    ;;            ~(if system/track-where-rexpr-constructed
+    ;;               `(binding [dyna.rexpr/*current-matched-rexpr* ~'rexpr]
+    ;;                  ~do-rewrite-body)
+    ;;               do-rewrite-body)
+    ;;                                     ; return that there is nothing
+    ;;            nil))))
 
+    `(fn (~'[rexpr]
+          (match-rexpr ~'rexpr ~matcher ~do-rewrite-body)))))
 
+(defn- make-rewrite-func-body [kw-args body]
+  (cond
+    (:infers kw-args) (???)
+    :else body
+    ))
 
 (defmacro def-rewrite [& args]
-  (let [kw-args (apply hash-map (drop-last args))
-        rewrite (last args)
-        functor-name (car (:match kw-args))
-        arity (if (= (cdar (:match kw-args)) :any) nil (- (count (:match kw-args)) 1))
+  (let [kw-args (apply hash-map (if (= (mod (count args) 2) 0)
+                                  args
+                                  (drop-last args)))
+        rewrite (last args) ;; in the case that there is not a last argument, then this will want to match against hte value.
         matcher (:match kw-args)
+        matcher-rexpr (if (map? matcher) (:rexpr matcher) matcher)
+        functor-name (car matcher-rexpr)
+        arity (if (= (cdar matcher-rexpr) :any) nil (- (count matcher-rexpr) 1))
         runs-at (:run-at kw-args :standard)
-        rewriter-function (make-rewriter-function matcher rewrite &form)]
-    `(do ~@(for [run-at (if (seqable? runs-at) runs-at [runs-at])]
-             `(save-defined-rewrite
-               ~(case run-at
-                  :standard `(var-get #'rexpr-rewrites)
-                  :construction `(var-get #'rexpr-rewrites-construct)
-                  ;;:standard-and-construction `(var-get #'rexpr-rewrites-construct) ;; this should also run these when their variables become ground
-                  ;;:construction-and-grounding-change nil ;; this could run it when there is a new variable which is ground, which might be useful in avoiding running sutff too much?
-                  :inference `(var-get #'rexpr-rewrites-inference))
-               ~(symbol (str functor-name "-rexpr"))
-               ~rewriter-function)))))
+        context-requires (:context-contains kw-args nil)
+        rewriter-function (make-rewriter-function matcher context-requires rewrite &form)
+        rewrite-func-var (gensym 'rewrite-func)]
+    (let [ret `(let [~rewrite-func-var ~rewriter-function]
+                 (locking dyna.rexpr-constructors/modification-lock
+                   ~@(for [run-at (if (seqable? runs-at) runs-at [runs-at])]
+                       `(let [[rewrite-collection# rewrite-collection-func#]
+                              ~(case run-at
+                                 :standard `[(var-get #'rexpr-rewrites) (var-get #'rexpr-rewrites-func)]
+                                 :construction `[(var-get #'rexpr-rewrites-construct) (var-get #'rexpr-rewrites-construct-func)]
+                                 :inference `[(var-get #'rexpr-rewrites-inference) (var-get #'rexpr-rewrites-inference-func)])
+                              functor-name# ~(symbol (str functor-name "-rexpr"))]
+                          ;; this is now also protected by the modification lock above???, so we don't need the atomic I guess....
+                          (swap-vals! rewrite-collection# (fn [old#] (assoc old# functor-name# (conj (get old# functor-name# #{}) ~rewrite-func-var))))
+                          ;; TODO: the first function is going to be the identity, which does not make since
+                          (let [combined-func# (~combine-rewrite-function
+                                   ~(symbol "dyna.rexpr-constructors" (str (case run-at
+                                                                             :standard "simplify-"
+                                                                             :construction "simplify-construct-"
+                                                                             :inference "simplify-inference-")
+                                                                           functor-name))
+                                                ~rewrite-func-var)]
+                            (intern 'dyna.rexpr-constructors '~(symbol (str (case run-at
+                                                                              :standard "simplify-"
+                                                                              :construction "simplify-construct-"
+                                                                              :inference "simplify-inference-"
+                                                                              )
+                                                                            functor-name))
+                                    combined-func#)
+                            (swap-vals! rewrite-collection-func# assoc functor-name# combined-func#))))))]
+      ret)))
 
 (defmacro def-iterator [& args]
-  (let [kw-args (apply hash-map (drop-last args))
-        func-body (last args)
-        functor-name (car (:match kw-args))
-        arity (if (= (cdar (:match kw-args)) :any) nil (- (count (:match kw-args)) 1))
-        matcher (:matcher kw-args)
-        func (make-rewriter-function matcher func-body &form)]
-    ;; there needs to be some find iterator method
-    ;; we could use the same methods to construct the function for getting the iterators
-    ;; then it would have the same access methods.  I suppose that there could be some base methods
-    ;; where it would call the base insteace, but we would like to union across the different methods
-    ;; for constructing something where
+  ;; (???) ;; TODO
+  ;; (let [kw-args (apply hash-map (drop-last args))
+  ;;       func-body (last args)
+  ;;       functor-name (car (:match kw-args))
+  ;;       arity (if (= (cdar (:match kw-args)) :any) nil (- (count (:match kw-args)) 1))
+  ;;       matcher (:matcher kw-args)
+  ;;       func (make-rewriter-function matcher (:context-requires kw-args nil) func-body &form)]
+  ;;   ;; there needs to be some find iterator method
+  ;;   ;; we could use the same methods to construct the function for getting the iterators
+  ;;   ;; then it would have the same access methods.  I suppose that there could be some base methods
+  ;;   ;; where it would call the base insteace, but we would like to union across the different methods
+  ;;   ;; for constructing something where
 
-    `(save-defined-rewrite
-      'rexpr-iterators-accessors
-      ~(symbol (str functor-name "-rexpr"))
-      ~func)
+  ;;   ;; `(save-defined-rewrite
+  ;;   ;;   'rexpr-iterators-accessors
+  ;;   ;;   ~(symbol (str functor-name "-rexpr"))
+  ;;   ;;   ~func)
 
-    nil))
+    nil)
 
 (defn make-iterator [variable iterator]
   ;; these are going to need to be hashable, otherwise this would mean that we can't use the set to identify which expressions are iterable
@@ -728,40 +881,66 @@
     (ctx-get-value (context/get-context) variable)))
 
 
-(defn simplify
-  [rexpr]
-  ;; this should just match the given type and identify if there are rewrites defined for this
+;; (defn simplify
+;;   [rexpr]
+;;   ;; this should just match the given type and identify if there are rewrites defined for this
+;;   (assert (context/has-context))
+;;   (let [typ (type rexpr)
+;;         rrs (get @rexpr-rewrites typ)
+;;         ret (if (nil? rrs)
+;;               rexpr ;; there is nothing here so we are just going to return the r-expr unmodified
+;;               (or (first (filter (complement nil?)
+;;                                  (for [rw rrs]
+;;                                    (let [res (rw rexpr)]
+;;                                  (if (not= rexpr res) res)))))
+;;                   rexpr))]
+;;     (ctx-add-rexpr! (context/get-context) ret)  ;; add the R-expr to the context as this is a conjunct that we might want to use
+;;     ret))
+
+(defn simplify [rexpr]
   (assert (context/has-context))
-  (let [typ (type rexpr)
-        rrs (get @rexpr-rewrites typ)
-        ret (if (nil? rrs)
-              rexpr ;; there is nothing here so we are just going to return the r-expr unmodified
-              (or (first (filter (complement nil?)
-                                 (for [rw rrs]
-                                   (let [res (rw rexpr)]
-                                 (if (not= rexpr res) res)))))
-                  rexpr))]
-    (ctx-add-rexpr! (context/get-context) ret)  ;; add the R-expr to the context as this is a conjunct that we might want to use
-    ret))
+  (let [ret  ((get @rexpr-rewrites-func (type rexpr) identity) rexpr)]
+    (if (or (nil? ret) (= ret rexpr))
+      rexpr ;; if not changed, don't do anything
+      (do
+        (dyna-assert (rexpr? ret))
+        (ctx-add-rexpr! (context/get-context) ret)
+        ret))))
 
 (swap! debug-useful-variables assoc 'simplify (fn [] simplify))
 
 (defn simplify-construct [rexpr]
-  (debug-try
-   (let [typ (type rexpr)
-         rrs (get @rexpr-rewrites-construct typ)]
-     (if (nil? rrs)
-       rexpr
-       (or (first (filter (complement nil?)
-                          (for [rw rrs]
-                            (let [res (rw rexpr)]
-                              (if (not= rexpr res) res)))))
-           rexpr)))
+  (let [ret ((get @rexpr-rewrites-construct-func (type rexpr) identity) rexpr)]
+    ;; (when (nil? ret)
+    ;;   (debug-repl "con nil"))
+    ;;(assert (not (nil? ret)))
+    ;; TODO: should this add to the context that this new R-expr was
+    ;; constructed.  In which case it would be able to make use of this new
+    ;; R-expr immediatly.
 
-   (catch StackOverflowError e
-     (do (println "Stack overflow when trying to construct " rexpr)
-         ;(debug-repl "stack overflow")
-         (throw e)))))
+    ;; though this function might disappear if we are going to use the direct call to the function
+    (if (nil? ret)
+      rexpr
+      (do
+        (dyna-assert (rexpr? ret))
+        ret))))
+
+;; (defn simplify-construct [rexpr]
+;;   (debug-try
+;;    (let [typ (type rexpr)
+;;          rrs (get @rexpr-rewrites-construct typ)]
+;;      (if (nil? rrs)
+;;        rexpr
+;;        (or (first (filter (complement nil?)
+;;                           (for [rw rrs]
+;;                             (let [res (rw rexpr)]
+;;                               (if (not= rexpr res) res)))))
+;;            rexpr)))
+
+;;    (catch StackOverflowError e
+;;      (do (println "Stack overflow when trying to construct " rexpr)
+;;          ;(debug-repl "stack overflow")
+;;          (throw e)))))
 
 
 ;; simplification which takes place a construction time
@@ -817,10 +996,8 @@
 ;; this is going to have to have some context in which an expression
 
 (defn is-ground? [var-name]
-  (if (and (is-variable? var-name) (is-variable-set? var-name))
-    (get-variable-value var-name)
-    (if (is-constant? var-name)
-      (boolean (.value ^constant-value-rexpr var-name)))))
+  (or (and (is-variable? var-name) (is-variable-set? var-name))
+      (is-constant? var-name)))
 
 (def-rewrite-matcher :str [string] (string? string))
 
@@ -881,6 +1058,10 @@
       (assert false)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def-rewrite
+  :match (unify (:any A) (:any B))
+  nil)
 
 (def-rewrite
   :match (unify (:any A) (:any B))
@@ -969,6 +1150,14 @@
         (when-not conj-map (debug-repl "uf2"))
         (make-conjunct conj-map)))))
 
+(comment
+  (def-rewrite
+    :match (unify-structure (:ground out) (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:any-list arguments))
+    :run-at :inference
+    :context-contains (unify-structure out ctx-filename ctx-dynabase ctx-name-str ctx-arguments)
+
+    ))
+
 
 (def-rewrite
   :match (unify-structure-get-meta (:ground struct) (:any dynabase) (:any from-file))
@@ -982,6 +1171,15 @@
                                                                null-term)))]))))
 
 
+(comment
+  (def-rewrite
+    :match (conjunct (:rexpr-list children))
+    :run-at :standard
+    (let [res (make-conjunct (doall (map #(let [r (simplify %)]
+                                            (if (is-empty-rexpr? r) (throw (UnificationFailure.))
+                                                r)) children)))]
+      res)))
+
 (def-rewrite
   :match (conjunct (:rexpr-list children))
   :run-at :standard
@@ -989,12 +1187,13 @@
     res))
 
 (def-rewrite
-  ; in the case that there is only 1 argument, this will just run that single argument
+  ; in the case that there is only 1 argument, then this doesn't need the conjunct to wrap it
   :match (conjunct ((fn [x] (= (count x) 1)) children))
   :run-at :construction
   (car children))
 
 (def-rewrite
+  ;; with no arguments, that is the same as there being no constraints, so we just return mult 1
   :match (conjunct ((fn [x] (= (count x) 0)) children))
   :run-at :construction
   (make-multiplicity 1))

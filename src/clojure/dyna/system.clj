@@ -3,7 +3,7 @@
 ;; variables which control how the system runs
 
 (def check-rexpr-arguments
-  (not= "false" (System/getProperty "dyna.check_rexprs_args" "true")))
+  (= "true" (System/getProperty "dyna.check_rexprs_args" "true")))
 
 (def print-rewrites-performed
   (= "true" (System/getProperty "dyna.print_rewrites_performed" "false")))

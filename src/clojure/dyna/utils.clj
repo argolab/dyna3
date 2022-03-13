@@ -221,9 +221,34 @@
 (defmacro make-term [x]
   (make-term-fn x))
 
+(defn- match-term-fn [source-var match-expression body]
+  (let [func-name (car match-expression)
+        arity (- (count match-expression) 1)
+        match-vars (vec (map #(if (symbol? %) % (gensym)) (cdr match-expression)))]
+    `(when (and (instance? DynaTerm ~source-var)
+                (= ~(str func-name) (.name ^DynaTerm ~source-var))
+                (= ~arity (.arity ^DynaTerm ~source-var)))
+       (let [~match-vars (.arguments ^DynaTerm ~source-var)]
+         ~(reduce (fn [a b]
+                    (if (nil? a)
+                      b
+                      (match-term-fn (get a 1) (get a 0) b)))
+                  (conj (vec (map (fn [me var]
+                                    (if (symbol? me)
+                                      nil
+                                      [me var]))
+                                  (cdr match-expression)
+                                  match-vars))
+                        body))))))
+
+(defmacro match-term [source-var match-expression & body]
+  (let [svar (gensym 'source-term-var)]
+    `(let [~svar ~source-var]
+       ~(match-term-fn svar match-expression `(do ~@body)))))
+
 (defmacro dyna-assert [expression]
   `(when-not ~expression
-     (debug-repl)
+     (debug-repl ~(str "assert failed " expression))
      (assert false)))
 
 

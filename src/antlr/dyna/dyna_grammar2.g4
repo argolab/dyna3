@@ -58,12 +58,9 @@ DollaredAtom
     : '$' [a-z][a-zA-Z0-9_]*
     ;
 
-// the escaped atoms and the string are somewhat similar in their representation
-// maybe we should have that the atoms
 EscapedAtom
-    : '\'' ~['{}() \t\n\r]+
+    : '\'' ~['{}() \t\n\r]+ '\''
     ;
-// '
 
 Comma
     : ','
@@ -622,7 +619,8 @@ expressionRoot returns [DynaTerm rterm]
         $rterm = DynaTerm.create_arr("\$call", $arguments.args);
     }
 //    | ea=escapedVariable { $rterm = $ea.rterm; }
-    | '`' e=expression { $rterm = DynaTerm.create("\$escaped", $e.rterm); }
+    | '`' '(' e=expression ')' { $rterm = DynaTerm.create("\$escaped", $e.rterm); }
+    | '`' v=Variable { $rterm = DynaTerm.create("\$escaped", DynaTerm.create("\$variable", $v.getText())); }
     ;
 
 
@@ -766,6 +764,10 @@ compilerExpressionArgument returns [Object val]
     | {$args=new ArrayList<>();} a=atom ('(' (ag=compilerExpressionArgument Comma {$args.add($ag.val);})*
                                              (ag=compilerExpressionArgument Comma? {$args.add($ag.val);})?  ')' )?
       {$val = DynaTerm.create_arr($a.t, $args); }
+    | '*' {$val = "*";}
+    | '**' {$val = "**";}
+    | '&' {$val = "&";}
+    | '&&' {$val = "&&";}
     ;
 
 compilerExpressionParams returns [ArrayList<Object> args = new ArrayList<>()]
@@ -786,7 +788,7 @@ locals [ArrayList<Object> args]
     | a=atom p=compilerExpressionParams {$rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create_arr($a.t, $p.args));}
     | a=atom b=atom p=compilerExpressionParams {$rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create($a.t, DynaTerm.create_arr($b.t, $p.args)));}
     | a=atom m=methodId { $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create($a.t, $m.rterm)); }
-    ;
+;
 
 // // expressions which change how the parser behaves or how the runtime works for given expression
 // compilerExpression returns [ParseNode trm]

@@ -210,6 +210,14 @@
     )
   )
 
+
+(comment
+  (def-rewrite
+    :match {:rexpr (lessthan (:var A) (:var B) (is-true? _))
+            :context (lessthan (:var C) A (is-true? _))}
+    :run-at :inference
+    :infers (lessthan C B (make-constant true))))
+
 ;; (def-base-rexpr greaterthan [:var v0 :var v1 :var v2])
 ;; (def-rewrite
 ;;   :match (greaterthan (:any v0) (:any v1) (:any v2))

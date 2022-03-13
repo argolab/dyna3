@@ -197,3 +197,34 @@ mm(X) max= 7.
 assert mm(10) = 10.
 assert mm(1) = 7.
 ")
+
+
+(str-test dispose-parser "
+:- dispose my_pair(&,&).
+my_pair(A, B) = &pair(A, B).
+
+assert my_pair(foo(1), bar(2)) = &pair(&foo(1), &bar(2)).
+")
+
+
+
+(str-test simple-macro "
+:- macro my_macro/1.
+my_macro(X) = &'*'(&$constant(2), X).
+
+test(X) = my_macro(X).
+
+assert test(5) = 10.
+")
+
+(str-test macro2 "
+:- macro my_macro/1.
+my_macro(X) := X.
+my_macro(`(`X + 2)) := `(`X + 3).
+
+f1(X) = my_macro(X + 1).
+f2(X) = my_macro(X + 2).
+
+assert f1(3) = 4.
+assert f2(3) = 6.
+")

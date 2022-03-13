@@ -200,6 +200,19 @@
 (swap! debug-useful-variables assoc 'context get-context)
 
 
+(defmacro scan-through-full-context [argument & body]
+  ;; scan through all of the conjunctive constraints in the context and assign them to the argument variable
+  ;; keep scanning as long as body does not return nil, otherwise return the value from body
+  `(let [scan-fun# ~(fn [argument] ~@body)]
+
+     ))
+
+(defmacro scan-through-context [type argument & body]
+  ;; scan through the conjunctive constraitns which are of the rexpr argument `type`
+  ;; the value will be bound to the argument variable
+  ;; keep scanning as long as the body return nil.  if the result is not nil, then that will be returned
+  )
+
 
 ;; there could be some nested variables which are array list based
 ;; those variables would not have the

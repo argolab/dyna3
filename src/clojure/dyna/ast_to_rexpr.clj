@@ -9,6 +9,7 @@
   (:require [clojure.set :refer [union intersection difference]])
   (:require [clojure.string :refer [join]])
   (:require [clojure.java.io :refer [resource]])
+  (:require [aprint.core :refer [aprint]])
   (:import [org.antlr.v4.runtime CharStream CharStreams UnbufferedTokenStream])
   (:import [org.antlr.v4.runtime.misc Interval])
   (:import [dyna DynaTerm DynaUserAssert ParserUnbufferedInputStream])
@@ -221,18 +222,19 @@
 (def current-dir-path (Paths/get (.toURI current-dir)))
 
 (defn convert-from-escaped-ast-to-ast [^DynaTerm ast]
-  (case [(.name ast) (.arity ast)]
-    ["$escaped" 1] (get ast 0) ;; then this is hitting something that is "unescaped" so we do not have to keep this around
-    (let [arguments (doall (map convert-from-escaped-ast-to-ast (.arguments ast)))
-          ;; the arguments are going to be wrapped in $quote if they are the same
-          ;; so if all of the
-          same-args (every? true? (map #(= (DynaTerm. "$constant" [%1]) %2)
-                                       (.arguments ast)
-                                       arguments))]
-      (if same-args
-        (DynaTerm. "$constant" [ast]) ;; then we can just quote the entire structure
-        (DynaTerm. "$quote1" [(DynaTerm. (.name ast) arguments)])) ;; then we are going to have to only quote the outer level, as there is something unescaped inside
-          )))
+  (if-not (instance? DynaTerm ast)
+    (DynaTerm. "$constant" [ast])
+    (case [(.name ast) (.arity ast)]
+      ["$escaped" 1] (get ast 0) ;; then this is hitting something that is "unescaped" so we do not have to keep this around
+      (let [arguments (doall (map convert-from-escaped-ast-to-ast (.arguments ast)))
+            ;; the arguments are going to be wrapped in $quote if they are the same
+            ;; so if all of the
+            all-consts (every? true? (map #(and (= "$constant" (.name ^DynaTerm %))
+                                                (= 1 (.arity ^DynaTerm %)))
+                                          arguments))]
+        (if all-consts
+          (DynaTerm. "$constant" [(DynaTerm. (.name ast) (vec (map #(get % 0) arguments)))]) ;; if this does not have nested structure, then can optimize and just use a constant structure
+          (DynaTerm. "$quote1" [(DynaTerm. (.name ast) arguments)]))))))
 
 
 (defn convert-from-ast [^DynaTerm ast out-variable variable-name-mapping source-file]
@@ -308,42 +310,54 @@
                                            ;; there can just be a function which is
                                            ;; called by import to do the importing
                                            ;; of a function in place.
-                                           "export" (let [[^String lname larity] (.arguments ^DynaTerm (get arg1 0))]
-                                                      (swap! system/user-exported-terms
-                                                             (fn [o]
-                                                               (assoc o source-file (conj [lname (int larity)] (get o source-file #{}))))))
+                                           "export" (match-term arg1 ("export" ("/" lname larity))
+                                                                (swap! system/user-exported-terms
+                                                                       (fn [o]
+                                                                         (assoc o source-file (conj [lname (int larity)] (get o source-file #{}))))))
 
                                            ;; some of the arugments to a function should get escaped escaped, or quoted
                                            ;; used like `:- dispose foo(quote1,eval).`
-                                           "dispose" (update-user-term {:name (.name ^DynaTerm arg1)
-                                                                        :arity (.arity ^DynaTerm arg1)
-                                                                        :source-file source-file}
-                                                                       (fn [o]
-                                                                         (assoc o :dispose-arguments (.arguments ^DynaTerm arg1))))
+                                           "dispose" (let [^DynaTerm disp-term (get arg1 0)
+                                                           disp-arg-map (vec (map #({"*" "$eval"
+                                                                                     "&" "$quote1"
+                                                                                     "&&" "$quote"
+                                                                                     "eval" "$eval"
+                                                                                     "quote1" "$quote1"
+                                                                                     "quote" "$quote"
+                                                                                     (DynaTerm. "quote1" []) "$quote1"
+                                                                                     (DynaTerm. "quote" []) "$quote"
+                                                                                     (DynaTerm. "eval" []) "$eval"} % "$eval")
+                                                                                  (.arguments disp-term)))]
+                                                       (update-user-term {:name (.name disp-term)
+                                                                          :arity (.arity disp-term)
+                                                                          :source-file source-file}
+                                                                         (fn [o]
+                                                                           (let [ret (assoc o :dispose-arguments disp-arg-map)]
+                                                                             ret))))
 
-                                           ;; mark a function as being a macro, meaning that it gets its argument's AST and will return an AST which should get evaluated
-                                           ;; used like `:- macro foo/3.`
-                                           "macro" (update-user-term {:name (get arg1 0)
-                                                                      :arity (get arg1 1)
-                                                                      :source-file source-file}
-                                                                     (fn [o]
-                                                                       (assoc o :is-macro true)))
+                                                       ;; mark a function as being a macro, meaning that it gets its argument's AST and will return an AST which should get evaluated
+                                                       ;; used like `:- macro foo/3.`
 
+                                           "macro" (match-term arg1 ("macro" ("/" name arity))
+                                                               (update-user-term {:name name
+                                                                                  :arity arity
+                                                                                  :source-file source-file}
+                                                                                 (fn [o]
+                                                                                   (assoc o :is-macro true))))
                                            ;; make a term global so that it can be referenced form every file
                                            ;; I suppose that there should be some global list of terms which will get resolved at every possible point
                                            ;; use like `:- make_global_term foo/3.`
-                                           "make_system_term" (let [[name arity] (.arguments ^DynaTerm (get arg1 0))
-                                                                    call-name {:name name
+                                           "make_system_term" (match-term arg1 ("make_system_term" ("/" name arity))
+                                                                          (let [call-name {:name name
                                                                                :arity arity
                                                                                :source-file source-file}
-                                                                    rexpr (make-user-call call-name
-                                                                                          (into {} (map #(let [x (make-variable (str "$" %))] [x x])
-                                                                                                        (range (+ arity 1))))
-                                                                                          0 #{})
-                                                                    ]
-                                                                (swap! system/globally-defined-user-term
-                                                                       assoc [name arity] rexpr))
-
+                                                                                rexpr (make-user-call call-name
+                                                                                                      (into {} (map #(let [x (make-variable (str "$" %))] [x x])
+                                                                                                                    (range (+ arity 1))))
+                                                                                                      0 #{})
+                                                                                ]
+                                                                            (swap! system/globally-defined-user-term
+                                                                                   assoc [name arity] rexpr)))
 
                                            "memoize_unk" (???) ;; mark some function as being memoized
                                            "memoize_null" (???)
@@ -623,17 +637,19 @@
             (let [arity (.arity ast)
                   call-name {:name (.name ast) ;; the name, arity and file name.  This makes the file work as a hard local scope for the function
                              :arity arity
-                             :source-file (or (.from_file ast) source-file) ;; the if there file name annotation on the term, then use that ratherthan the local file
+                             :source-file (or (.from_file ast) source-file) ;; the if there file name annotation on the term, then use that rather than the local file
                              }
                   user-term (get-user-term call-name) ;; this can return a user or system term
                   is-macro (:is-macro user-term false)
                   dispose-arguments (:dispose-arguments user-term)
                   call-vals (doall (if is-macro
-                                     (map (fn [a] (DynaTerm. "$constant" [a])) (.arguments ast))
+                                     (map make-constant (.arguments ast))
                                      (get-arg-values
                                       (if dispose-arguments
                                         ;; if the nested term is a variable, then we don't want to quote it or something???
-                                        (map (fn [arg disp] (DynaTerm. disp [arg]))
+                                        (map (fn [arg disp] (if (not= disp "$eval")
+                                                              (DynaTerm. disp [arg])
+                                                              arg))
                                              (.arguments ast) dispose-arguments)
                                         (.arguments ast)))))
                   local-out (if is-macro
@@ -804,7 +820,10 @@
         (if (nil? parse)
           (println (str "WARNING: file " url " did not contain any dyna rules"))
           (let [result (convert-from-ast parse (make-constant true) {} url)]
-            (assert (= result (make-multiplicity 1)))))))))
+            (when-not (= result (make-multiplicity 1))
+              (println (str "failed to load file " url))
+              (aprint result)
+              (assert false))))))))
 
 
 

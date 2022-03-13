@@ -245,7 +245,7 @@
                        (swap! agg-val (:combine aop) x))
                      (swap! num-agg inc))]
 
-    (and (is-disjunct? R)
+    (when (is-disjunct? R)
          ;; if there is some branch which just has the assignment to the
          ;; incoming variable, then we should attempt to perform
 

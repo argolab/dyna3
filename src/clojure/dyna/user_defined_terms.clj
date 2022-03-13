@@ -25,7 +25,7 @@
                              (range (+ 1 arity))))
                 ~rexpr)))))
 
-(defn empty-user-defined-term []
+(defn empty-user-defined-term [name]
   {:def-assumption (make-assumption) ;; the assumption for the definition
    :optimized-assumption (make-assumption) ;; the assumption that there is no more optimized version of this term
    :memoized-assumption (make-assumption) ;; if there is some changed to the memoized value for this term
@@ -53,12 +53,13 @@
    ;; correspond with something
 
    ;; there should be other fields here which correspond with memoized values or
-   })
+   :term-name name})
+
 
 (defn update-user-term [name function]
   (swap! system/user-defined-terms (fn [old]
-                                     (let [v (get old name)]
-                                       (assoc old name (function (if v v (empty-user-defined-term))))))))
+                                     (let [v (get old name nil)]
+                                       (assoc old name (function (if-not (nil? v) v (empty-user-defined-term name))))))))
 
 (defn add-to-user-term [source-file dynabase name arity rexpr]
   (let [object-name (merge {:name name
@@ -81,7 +82,7 @@
           (swap-vals! system/user-defined-terms (fn [old]
                                                   (let [v (get old object-name)
                                                         nv (if (nil? v)
-                                                             (let [e (empty-user-defined-term)]
+                                                             (let [e (empty-user-defined-term object-name)]
                                                                (assoc e :rexprs (conj (:rexprs e) value)))
                                                              (do
                                                                ;;(invalidate! (:def-assumption v))
@@ -139,8 +140,8 @@
                                       (let [new-in (make-variable (gensym 'comb_incoming_var))
                                             new-children (for [c children]
                                                            (strip-agg new-in c))]
-                                        [op (make-aggs op (first out-vars) new-in new-children)]))))
-           ]
+                                        [op (make-aggs op (first out-vars) new-in new-children)]))))]
+
        ;; if there is more than 1 group, then that means there are multiple aggregators, in which case we are going to have to have "two levels" of
        ;; aggregation created as a result.  This will
        (if (> (count groupped-aggs) 1)
@@ -153,7 +154,8 @@
 (def-rewrite
   :match (user-call (:unchecked name) (:unchecked var-map) (#(< % @system/user-recursion-limit) call-depth) (:unchecked parent-call-arguments))
   (let [ut (get-user-term name)]
-    (if (nil? ut)
+    (when (nil? ut)
+      (debug-repl "nil user term")
       (dyna-warning (str "Did not find method " (:name name) "/" (:arity name) " from file " (:source-file name))))
 
     (when ut  ;; this should really be a warning or something in the case that it can't be found. Though we might also need to create some assumption that nothing is defined...
@@ -165,9 +167,13 @@
                                         (let [[lname lvar-map lcall-depth] (get-arguments rexpr)
                                               new-call (make-user-call lname lvar-map (+ call-depth lcall-depth 1)
                                                                        #{})]
+                                          (when-not (rexpr? new-call)
+                                            (debug-repl "call fail rexpr"))
                                           ;(debug-repl)
                                           new-call)
-                                        (rewrite-rexpr-children rexpr rucd)))
+                                        (let [ret (rewrite-rexpr-children rexpr rucd)]
+                                          (when-not (rexpr? ret) (debug-repl "call fail rexpr"))
+                                          ret)))
             ;; all-variables (get-all-variables-rec rexpr)
             ;; var-map-all (merge
             ;;              (into {} (remove nil? (for [k all-variables]
@@ -184,8 +190,8 @@
             ;;                   var-map-all))
             variable-map-rr (context/bind-no-context
                              (remap-variables-handle-hidden (rewrite-user-call-depth rexpr)
-                                                            var-map))
-            ]
+                                                            var-map))]
+
         (depend-on-assumption (:def-assumption ut))  ;; this should depend on the representational assumption or something.  Like there can be a composit R-expr, but getting optimized does not have to invalidate everything, so there can be a "soft" depend or something
         (dyna-debug (let [exp-var (exposed-variables variable-map-rr)]
                       (when-not (subset? exp-var (set (vals var-map)))

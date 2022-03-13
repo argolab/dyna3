@@ -5,7 +5,7 @@
             [dyna.rexpr :refer :all]
             [dyna.context :as context]
             [dyna.rexpr-builtins :refer :all]
-            [dyna.utils :refer [debug-repl]]))
+            [dyna.utils :refer [debug-repl make-term match-term]]))
 
 
 (deftest basic-rexpr
@@ -96,3 +96,22 @@
         r2 (context/bind-context-raw ctx (simplify-fully rexpr))]
     (is (= (make-multiplicity 1) r2))
     (is (= (ctx-get-value ctx (make-variable 'out)) 777))))
+
+
+(deftest make-match-term
+  (let [term (make-term ("myterm" ("another" 1 2 3)))
+        cnt (atom 0)]
+    (dyna.utils/match-term term ("myterm" ("another" a b c))
+                           (assert (= a 1))
+                           (swap! cnt inc))
+    (assert (= 1 @cnt))))
+
+
+(deftest match-rexpr-test
+  (let [rexpr (make-unify (make-variable 'a) (make-variable 'b))
+        cnt (atom 0)]
+    (match-rexpr rexpr (unify (:variable avar) (:variable bvar))
+                 (swap! cnt inc)
+                 (assert (= avar (make-variable 'a))))
+
+    (assert (= @cnt 1))))

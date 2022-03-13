@@ -5,10 +5,11 @@
   (:require [clojure.java.io :refer [resource file]])
 
   (:require [dyna.utils :refer :all])
-  (:require [dyna.rexpr :refer :all])
+  (:require [dyna.rexpr])
+  (:require [dyna.rexpr-constructors :refer :all])
   (:require [dyna.base-protocols :refer :all])
-  (:require [dyna.rexpr-builtins :refer :all])
   (:require [dyna.context :as context])
+  (:require [dyna.rexpr-builtins])
   (:require [dyna.aggregators])
   (:require [dyna.rexpr-dynabase])
   (:require [dyna.ast-to-rexpr :refer [parse-string
