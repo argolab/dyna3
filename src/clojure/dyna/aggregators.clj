@@ -273,6 +273,7 @@
 
 (def-rewrite
   :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:unchecked body-is-conjunctive) (:rexpr R))
+  :run-at [:standard :inference]
   (let [aop (get @aggregators operator)
         ctx (context/make-nested-context-aggregator rexpr incoming-variable body-is-conjunctive)]
     (when (nil? aop)

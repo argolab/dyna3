@@ -199,6 +199,8 @@
 (def-user-term ["lessthaneq" "<="] 2 (make-lessthan-eq v0 v1 v2))
 (def-user-term ["greaterthaneq" ">="] 2 (make-lessthan-eq v1 v0 v2))
 
+(defn is-true? [x] (= (make-constant true) x))
+
 (comment
   (def-rewrite
     :match (lessthan (:var A) (:var B) (is-true? x))
@@ -211,12 +213,17 @@
   )
 
 
-(comment
-  (def-rewrite
-    :match {:rexpr (lessthan (:var A) (:var B) (is-true? _))
-            :context (lessthan (:var C) A (is-true? _))}
-    :run-at :inference
-    :infers (lessthan C B (make-constant true))))
+(def-rewrite
+  :match {:rexpr (lessthan (:var A) (:var B) (is-true? _))
+          :context (lessthan (:var C) A (is-true? _))}
+  :run-at :inference
+  :infers (lessthan C B (make-constant true)))
+
+(def-rewrite
+  :match {:rexpr (lessthan (:any A) (:any B) (:any C))
+          :check (= A B)}
+  :run-at :construction
+  (make-unify C (make-constant false)))
 
 ;; (def-base-rexpr greaterthan [:var v0 :var v1 :var v2])
 ;; (def-rewrite

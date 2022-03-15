@@ -228,3 +228,18 @@ f2(X) = my_macro(X + 2).
 assert f1(3) = 4.
 assert f2(3) = 6.
 ")
+
+
+(str-test lessthan-construct  "
+a := 1.
+a := 0 for A < A.
+
+assert a = 1.
+")
+
+(str-test lessthan-combine "
+a := 1.
+a := 0 for A < B, B < A.
+
+assert a = 1.
+")
