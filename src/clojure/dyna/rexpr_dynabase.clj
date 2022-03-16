@@ -106,11 +106,11 @@
 
 
 ;; this should
-(def-base-rexpr load-file [:var filename
-                           :var calling-from-dynabase
-                           :var resulting-dynabase])
+;; (def-base-rexpr load-file [:var filename
+;;                            :var calling-from-dynabase
+;;                            :var resulting-dynabase])
 
-(def-user-term "$load" 1 (make-load-file v0 self v1))
+;; (def-user-term "$load" 1 (make-load-file v0 self v1))
 
 
 

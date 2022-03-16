@@ -651,9 +651,9 @@
 
 (defn- make-context-matching-function [present-variables context-match body]
   (let [rexpr-context (gensym 'rexpr-context)]
-    `(context/scan-through-context (context/get-context) ~(symbol (str (car context-match) "-rexpr"))
-                                   ~rexpr-context
-                                   ~(make-rexpr-matching-function rexpr-context (conj present-variables rexpr-context) context-match body))))
+    `(context/scan-through-context-by-type (context/get-context) ~(symbol (str (car context-match) "-rexpr"))
+                                           ~rexpr-context
+                                           ~(make-rexpr-matching-function rexpr-context (conj present-variables rexpr-context) context-match body))))
 
 
 (defn- make-rexpr-matching-function [source-variable present-variables matcher body]
@@ -1053,13 +1053,14 @@
         (when-not conj-map (debug-repl "uf2"))
         (make-conjunct conj-map)))))
 
-(comment
-  (def-rewrite
-    :match (unify-structure (:ground out) (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:any-list arguments))
-    :run-at :inference
-    :context-contains (unify-structure out ctx-filename ctx-dynabase ctx-name-str ctx-arguments)
-
-    ))
+(def-rewrite
+  :match {:rexpr (unify-structure (:any out) (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:any-list arguments))
+          :context (unify-structure out (:unchecked file-name2) (:any dynabase2) (:unchecked name-str2) (:any-list arguments2))}
+  :run-at :inference
+  (if (or (not= name-str name-str2) (not= (count arguments) (count arguments2)))
+    (make-multiplicity 0) ;; then these two failed to unify together
+    (do ;; this needs to unify all of the arguments together
+      (make-conjunct (doall (map make-unify arguments arguments2))))))
 
 
 (def-rewrite

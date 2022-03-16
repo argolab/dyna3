@@ -220,7 +220,11 @@
   `(let [scan-fun# (fn [~argument] ~@body)]
      (ctx-scan-through-conjuncts ~ctx scan-fn#)))
 
-(defmacro scan-through-context [ctx type argument & body]
+;; these methods should be made more efficient in the future, for now, they are
+;; just going to scan through the full list of conjunctive constraints and
+;; filter out the things which are not relevant.  This is _not_ efficient atm.
+
+(defmacro scan-through-context-by-type [ctx type argument & body]
   ;; scan through the conjunctive constraitns which are of the rexpr argument `type`
   ;; the value will be bound to the argument variable
   ;; keep scanning as long as the body return nil.  if the result is not nil, then that will be returned
@@ -229,5 +233,10 @@
      (ctx-scan-through-conjuncts ~ctx scan-fun#)))
 
 
-;; there could be some nested variables which are array list based
-;; those variables would not have the
+(defmacro scan-through-context-by-variable [ctx variable argument & body]
+  ;; many constraints are going to be looking to find other things which interact with a specific variable
+
+  `(let [var# ~variable
+         scan-fun# (fn [~argument] (when (contains? (exposed-variables ~argument) var#)
+                                     ~@body))]
+     (ctx-scan-through-conjuncts ~ctx scan-fun#)))

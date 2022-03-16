@@ -517,7 +517,9 @@
                                    #{}  ;; the set of arguments which need to get avoid
                                    )
 
-            ["$dynabase_create" 2] (let [[extended-dynabase-value dynabase-terms] (.arguments ast)]
+            ["$dynabase_create" 2] (let [[extended-dynabase-value dynabase-terms] (.arguments ast)
+                                         dynabase-name (gensym 'dynabase_)
+                                         ]
                                      (???) ;; TODO
                                      )
 

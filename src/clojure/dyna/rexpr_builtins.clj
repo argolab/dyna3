@@ -225,6 +225,8 @@
   (:allground (= v2 (= v0 v1)))
   (v2 (= v0 v1)))
 
+
+;; XXX: should this rewrite exist??? this makes it basically the same as unify-with-return
 (def-rewrite
   :match (equals (:any A) (:any B) (is-true? _))
   :run-at [:construction :standard]
@@ -407,11 +409,11 @@
 (def-user-term "str" 0 (make-unify v0 (make-constant ""))) ;; with zero arguments, it should just return the empty stringx
 
 ;; check that the argument is a string
-(def-builtin-rexpr isstring 2
+(def-builtin-rexpr is-string 2
   (:allground (= v1 (string? v0)))
   (v1 (string? v0)))
 
-(def-user-term "string" 1 (make-isstring v0 v1))
+(def-user-term "string" 1 (make-is-string v0 v1))
 
 (def-base-rexpr unify-with-return [:var A :var B :var Return])
 
@@ -421,7 +423,7 @@
   (make-unify Return (make-constant (= (get-value A) (get-value B)))))
 
 (def-rewrite
-  :match (unify-with-return (:any A) (:any B) (#(= (make-constant true) %) Return))
+  :match (unify-with-return (:any A) (:any B) (is-true? Return))
   :run-at :construction
   (make-unify A B))
 
@@ -461,6 +463,9 @@
 
 ;; operators for handing a map of elements.  The map is a wrapped clojure map which is associate
 (defrecord DynaMap [map-elements])
+
+(defmethod print-method DynaMap [^DynaMap this ^java.io.Writer w]
+  (.write w (str (.map-elements this))))
 
 (def-base-rexpr map-element-access [:var Key
                                     :var Value

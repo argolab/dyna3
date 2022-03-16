@@ -243,3 +243,29 @@ a := 0 for A < B, B < A.
 
 assert a = 1.
 ")
+
+(str-test map-type "
+m = {\"A\" -> 123, \"B\" -> 456}.
+
+get_a({\"A\" -> X | _}) = X.
+assert get_a(m) = 123.
+
+get_b({B | _}) = B.
+assert get_b(m) = 456.
+
+get_c({C | _}) = C.
+assert get_c({\"C\" -> 789 | m}) = 789.
+assert get_c({\"C\" -> 333}) = 333.
+
+")
+
+
+(str-test dynabase1 "
+dbase = {
+a = 123.
+b = 456.
+}.
+
+assert dbase.a = 123.
+assert dbase.b = 456.
+")
