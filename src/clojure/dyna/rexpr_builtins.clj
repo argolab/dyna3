@@ -116,15 +116,17 @@
 
 (def-rewrite
   :match (add (:ground A) (:any B) (:any C))
-  (cond (= (get-value A) 0) (make-unify B C)  ;; the value is zero, so can unify the variables together
-        (= B C) (make-multiplicity 0)         ;; the two variables equal will never work
-        :else nil))
+  (let [av (get-value A)]
+    (cond (= av 0) (make-unify B C) ;; the value is zero, so can unify the variables together
+          (and (= B C) (not= av 0)) (make-multiplicity 0) ;; the two variables equal will never work
+          :else nil)))
 
 (def-rewrite
   :match (add (:any A) (:ground B) (:any C))
-  (cond (= (get-value B) 0) (make-unify A C)  ;; the value is zero, so can unify the variables together
-        (= A C) (make-multiplicity 0)         ;; the two variables equal will never work as non-zero added between them
-        :else nil))
+  (let [bv (get-value B)]
+    (cond (= bv 0) (make-unify A C)  ;; the value is zero, so can unify the variables together
+          (and (= A C) (not= bv 0)) (make-multiplicity 0)         ;; the two variables equal will never work as non-zero added between them
+          :else nil)))
 
 (def-builtin-rexpr times 3
   (:allground (= v2 (* v0 v1)))
@@ -138,27 +140,27 @@
 
 (def-rewrite
   :match (times (:ground A) (:any B) (:any C))
-  (cond (= (get-value A) 1) (make-unify B C)
-        (= B C) (make-multiplicity 0)
-        :else nil))
+  (let [av (get-value A)]
+    (cond (= av 1) (make-unify B C)
+          (and (= B C) (not= av 1)) (make-multiplicity 0)
+          :else nil)))
 
 (def-rewrite
   :match (times (:any A) (:ground B) (:any C))
-  (cond (= (get-value B) 1) (make-unify A C)
-        (= A C) (make-multiplicity 0)
-        :else nil))
+  (let [bv (get-value B)]
+    (cond (= bv 1) (make-unify A C)
+          (and (= A C) (not= bv 1)) (make-multiplicity 0)
+          :else nil)))
 
 
 (def-builtin-rexpr min 3
   (:allground (= v2 (min v0 v1)))
-  (v2 (min v0 v1))
-  )
+  (v2 (min v0 v1)))
 (def-user-term "min" 2 (make-min v0 v1 v2))
 
 (def-builtin-rexpr max 3
   (:allground (= v2 (max v0 v1)))
-  (v2 (max v0 v1))
-  )
+  (v2 (max v0 v1)))
 (def-user-term "max" 2 (make-max v0 v1 v2))
 
 (def-builtin-rexpr pow 3
@@ -173,17 +175,10 @@
 (def-builtin-rexpr exp 2
   (:allground (= v1 (java.lang.Math/exp v0)))
   (v1 (java.lang.Math/exp v0))
-  (v0 (java.lang.Math/log v1))
-  )
+  (v0 (java.lang.Math/log v1)))
 
 (def-user-term "exp" 1 (make-exp v0 v1))
 (def-user-term "log" 1 (make-exp v1 v0))
-
-;; (def-base-rexpr log [:var v0 :var v1])  ;; have some log which just gets inverted into exp.  though this is not something that would represent a given expression
-;; (def-rewrite
-;;   :match (log (:any v0) (:any v1))
-;;   :run-at :construction
-;;   (make-exp v1 v0))
 
 (def-builtin-rexpr lessthan 3
   (:allground (= v2 (< v0 v1)))
@@ -201,23 +196,17 @@
 
 (defn is-true? [x] (= (make-constant true) x))
 
-(comment
-  (def-rewrite
-    :match (lessthan (:var A) (:var B) (is-true? x))
-    :run-at :inference
-    :context (lessthan (:var C) (:var A) (is-true? y))
-    :infers (lessthan C B (make-constant true))
-    ;; then this will need to make a new conjucntive constraint
-    nil
-    )
-  )
-
+(def-rewrite
+  :match {:rexpr (lessthan (:any A) (:any B) (is-true? _))
+          :context (lessthan (:any C) A (is-true? _))}
+  :run-at :inference
+  :infers (make-lessthan C B (make-constant true)))
 
 (def-rewrite
-  :match {:rexpr (lessthan (:var A) (:var B) (is-true? _))
-          :context (lessthan (:var C) A (is-true? _))}
+  :match {:rexpr (lessthan (:any A) (:any B) (is-true? _))
+          :context (lessthan B (:any C) (is-true? _))}
   :run-at :inference
-  :infers (lessthan C B (make-constant true)))
+  :infers (make-lessthan A C (make-constant true)))
 
 (def-rewrite
   :match {:rexpr (lessthan (:any A) (:any B) (:any C))
@@ -225,21 +214,27 @@
   :run-at :construction
   (make-unify C (make-constant false)))
 
-;; (def-base-rexpr greaterthan [:var v0 :var v1 :var v2])
-;; (def-rewrite
-;;   :match (greaterthan (:any v0) (:any v1) (:any v2))
-;;   :run-at :construction
-;;   (make-lessthan v1 v0 v2))
 
-;; (def-base-rexpr greaterthan-eq [:var v0 :var v1 :var v2])
-;; (def-rewrite
-;;   :match (greaterthan-eq (:any v0) (:any v1) (:any v2))
-;;   :run-at :construction
-;;   (make-lessthan-eq v1 v0 v2))
+(def-rewrite
+  :match {:rexpr (lessthan-eq (:any A) (:any B) (is-true? _))
+          :context (lessthan-eq (:any C) A (is-true? _))}
+  :run-at :inference
+  :infers (make-lessthan-eq C B (make-constant true)))
 
 (def-builtin-rexpr equals 3
   (:allground (= v2 (= v0 v1)))
   (v2 (= v0 v1)))
+
+(def-rewrite
+  :match (equals (:any A) (:any B) (is-true? _))
+  :run-at [:construction :standard]
+  (make-unify A B))
+
+(def-rewrite
+  :match {:rexpr (equals (:any A) (:any B) C)
+          :check (= A B)}
+  :run-at :construction
+  (make-unify C (make-constant true)))
 
 ;; this should maybe just be unification rather than having something different for equals checking?
 (def-user-term ["equals" "=="] 2 (make-equals v0 v1 v2))
@@ -247,6 +242,17 @@
 (def-builtin-rexpr not-equals 3
   (:allground (= v2 (not= v0 v1)))
   (v2 (not= v0 v1)))
+
+(def-rewrite
+  :match (not-equals (:any A) (:any B) (#(= % (make-constant false)) _))
+  :run-at [:construction :standard]
+  (make-unify A B))
+
+(def-rewrite
+  :match {:rexpr (not-equals (:any A) (:any B) C)
+          :check (= A B)}
+  :run-at :construction
+  (make-unify C (make-constant false)))
 
 (def-user-term ["notequals" "!="] 2 (make-not-equals v0 v1 v2))
 
@@ -308,10 +314,6 @@
   (v1 (java.lang.Math/tanh v0)))
 (def-user-term "tanh" 1 (make-tanh v0 v1))
 (def-user-term "atanh" 1 (make-tanh v1 v0))
-
-;; (def-builtin-rexpr abs 2
-;;                   :allground (= v1 (if (>= v0 0) v0 (- v0)))
-;;                   (v1 (if (>= v0 0) v0 (- v0))))
 
 
 

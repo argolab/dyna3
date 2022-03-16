@@ -138,7 +138,7 @@ StringConst2
 // ' stupid highlighting
 
 fragment StringConstBracketsrec
-    : '{' ( StringConstBracketsrec | ~[{}] )* '}'
+    : '{' ( StringConstBracketsrec | '%' ~[\n\r]* [\n\r] | ~[{}] )* '}'
     ;
 
 StringConstBrackets
@@ -151,7 +151,7 @@ junk3: ;
 stringConst returns[String t] locals [String vv]
     : a=StringConst { $vv = $a.getText(); $t = $vv.substring(1, $vv.length() - 1); }
     | a=StringConst2 { $vv = $a.getText(); $t = $vv.substring(1, $vv.length() - 1); }
-    | a=StringConstBrackets { $vv = $a.getText(); $t = $vv.substring(2, $vv.length() - 1); }
+    | a=StringConstBrackets { $vv = $a.getText(); $t = $vv.substring(2, $vv.length() - 1).replaceAll("%[^\n\r]*([\n\r])", "\$1"); }
     // TODO: we need to handle string escapes etc
     ;
 
@@ -642,7 +642,7 @@ locals [DynaTerm add_arg=null]
             '}'
         |   str=StringConstBrackets {
                     String lstr = $str.getText();
-                    $add_arg = DynaTerm.create("\$constant", lstr.substring(2, lstr.length() - 1));
+                    $add_arg = DynaTerm.create("\$constant", lstr.substring(2, lstr.length() - 1).replaceAll("%[^\n\r]*([\n\r])", "\$1"));
                     }
         )
         {

@@ -23,7 +23,7 @@ print my_f'{
 my_concat(A,B) = str("this concats two strings ", A, " and ", B).
 
 print my_concat("this is the first")'{
-     and this is the second
+     and this is the second  % this comment should not print out
 
 }.
 

@@ -25,6 +25,7 @@
 (deftype context
     [parent
      full-context ; if true, then this is tracking all conjuncts, otherwise this is just the assignments to variables
+                  ; this is currently getting ignored, so we are essentially always having the full context
      context-kind
      root-rexpr
      ^:unsynchronized-mutable rexprs                          ; unsynchronized-mutable as this should only be used from a single thread
@@ -127,6 +128,17 @@
               (debug-repl)
               (???))  ;; todo: other kinds of contexts which are going
       ))
+  (ctx-scan-through-conjuncts [this scan-fn]
+    (let [r (reduce
+             (fn [_ x] (let [r (scan-fn x)] (if-not (nil? r) (reduced r))))
+             rexprs)]
+      (if (and (nil? r) (not (nil? parent)))
+        (ctx-scan-through-conjuncts parent scan-fn)
+        r)))
+
+  (ctx-contains-rexpr? [this rexpr]
+    (or (contains? rexprs rexpr) (and (not (nil? parent) (ctx-contains-rexpr? parent rexpr)))))
+
   Object
   (toString ^String [this]
     (if (nil? parent)
@@ -200,18 +212,21 @@
 (swap! debug-useful-variables assoc 'context get-context)
 
 
-(defmacro scan-through-full-context [argument & body]
+
+;; these should be replaced with something that is more efficient.  like if this is going to require
+(defmacro scan-through-full-context [ctx argument & body]
   ;; scan through all of the conjunctive constraints in the context and assign them to the argument variable
   ;; keep scanning as long as body does not return nil, otherwise return the value from body
-  `(let [scan-fun# ~(fn [argument] ~@body)]
+  `(let [scan-fun# (fn [~argument] ~@body)]
+     (ctx-scan-through-conjuncts ~ctx scan-fn#)))
 
-     ))
-
-(defmacro scan-through-context [type argument & body]
+(defmacro scan-through-context [ctx type argument & body]
   ;; scan through the conjunctive constraitns which are of the rexpr argument `type`
   ;; the value will be bound to the argument variable
   ;; keep scanning as long as the body return nil.  if the result is not nil, then that will be returned
-  )
+  `(let [scan-fun# (fn [~argument] (when (instance? ~type ~argument)
+                                      ~@body))]
+     (ctx-scan-through-conjuncts ~ctx scan-fun#)))
 
 
 ;; there could be some nested variables which are array list based

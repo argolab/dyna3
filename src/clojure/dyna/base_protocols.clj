@@ -51,6 +51,9 @@
   (ctx-intersect [this other])
   (ctx-subtract [this other])
 
+  (ctx-scan-through-conjuncts [this scan-fn])
+  (ctx-contains-rexpr? [this rexpr])
+
   ;; for debugging
   (ctx-get-inner-values [this])
   (ctx-get-all-bindings [this]))
