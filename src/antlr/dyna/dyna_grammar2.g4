@@ -51,7 +51,7 @@ Whitespace
 
 NormalAtom
     //: ('a'..'z')('a'..'z'|'A'..'Z'|'0'..'9'|'_')*
-    : [a-z][a-zA-Z0-9_]*
+    : [a-z][a-zA-Z0-9_]* {!("new".equals(getText()))}?
     ;
 
 DollaredAtom
@@ -65,6 +65,7 @@ EscapedAtom
 Comma
     : ','
     ;
+
 
 // there is some bug in the antlr4 parser where the first grammar rule after the lexer rules will error
 // when using the returns statement
@@ -483,79 +484,24 @@ assocativeMapElement returns[DynaTerm key, DynaTerm value]
     ;
 
 
-// there could be some syntax for specifying which variables are captured.  This would have that there are some expressions with
 dynabase returns[DynaTerm rterm]
-    locals [ArrayList<DynaTerm> terms = new ArrayList<>(), DynaTerm par = null, DynaTerm dterms = null]
-    : 'new'
-        (parent=expression {$par = $parent.rterm;})? // if this inherits from some other dynabase
-        ('{' ((t=term {$dterms = ($dterms == null ? $t.rterm : DynaTerm.create(",", $dterms, $t.rterm));})*
-               t2=term_unended '.' {$dterms = ($dterms == null ? $t2.rterm : DynaTerm.create(",", $dterms, $t2.rterm));})?
-            '}')?
-        {$rterm = DynaTerm.create("\$dynabase_create",
-                $par == null ? DynaTerm.null_term : $par,
-                $dterms == null ? DynaTerm.null_term : $dterms);}
-    | '{' dd=dynabaseInnerBracket {$rterm=$dd.rterm;} '}'
+    locals [DynaTerm dterms=DynaTerm.null_term]
+    : 'new' '(' parent=expression ')' {$rterm=DynaTerm.create("\$dynabase_create", $parent.rterm, DynaTerm.null_term);}
+    | 'new' parent=expression '{' (dd=dynabaseInnerBracketTerms {$dterms=$dd.dterms;})? '}' {$rterm=DynaTerm.create("\$dynabase_create", $parent.rterm, $dterms);}
+    | 'new' '{' (dd=dynabaseInnerBracketTerms {$dterms=$dd.dterms;})? '}' {$rterm=DynaTerm.create("\$dynabase_create", DynaTerm.null_term, $dterms);}
+    | '{' d=dynabaseInnerBracket '}'  {$rterm=$d.rterm;}
     ;
+
 
 dynabaseInnerBracket returns[DynaTerm rterm]
-    locals [ArrayList<DynaTerm> terms = new ArrayList<>(), DynaTerm dterms = null]
-    : (t=term {$dterms = ($dterms == null ? $t.rterm : DynaTerm.create(",", $dterms, $t.rterm));})*
-           t2=term_unended '.' {$dterms = ($dterms == null ? $t2.rterm : DynaTerm.create(",", $dterms, $t2.rterm));}
-        {assert($dterms != null);
-            $rterm = DynaTerm.create("\$dynabase_create", DynaTerm.null_term, $dterms);}
+    : dd=dynabaseInnerBracketTerms {$rterm=DynaTerm.create("\$dynabase_create", DynaTerm.null_term, $dd.dterms);}
     ;
 
-
-////////////////////
-
-// inlineAggregatedBody[DynaParserInterface prog] returns [Object value]
-//     locals [ArrayList<ParseNode> exprList = new ArrayList<>();]
-//     : (e=expression[$prog] Comma {$exprList.add($e.trm);})* e=expression {$exprList.add($e.trm);}
-//       { $trm = CommaOperatorNode.make($exprList); }
-//     ;
-
-// inlineAggregatedBodies returns [ArrayList<ParseNode> bodies = new ArrayList<>();]
-//     : (a=inlineAggregatedBody ';' {$bodies.add($a.trm);})* a=inlineAggregatedBody {$bodies.add($a.trm);}
-//     ;
-
-
-// inlineAggregated returns [DynaTerm rterm]
-// locals [ArrayList<DynaTerm> bodies = new ArrayList<>()]
-//     : '(' agg=aggregatorName
-//         (t=termBody[$agg.t] ';' { $bodies.add($t.rterm); })*
-//         termBody[$agg.t] {$bodies.add($t.rterm);}
-//         ')'
-//         {$rterm = DynaTerm.create("\$inline_aggregated_function", $agg.t, DynaTerm.make_list($bodies));}
-//     ;
-
-
-// // is there any use for having an inline function syntax.  I suppose that this can't hurt it too bad...
-// // expressing something like a general list sort using a function call would be interesting.
-// // so the calling expressions would correspond with
-
-// // could also use a keyword lambda like in python, so the expression could be lambda X,Y,Z: what is going to go here???
-// // having the () wrap the expression makes it a bit nicer
-// inlineAnonFunction returns [DynaTerm rterm]
-// locals [ArrayList<String> varlist = new ArrayList<>(),
-// ArrayList<DynaTerm> bodylist = new ArrayList<>()]
-//     : '(' (v=Variable Comma {$varlist.add($v.getText());} )* v=Variable {$varlist.add($v.getText());} '~>'
-//         (t=termBody["="] {$bodylist.add($t.rterm);} ';')*
-//     t=termBody["="] {$bodylist.add($t.rterm);} ')'
-// {
-
-//             // (X,Y,Z ~> X+Y+Z+V)
-//             // because this should require that the expression unifies, does it make since to allow a comma expression here?  Should this just be a single expression?  But someone could always sneak into the expression something with commas.  Maybe this should really just be some short hand for expressing functions wihch represent different operations
-
-//             // this is going to have to convert this into some new dummy term where anything that is captured gets added into some term
-//             // then any additional variables will have that the expression should correspond with which of the operators will
-//     $rterm = DynaTerm.create("\$inline_function", DynaTerm.make_list($varlist), DynaTerm.make_list($bodylist));
-//     // this wants to get a reference to the anon function, not call it immediately.
-//     // so this should construct what the name for the item is, but not identify which of the arguments
-// }
-//     | v=Variable '~>' e=expression
-//       {$rterm = DynaTerm.create("\$inline_function", DynaTerm.make_list(new String[]{$v.getText()}), DynaTerm.make_list(new DynaTerm[]{$e.rterm}));}
-//     ;
-
+dynabaseInnerBracketTerms returns[DynaTerm dterms=null]
+    : (t=term_unended EndTerm {$dterms = ($dterms == null ? $t.rterm : DynaTerm.create(",", $dterms, $t.rterm));})*
+       t=term_unended (EndTerm|'.') {$dterms = ($dterms == null ? $t.rterm : DynaTerm.create(",", $dterms, $t.rterm));}
+    | 'dynabaseinner'
+    ;
 
 
 // possible that the `(X) = foo` will get confused with unification.  In which case this will need something else for the syntax of an equals aggregator?

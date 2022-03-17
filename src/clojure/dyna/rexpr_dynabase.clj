@@ -3,7 +3,8 @@
   (:require [dyna.base-protocols :refer :all])
   (:import [dyna.base_protocols Dynabase])
   (:require [dyna.rexpr :refer :all])
-  (:require [dyna.user-defined-terms :refer [def-user-term]]))
+  (:require [dyna.user-defined-terms :refer [def-user-term]])
+  (:require [dyna.assumptions :refer [make-assumption]]))
 
 ;; R-exprs which represent construction of dynabases
 ;; dynabases are a prototype styled inheritiance system for dyna
@@ -127,7 +128,7 @@
                                    ;; rewrites to avoid having to process the
                                    ;; dynabase more than once
             :referenced-variables (vec referenced-variables)
-            :assumption nil  ;; there should be some assumption about the
+            :assumption (make-assumption)  ;; there should be some assumption about the
                              ;; dynabase not inheriting from itself.  This will
                              ;; enable us to have more "efficient" code where an
                              ;; expression can again make the same assumptions
@@ -139,4 +140,4 @@
 ;; if some variable is an instance of a dynabase.  This would be that the
 ;; dynabases are equal to each other, or the instance is a superset of the first
 ;; map
-(def-user-term "instance" 2 (make-multiplicity 1))
+;(def-user-term "instance" 2 (make-multiplicity 1))

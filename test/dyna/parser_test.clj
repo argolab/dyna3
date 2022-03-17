@@ -24,3 +24,25 @@
   (do
     (parse-string "foo(X) = (min= X;Y).")
     (parse-string "foo2(X,Y) = Func=((Z) min= X,Z ), Func(Y).")))
+
+(deftest dynabase
+  (parse-string "a = new {}.")
+  (parse-string "
+a = new {
+f(X) = 123.
+}.
+
+v = {f = 123.}.
+
+b = {
+c = 3.
+}.
+
+f = new(b).
+
+z = foo {
+f = 123.
+}.
+
+w = f.a.b.c(123,456).e.w(9).
+"))
