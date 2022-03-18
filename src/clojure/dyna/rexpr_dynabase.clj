@@ -36,17 +36,15 @@
 (def-rewrite
   :match (dynabase-constructor (:str name) (:ground-var-list arguments) (:ground parent-dynabase) (:any dynabase))
   (let [parent-val (get-value parent-dynabase)
-        args (doall (map get-value arguments))
+        args (vec (map get-value arguments))
         metadata (get @system/dynabase-metadata name)
-        ret (cond (dnil? parent-val)
-                  (let [db (Dynabase. {name (list args)})]
-                    (make-unify dynabase (make-constant db)))
-                  (instance? Dynabase parent-val)
-                  (let [parent-obj (.access-map ^Dynabase parent-val)
-                        dbm (assoc parent-obj name (conj (get parent-obj name ()) args))
-                        db (Dynabase. dbm)]
-                    ;; this needs to track which kinds of dynabases this is going to inherit from
-                    (make-unify dynabase (make-constant db)))
+        ret (cond (dnil? parent-val) (let [db (Dynabase. {name (list args)})]
+                                       (make-unify dynabase (make-constant db)))
+                  (instance? Dynabase parent-val) (let [parent-obj (.access-map ^Dynabase parent-val)
+                                                        dbm (assoc parent-obj name (conj (get parent-obj name ()) args))
+                                                        db (Dynabase. dbm)]
+                                                    ;; this needs to track which kinds of dynabases this is going to inherit from
+                                                    (make-unify dynabase (make-constant db)))
                   :else (do (debug-repl "unexpected dynabase parent type")
                             (assert false)))]
     ret))
@@ -68,9 +66,11 @@
                                        args (first arr))))
             ;; this needs to have some disjunct over all of the different values that this can take on.  In this case, this would
             (make-disjunct
-             (doall (map (fn [ae]
-                           (make-conjunct (doall (map (fn [var val] (make-no-simp-unify var (make-constant val))) ae))))
-                         arr)))))))))
+             (vec (map (fn [ae]
+                         (make-conjunct (vec (map
+                                              (fn [var val] (make-no-simp-unify var (make-constant val)))
+                                              args ae))))
+                       arr)))))))))
 
 (comment
   (def-iterator

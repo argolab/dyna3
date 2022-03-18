@@ -136,10 +136,9 @@
                                               true ;; the body is conjunctive, meaning that we can move constraints out
                                               (make-disjunct (doall rexprs)))]
                          res))
-
            groupped-aggs (into {} (for [[op children] grouped]
                                     (if (= 1 (count children))
-                                      (first children)
+                                      [op (first children)]
                                       (let [new-in (make-variable (gensym 'comb_incoming_var))
                                             new-children (for [c children]
                                                            (strip-agg new-in c))]

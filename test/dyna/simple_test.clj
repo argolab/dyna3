@@ -291,5 +291,33 @@ w += 2.
 }.
 
 assert b.z = 1.
-assert b.w = 1.
+assert b.w = 2.
+assert_fail _ = a.w.
 ")
+
+(str-test dynabase4 "
+a = {z += 1.}.
+b = {z += 2.}.
+c = new a { z += 3.}.
+
+assert a.z = 1.
+assert b.z = 2.
+assert c.z = 4.
+")
+
+(str-test dynabase5 "
+a = {z += 1.}.
+b = {z *= 2.}.
+
+assert a.z = 1.
+assert b.z = 2.
+")
+
+(comment
+  (str-test dynabase6 "
+f(X) = new X { z += 1. }.
+
+a = f(f(f(new {}))).
+
+assert a.z = 3.
+"))

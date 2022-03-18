@@ -32,11 +32,10 @@
   :many-items *
   :rexpr-binary-op make-add)
 
-(comment
-  (def-aggregator "*="
-    :combine *
-    :many-items (fn [x mult] (Math/pow x mult))
-    :rexpr-binary-op make-times))
+(def-aggregator "*="
+  :combine *
+  :many-items (fn [x mult] (Math/pow x mult))
+  :rexpr-binary-op make-times)
 
 
 ;; we can define 'advanced' aggregators which will allow this to pass through
@@ -60,10 +59,15 @@
 ;; used if there are multiple aggregators on a single rule which need to get combined together
 ;; this will throw an exception if we attempt to combine multiple expressions together at once
 ;; though maybe this should just be some error state that propagates around as a user value or something instead of an exception
-(comment
+(let [ident (Object.)]
   (def-aggregator "only_one_contrib"
+    :identity ident
     :combine (fn [a b]
-               (throw (DynaUserError. "multiple aggregators on the same rule")))))
+               (throw (DynaUserError. "multiple aggregators on the same rule")))
+    :lower-value (fn [x]
+                   (when (identical? ident x)
+                     (throw (UnificationFailure. "no contributionso on aggregator")))
+                   x)))
 
 (defn- get-aggregated-value [v]
   (if (and (instance? DynaTerm v)
@@ -171,6 +175,8 @@
   :lower-value (fn [x]
                  (assert (= "$colon_line_tracking" (.name ^DynaTerm x)))
                  (let [[la va] (.arguments ^DynaTerm x)]
+                   (when (= va colon-identity-elem)
+                     (throw (UnificationFailure. "$null on :=")))
                    va)))
 
 

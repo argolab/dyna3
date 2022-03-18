@@ -539,24 +539,25 @@
                                                                             (get-value extended-dynabase-value)
                                                                             (make-constant DynaTerm/null_term))
                                                                           out-variable)]
-                                     ((fn mkt [^DynaTerm trm]
-                                        (let [^DynaTerm dt (if (= "," (.name trm)) (get trm 0) trm)]
-                                          (cond (= (.name dt) ",") (do (mkt (get dt 0))
-                                                                       (mkt (get dt 1)))
-                                                (= (.name dt) "$define_term") (let [[name odb aggregator body] (.arguments dt)]
-                                                                                (assert (= odb DynaTerm/null_term))
-                                                                                (let [res (convert-from-ast (DynaTerm. "$define_term"
-                                                                                                                       [name
-                                                                                                                        dynabase-term-access
-                                                                                                                        aggregator
-                                                                                                                        body])
-                                                                                                            (make-constant true) {} source-file)]
-                                                                                  (assert (= res (make-multiplicity 1)))))
-                                                :else (do
-                                                        (debug-repl "dynabase unsupported body type")
-                                                        (???)))
-                                          (when (= "," (.name trm)) (recur (get trm 1)))))
-                                      dynabase-terms)
+                                     (when (not= dynabase-terms DynaTerm/null_term)
+                                       ((fn mkt [^DynaTerm trm]
+                                          (let [^DynaTerm dt (if (= "," (.name trm)) (get trm 0) trm)]
+                                            (cond (= (.name dt) ",") (do (mkt (get dt 0))
+                                                                         (mkt (get dt 1)))
+                                                  (= (.name dt) "$define_term") (let [[name odb aggregator body] (.arguments dt)]
+                                                                                  (assert (= odb DynaTerm/null_term))
+                                                                                  (let [res (convert-from-ast (DynaTerm. "$define_term"
+                                                                                                                         [name
+                                                                                                                          dynabase-term-access
+                                                                                                                          aggregator
+                                                                                                                          body])
+                                                                                                              (make-constant true) {} source-file)]
+                                                                                    (assert (= res (make-multiplicity 1)))))
+                                                  :else (do
+                                                          (debug-repl "dynabase unsupported body type")
+                                                          (???)))
+                                            (when (= "," (.name trm)) (recur (get trm 1)))))
+                                        dynabase-terms))
                                      rexpr)
 
             ["$dynabase_access" 1] (let [[^DynaTerm dbase] (.arguments ast)
