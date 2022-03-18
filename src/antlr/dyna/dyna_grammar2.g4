@@ -451,7 +451,7 @@ arrayElements returns [ArrayList<DynaTerm> elems = new ArrayList<>(); ]
     : (e=expression Comma {$elems.add($e.rterm);})* e=expression {$elems.add($e.rterm);} Comma?
     ;
 
-assocativeMap returns[DynaTerm rterm] locals []
+assocativeMap returns[DynaTerm rterm]
     : '{' a=assocativeMapInnerBrackets '}' {$rterm=$a.rterm;}
     ;
 
@@ -500,7 +500,6 @@ dynabaseInnerBracket returns[DynaTerm rterm]
 dynabaseInnerBracketTerms returns[DynaTerm dterms=null]
     : (t=term_unended EndTerm {$dterms = ($dterms == null ? $t.rterm : DynaTerm.create(",", $dterms, $t.rterm));})*
        t=term_unended (EndTerm|'.') {$dterms = ($dterms == null ? $t.rterm : DynaTerm.create(",", $dterms, $t.rterm));}
-    | 'dynabaseinner'
     ;
 
 

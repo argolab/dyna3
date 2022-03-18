@@ -6,7 +6,7 @@
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
   (:require [dyna.user-defined-terms :refer [add-to-user-term update-user-term def-user-term get-user-term]])
-  (:require [clojure.set :refer [union intersection difference]])
+  (:require [clojure.set :refer [union intersection difference rename-keys]])
   (:require [clojure.string :refer [join]])
   (:require [clojure.java.io :refer [resource]])
   (:require [aprint.core :refer [aprint]])
@@ -385,6 +385,7 @@
                                                                       (DynaTerm. "$dynabase_access" [dynabase])
                                                                       (DynaTerm. "$constant" [DynaTerm/null_term]))])
                                                body)
+                                     dynabase-name (if-not (dnil? dynabase) (.name ^DynaTerm dynabase) DynaTerm/null_term)
                                      new-ast (DynaTerm. "$define_term_normalized"
                                                         [(.name ^DynaTerm head)
                                                          (.arity ^DynaTerm head)
@@ -399,8 +400,7 @@
                                                 argument-variables (merge ;; these are the variables which are arguments to this
                                                                     (into {} (for [i (range functor-arity)]
                                                                                [(str "$" i) (make-variable (str "$" i))]))
-                                                                    (when dynabase
-                                                                      {"$self" (make-variable "$self")}))
+                                                                    {"$self" (make-variable "$self")})
                                                 ;; anything which matches these patterns should not be the variables which are present
                                                 project-variables (filter
                                                                    (if (not (dnil? dynabase))
@@ -498,6 +498,7 @@
                                                                                     dbval
                                                                                     (make-intermediate-var) ;; we do not care about the file which this comes from, so we just ignore this
                                                                                     )]
+                                     (debug-repl "db quote")
                                      (make-conjunct [structure meta-struct]))
 
             ["$dynabase_call" 2] (let [[dynabase-var call-term] (.arguments ast)
@@ -505,24 +506,65 @@
                                        call-vals (get-arg-values (.arguments call-term))
                                        arity (count call-vals)
                                        call-name {:name (.name call-term) ;; the name arity.  When a dynabase is called, there is no filename on the name qualifier, as it requires that it can be exported across files etc
-                                                  :arity arity}]
+                                                  :arity arity}
+                                       ;; I suppose that a dynabase could also have some additional variable like :dynabase true so that the functor names of a dynabase are seperate from other terms?
+                                       ]
                                    (make-user-call
                                     call-name
                                     (merge
                                      {(make-variable "$self") dynabase-val
                                       (make-variable (str "$" arity)) out-variable}
                                      (into {} (for [[i v] (zipmap (range) call-vals)]
-                                                [(make-variable (str "$" i)) v]))))
-                                   0 ;; the call depth
-                                   #{}  ;; the set of arguments which need to get avoid
+                                                [(make-variable (str "$" i)) v])))
+                                    0 ;; the call depth
+                                    #{})  ;; the set of arguments which need to get avoid
                                    )
 
             ["$dynabase_create" 2] (let [[extended-dynabase-value dynabase-terms] (.arguments ast)
-                                         ;dynabase-name (gensym 'dynabase_)
-                                         ]
-                                     (debug-repl "dynabase create")
-                                     (???) ;; TODO
-                                     )
+                                         dynabase-captured-variables (into {} (for [[k v] variable-name-mapping]
+                                                                                (let [val (if (is-constant? v)
+                                                                                            (DynaTerm. "$constant" [v])
+                                                                                            (DynaTerm. "$variable" [k]))]
+                                                                                  (if (= k "$self")
+                                                                                    ["$parent" val]
+                                                                                    [k val]))))
+                                         has-super (not= DynaTerm/null_term extended-dynabase-value)
+                                         referenced-variables (vec (keys dynabase-captured-variables))
+                                         dbase-name (make-new-dynabase-identifier has-super referenced-variables)
+                                         dynabase-term-access (DynaTerm. dbase-name (vec (map #(DynaTerm. "$variable" [%]) referenced-variables)))
+                                         dynabase-term-create (DynaTerm. dbase-name (vec (map dynabase-captured-variables referenced-variables)))
+                                         rexpr (make-dynabase-constructor dbase-name
+                                                                          (vec (map #(get-value (dynabase-captured-variables %)) referenced-variables))
+                                                                          (if (not= DynaTerm/null_term extended-dynabase-value)
+                                                                            (get-value extended-dynabase-value)
+                                                                            (make-constant DynaTerm/null_term))
+                                                                          out-variable)]
+                                     ((fn mkt [^DynaTerm trm]
+                                        (let [^DynaTerm dt (if (= "," (.name trm)) (get trm 0) trm)]
+                                          (cond (= (.name dt) ",") (do (mkt (get dt 0))
+                                                                       (mkt (get dt 1)))
+                                                (= (.name dt) "$define_term") (let [[name odb aggregator body] (.arguments dt)]
+                                                                                (assert (= odb DynaTerm/null_term))
+                                                                                (let [res (convert-from-ast (DynaTerm. "$define_term"
+                                                                                                                       [name
+                                                                                                                        dynabase-term-access
+                                                                                                                        aggregator
+                                                                                                                        body])
+                                                                                                            (make-constant true) {} source-file)]
+                                                                                  (assert (= res (make-multiplicity 1)))))
+                                                :else (do
+                                                        (debug-repl "dynabase unsupported body type")
+                                                        (???)))
+                                          (when (= "," (.name trm)) (recur (get trm 1)))))
+                                      dynabase-terms)
+                                     rexpr)
+
+            ["$dynabase_access" 1] (let [[^DynaTerm dbase] (.arguments ast)
+                                         dbase-name (.name dbase)
+                                         dbase-arity (.arity dbase)
+                                         args (vec (map get-value (.arguments dbase)))
+                                         rexpr (make-dynabase-access dbase-name out-variable args)]
+                                     rexpr)
 
             ;; the assert can run inline, so it will check some statement before everything has been parsed
             ;; this will make writing tests for something easy

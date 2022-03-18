@@ -5,7 +5,7 @@
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
   (:require [dyna.assumptions :refer [invalidate! make-assumption depend-on-assumption]])
-  (:require [clojure.set :refer [subset?]])
+  (:require [clojure.set :refer [subset? union]])
   (:import [dyna.rexpr user-call-rexpr]))
 
 
@@ -70,9 +70,12 @@
                :dynabase dynabase
                :rexpr rexpr}]
     (dyna-debug
-     (let [exp-vars (exposed-variables rexpr)]
-       (when-not (and (subset? exp-vars (into #{} (for [i (range (+  1 arity))]
-                                                    (make-variable (str "$" i)))))
+     (let [exp-vars (exposed-variables rexpr)
+           set-vars (union (into #{} (for [i (range (+  1 arity))]
+                                       (make-variable (str "$" i))))
+                           (when-not (dnil? dynabase)
+                             #{(make-variable "$self")}))]
+       (when-not (and (subset? exp-vars set-vars)
                       (contains? exp-vars (make-variable (str "$" arity))))
          (debug-repl "add to user term error")
          (assert false)))
@@ -90,7 +93,7 @@
                                                                       :rexprs (conj (:rexprs v) value)
                                                                       :def-assumption (make-assumption))))
                                                         nv2 (if (not (dnil? dynabase))
-                                                              (assoc nv :dynabases (conj dynabase (:dynabases nv #{})))
+                                                              (assoc nv :dynabases (conj (:dynabases nv #{}) dynabase))
                                                               nv)]
                                                     (assoc old object-name nv2))))
           assumpt (get-in old-defs [object-name :def-assumption])]

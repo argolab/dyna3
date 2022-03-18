@@ -8,6 +8,7 @@
   ;(:require [dyna.rewrites :refer [def-rewrite]])
   (:require [clojure.set :refer [union]])
   (:require [dyna.user-defined-terms :refer [def-user-term]])
+  (:import [dyna DynaTerm])
   )
 
 ;(in-ns 'dyna.rexpr)
@@ -458,7 +459,7 @@
 ;; (def-user-term "$nil" 1 (make-unify v0 (make-structured-rexpr "$nil" [])))
 ;; (def-user-term "$cons" 2 (make-unify v2 (make-structured-rexpr "." [v0 v1])))
 
-(def-user-term "$nil" 0 (make-unify-structure v0 nil (make-constant undefined-dynabase) "$nil" []))
+(def-user-term "$nil" 0 (make-unify v0 (make-constant DynaTerm/null_term)))  ;; this is $nil
 (def-user-term "$cons" 2 (make-unify-structure v2 nil (make-constant undefined-dynabase) "." [v0 v1]))
 
 ;; operators for handing a map of elements.  The map is a wrapped clojure map which is associate

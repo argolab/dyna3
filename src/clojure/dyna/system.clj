@@ -71,6 +71,9 @@
 
 (def ^:dynamic debug-on-assert-fail true)
 
+;; metadata associated with all of the different types of dynabases
+(def ^:dynamic dynabase-metadata (atom {}))
+
 ;; this should ensure that there are system-defined-user-terms also.  could have some flag which is "system is inited" and that it would parse
 ;; the prelude in the case that it wasn't already inited or something?  It would want for
 (defn make-new-dyna-system []
