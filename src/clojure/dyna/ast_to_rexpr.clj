@@ -525,9 +525,9 @@
                                                                                 (let [val (if (is-constant? v)
                                                                                             (DynaTerm. "$constant" [v])
                                                                                             (DynaTerm. "$variable" [k]))]
-                                                                                  (if (= k "$self")
-                                                                                    ["$parent" val]
-                                                                                    [k val]))))
+                                                                                  (cond (= k "$self") ["$parent" val]
+                                                                                        (re-matches #"\$[0-9]+" k) [(str "$construct_arg_" k) val]
+                                                                                        :else [k val]))))
                                          has-super (not= DynaTerm/null_term extended-dynabase-value)
                                          referenced-variables (vec (keys dynabase-captured-variables))
                                          dbase-name (make-new-dynabase-identifier has-super referenced-variables)

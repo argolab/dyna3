@@ -269,3 +269,27 @@ b = 456.
 assert dbase.a = 123.
 assert dbase.b = 456.
 ")
+
+(str-test dynabase2 "
+f(X) = {
+z = X*2.
+}.
+
+baz = f(10).
+
+assert baz.z = 20.
+assert f(3).z = 6.
+")
+
+(str-test dynabase3 "
+a = {
+z += 1.
+}.
+
+b = new a {
+w += 2.
+}.
+
+assert b.z = 1.
+assert b.w = 1.
+")

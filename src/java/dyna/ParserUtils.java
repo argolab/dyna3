@@ -27,19 +27,13 @@ class ParserUtils {
     }
 
     public static String gensym_variable_name() {
-        // this is used by the parser, not really something that "belongs" on
-        // the DynaTerm class, but it should be ok
-
-        // this should also get moved off the DynaTerm class to something which
         return clojure_gensym.invoke("$anon_var__").toString();
     }
 
     private static final AtomicLong colon_line_counter_ = new AtomicLong();
     public static long colon_line_counter() {
         // this returns the counter for the number of times that := rules have
-        // appeared in the program this really should not appear on the DynaTerm
-        // class as there is no point for it here, so it should get move din the
-        // future
+        // appeared in the program
         return colon_line_counter_.getAndAdd(1);
     }
 

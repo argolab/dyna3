@@ -37,6 +37,7 @@
   :match (dynabase-constructor (:str name) (:ground-var-list arguments) (:ground parent-dynabase) (:any dynabase))
   (let [parent-val (get-value parent-dynabase)
         args (doall (map get-value arguments))
+        metadata (get @system/dynabase-metadata name)
         ret (cond (dnil? parent-val)
                   (let [db (Dynabase. {name (list args)})]
                     (make-unify dynabase (make-constant db)))
@@ -44,6 +45,7 @@
                   (let [parent-obj (.access-map ^Dynabase parent-val)
                         dbm (assoc parent-obj name (conj (get parent-obj name ()) args))
                         db (Dynabase. dbm)]
+                    ;; this needs to track which kinds of dynabases this is going to inherit from
                     (make-unify dynabase (make-constant db)))
                   :else (do (debug-repl "unexpected dynabase parent type")
                             (assert false)))]
