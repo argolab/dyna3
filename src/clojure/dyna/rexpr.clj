@@ -4,6 +4,7 @@
   (:require [dyna.rexpr-constructors])
   (:require [dyna.context :as context])
   (:require [dyna.system :as system])
+  (:require [dyna.iterators :as iterators])
   (:require [clojure.set :refer [union difference]])
   (:require [clojure.string :refer [trim]])
   (:require [aprint.core :refer [aprint]])
@@ -765,25 +766,21 @@
       ret)))
 
 (defmacro def-iterator [& args]
-  ;; (???) ;; TODO
-  ;; (let [kw-args (apply hash-map (drop-last args))
-  ;;       func-body (last args)
-  ;;       functor-name (car (:match kw-args))
-  ;;       arity (if (= (cdar (:match kw-args)) :any) nil (- (count (:match kw-args)) 1))
-  ;;       matcher (:matcher kw-args)
-  ;;       func (make-rewriter-function matcher (:context-requires kw-args nil) func-body &form)]
-  ;;   ;; there needs to be some find iterator method
-  ;;   ;; we could use the same methods to construct the function for getting the iterators
-  ;;   ;; then it would have the same access methods.  I suppose that there could be some base methods
-  ;;   ;; where it would call the base insteace, but we would like to union across the different methods
-  ;;   ;; for constructing something where
+  (let [kw-args (apply hash-map (drop-last args))
+        func-body (last args)
+        matcher (:match kw-args)
+        matcher-rexpr (if (map? matcher) (:rexpr matcher) matcher)
+        functor-name (car matcher-rexpr)
+        functor-type (symbol (str functor-name "-rexpr"))
+        iter-func `(fn ~'[rexpr]
+                     (match-rexpr ~'rexpr ~matcher ~func-body))
+        ret `(let [iter-func# ~iter-func]
+               (swap! rexpr-iterators-accessors (fn ~'[old]
+                                                  (assoc ~'old ~functor-type (conj (get ~'old ~functor-type [])
+                                                                                   iter-func#)))))
+        ]
+    ret))
 
-  ;;   ;; `(save-defined-rewrite
-  ;;   ;;   'rexpr-iterators-accessors
-  ;;   ;;   ~(symbol (str functor-name "-rexpr"))
-  ;;   ;;   ~func)
-
-    nil)
 
 (defn make-iterator [variable iterator]
   ;; these are going to need to be hashable, otherwise this would mean that we can't use the set to identify which expressions are iterable
@@ -885,12 +882,14 @@
         res (context/bind-context ctx
                                   (simplify-fully rexpr))]
     ;; there needs to be a better way to get the bindigns to variables rather than doing this "hack" to get the map
-    (system/query-output query-id (get (ctx-get-inner-values ctx) 3) res)))
+    (system/query-output query-id {:context ctx
+                                   :context-value-map (get (ctx-get-inner-values ctx) 4)
+                                   :rexpr res})))
 
 
 (defn find-iterators [rexpr]
   (let [typ (type rexpr)
-        rrs (get @rexpr-iterators-accessors typ)]
+        rrs (get @rexpr-iterators-accessors typ [])]
     (apply union (for [rs rrs] (rs rexpr)))))
 
 
@@ -1027,7 +1026,7 @@
 
 (def-iterator
   :match (unify (:iterate A) (:ground B))
-  (make-iterator A [(get-value B)]))
+  (iterators/make-unit-iterator A (get-value B)))
 
 (def-rewrite
   :match (unify-structure (:free out) (:unchecked file-name) (:ground dynabase) (:unchecked name-str) (:ground-var-list arguments))
@@ -1203,6 +1202,12 @@
     (ctx-add-context! outer-context intersected-ctx)
     ;(debug-repl "disjunct standard")
     (make-disjunct children-with-contexts)))
+
+(def-iterator
+  :match (disjunct (:rexpr-list children))
+  (let [all-iteres (vec (map find-iterators children))]
+    ;; this has to intersect
+    ))
 
 (def-rewrite
   ;; this is proj(A, 0) -> 0

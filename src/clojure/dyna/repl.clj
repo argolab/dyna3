@@ -5,6 +5,7 @@
 
   (:require [dyna.ast-to-rexpr :refer [eval-string print-parser-errors parse-string]])
   (:require [dyna.system :as system])
+  (:require [dyna.rexpr-constructors :refer [make-multiplicity]])
   (:require [clojure.string :refer [trim]])
   (:import [dyna DynaUserAssert]))
 
@@ -53,14 +54,24 @@
                         (.build))]
     (println "To exit press ctrl-d")
     (try
-      (binding [system/query-output (fn [query-text ctx rexpr]
-                                      (println query-text ": " ctx rexpr))]
+      (binding [system/query-output (fn [[query-text query-line-number] result]
+                                      ;; ignore the line number as this is running interc
+                                      (println "========== Query ==========")
+                                      (println query-text)
+                                      (println)
+                                      (println "Variable assignments:" (:context-value-map result))
+                                      (when (not= (make-multiplicity 1) (:rexpr result))
+                                        (println "Rexpr:" (:rexpr result)))
+                                      (println "==========================="))]
         (loop []
           (let [input (.readLine line-reader "dyna> ")]
             ;(println "read input" input)
             (when-not (contains? #{"exit" "quit"} (trim input))
               (try
-                (println (eval-string input :fragment-allowed false))
+                (let [rexpr-result (eval-string input :fragment-allowed false)]
+                  (if (= (make-multiplicity 1) rexpr-result)
+                    (println "ok")
+                    (println rexpr-result)))
                 (catch DynaUserAssert e
                   (println (.getMessage e))))
               (recur)))))

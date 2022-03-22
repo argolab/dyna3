@@ -253,7 +253,7 @@
 
     (when (is-disjunct? R)
          ;; if there is some branch which just has the assignment to the
-         ;; incoming variable, then we should attempt to perform
+         ;; incoming variable, then we should attempt to combine the different values together
 
          (let [body1 (vec (remove nil? (for [disj (:args R)]
                                          (if (and (is-unify? disj)
@@ -311,3 +311,13 @@
                                                                  (make-constant incom-val))
                                              nR]))))
         (make-aggregator operator result-variable incoming-variable body-is-conjunctive nR)))))
+
+
+(def-rewrite
+  :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:unchecked body-is-conjunctive) (:rexpr R))
+  :run-at :standard
+  (let [aop (get @aggregators operator)
+        ctx (context/make-nested-context-aggregator rexpr incoming-variable body-is-conjunctive)
+        body-iterators (find-iterators R)]
+    (when-not (empty? body-iterators)
+      (debug-repl "agg iterator"))))

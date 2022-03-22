@@ -313,11 +313,11 @@ assert a.z = 1.
 assert b.z = 2.
 ")
 
-(comment
-  (str-test dynabase6 "
+(comment)
+(str-test dynabase6 "
 f(X) = new X { z += 1. }.
 
 a = f(f(f(new {}))).
 
 assert a.z = 3.
-"))
+")

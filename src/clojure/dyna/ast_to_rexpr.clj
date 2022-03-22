@@ -611,25 +611,14 @@
                                  (debug-repl "user program debug repl")
                                  (make-unify out-variable (make-constant true)))
 
-            ["$query" 2] (let [[expression text-rep] (.arguments ast)
+            ["$query" 3] (let [[expression text-rep line-number] (.arguments ast)
                                all-variables-names (find-term-variables expression)
                                result-var (make-variable "$query_result_var")
                                all-variables (find-term-variables expression) ;; if there is an nested aggregator, those are not found, just the exposed variables
                                variable-map (into {} (map (fn [x] [x (make-variable x)]) all-variables))
-
-                               rexpr (convert-from-ast expression result-var variable-map source-file)
-                               ;result (simp-top rexpr)
-                               ]
-                           ;; this is a rebindable value which represents the expression that is getting evaluated
-                           ;(system/query-output text-rep result)
-                           (simplify-rexpr-query text-rep rexpr)
-                           (make-unify out-variable (make-constant true))
-                           ;; this is going to want to make all of the variables into something, there is no "aggregation" here
-                           ;; if this somehow wraps this expression in something which will represent the result
-
-                           ;; there might also be some special "out" channel which we can have where the results of the query should go
-                           ;; realistically, the query processing shouldn't happen in this file
-                           )
+                               rexpr (convert-from-ast expression result-var variable-map source-file)]
+                           (simplify-rexpr-query [text-rep line-number] rexpr)
+                           (make-unify out-variable (make-constant true)))
 
 
             ;; we special case the ,/2 operator as this allows us to pass the info that the first expression will get unified with a constant true earlier

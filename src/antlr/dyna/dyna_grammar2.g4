@@ -259,7 +259,7 @@ term returns[DynaTerm rterm = null]
     : term_unended EndTerm {$rterm=$term_unended.rterm;}
     | t=termBody["query="] EndQuery {
             String ttext = $t.ctx.start.getInputStream().getText(new Interval($t.ctx.start.getStartIndex(), $t.ctx.stop.getStopIndex()));
-            $rterm = DynaTerm.create("\$query", $t.rterm, ttext);
+            $rterm = DynaTerm.create("\$query", $t.rterm, ttext, $t.ctx.getStart().getLine());
         }
     | 'assert'
         t=termBody["assert="] EndTerm

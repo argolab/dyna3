@@ -92,7 +92,8 @@
           ;; csv save file operations at that point?
           ))))
 
-  (println "End of main function for dyna"))
+  ;(println "End of main function for dyna")
+  )
 
 
 
