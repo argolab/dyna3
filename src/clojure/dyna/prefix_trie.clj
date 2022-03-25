@@ -2,6 +2,9 @@
   (:import [dyna IPrefixTrie]))
 
 
+;; this file is not used yet
+
+
 ;; (gen-interface
 ;;  :name dyna.IPrefixTrie
 ;;  :extends [clojure.lang.ILookup]

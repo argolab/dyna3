@@ -1,6 +1,8 @@
 (ns dyna.rexpr-disjunction
   (:require [dyna.rexpr :refer :all]))
 
+(assert false)  ;; this file is not used yet
+
 ;; more efficient implementations of disjunction which can handle special (but
 ;; common) cases.  This can include dispatching on the values of variables
 ;; directly to a branch, like a trie.  We should be able to construct these

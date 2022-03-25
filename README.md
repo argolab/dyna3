@@ -1,22 +1,24 @@
-# dyna_backend_java2
+# Dyna v3
 
-A Clojure library designed to ... well, that part is up to you.
+Dyna v3 is the latest implementation of the [Dyna](http://dyna.org) programming
+language.
 
-## Usage
+# Building
+```
+make
+```
 
-FIXME
+A recent version of java is required.  Running `make` should automattically
+download all dependencies.  The dyna runtime will be compiled into
+`./dyna-standalone-0.1.0`.
 
-## License
+## Running dyna
+```
+make
+./dyna-standalone-0.1.0
+```
 
-Copyright © 2021 FIXME
-
-This program and the accompanying materials are made available under the
-terms of the Eclipse Public License 2.0 which is available at
-http://www.eclipse.org/legal/epl-2.0.
-
-This Source Code may also be made available under the following Secondary
-Licenses when the conditions for such availability set forth in the Eclipse
-Public License, v. 2.0 are satisfied: GNU General Public License as published by
-the Free Software Foundation, either version 2 of the License, or (at your
-option) any later version, with the GNU Classpath Exception which is available
-at https://www.gnu.org/software/classpath/license.html.
+## Running tests
+```
+rlwrap -a lein test
+```
