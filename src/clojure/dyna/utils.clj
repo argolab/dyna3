@@ -64,7 +64,7 @@
 
 ;; the system.out might be getting messed with.  The system/in is not getting echoed back
 
-(def debug-useful-variables (atom {}))
+(def debug-useful-variables (atom {'aprint (fn [] aprint)}))
 
 (defn- debug-repl-fn [prompt local-bindings ^Throwable traceback]
   (let [all-bindings  (merge (into {} (for [[k v] @debug-useful-variables]

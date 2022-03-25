@@ -66,3 +66,13 @@
     (str "(Dynabase " access-map ")")))
 
 (def undefined-dynabase (Dynabase. nil))
+
+(defprotocol DIterable
+  (iter-what-variables-bound [this])
+  (iter-variable-binding-order [this])
+
+  (iter-create-iterator [this which-binding]))
+
+(defprotocol DIterator
+  (iter-run-cb [this cb-fun])
+  (iter-has-next [this]))

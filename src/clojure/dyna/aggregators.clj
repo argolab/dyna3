@@ -8,7 +8,8 @@
   (:require [dyna.term :refer :all])
   (:import (dyna UnificationFailure DynaTerm DynaUserError ParserUtils))
   (:import [dyna.rexpr aggregator-rexpr])
-  (:require [dyna.context :as context]))
+  (:require [dyna.context :as context])
+  (:require [clojure.set :refer [subset?]]))
 
 (def aggregators (atom {}))
 
@@ -313,11 +314,23 @@
         (make-aggregator operator result-variable incoming-variable body-is-conjunctive nR)))))
 
 
-(def-rewrite
-  :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:unchecked body-is-conjunctive) (:rexpr R))
-  :run-at :standard
-  (let [aop (get @aggregators operator)
-        ctx (context/make-nested-context-aggregator rexpr incoming-variable body-is-conjunctive)
-        body-iterators (find-iterators R)]
-    (when-not (empty? body-iterators)
-      (debug-repl "agg iterator"))))
+(comment
+  (def-rewrite
+    :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:unchecked body-is-conjunctive) (:rexpr R))
+    :run-at :standard
+    (let [aop (get @aggregators operator)
+          ctx (context/make-nested-context-aggregator rexpr incoming-variable body-is-conjunctive)
+          interested-variables (disj (exposed-variables R) incoming-variable) ;; these are the variables that we want to bind
+          body-iterators (find-iterators R)]
+      (debug-repl "gg")
+      (when (not (empty? interested-variables))
+        (debug-repl "has interested"))
+      (when (and (not (empty? body-iterators)) (not (empty? interested-variables)))
+        (let [selected (first body-iterators)]
+          (assert (subset? (iter-what-variables-bound selected) (exposed-variables R)))
+                                        ;(debug-repl "agg iterator")
+          (let [iter (iter-create-iterator selected nil) ;; this should indicate somehow which of teh variable bindings is getting selected
+                iter-res (iter-run-cb iter (fn [var-value-mapping]
+                                             (debug-repl "agg iterator inside fn"))
+                                      )]
+            (debug-repl "iter result")))))))

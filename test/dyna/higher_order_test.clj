@@ -8,7 +8,7 @@
 a += X=&f(Z), X=&g(W), 1.  % should unify to nothing,
 a += 0.
 
-debug_repl a.
+%debug_repl a.
 
 assert a = 0.
 ")

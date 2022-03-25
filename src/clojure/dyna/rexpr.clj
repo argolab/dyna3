@@ -129,7 +129,7 @@
                                                   #(if (= :hidden-var (car %)) (cdar %))
                                                   vargroup)}))))
            (catch java.lang.ClassCastException ~'error
-             (do (debug-repl)
+             (do (debug-repl "class cast exception")
                  (throw ~'error)))
            ))
          (~'remap-variables ~'[this variable-map]
@@ -652,9 +652,12 @@
 
 (defn- make-context-matching-function [present-variables context-match body]
   (let [rexpr-context (gensym 'rexpr-context)]
-    `(context/scan-through-context-by-type (context/get-context) ~(symbol (str (car context-match) "-rexpr"))
+    `(context/scan-through-context-by-type (context/get-context)
+                                           ~(symbol (str (car context-match) "-rexpr"))
                                            ~rexpr-context
-                                           ~(make-rexpr-matching-function rexpr-context (conj present-variables rexpr-context) context-match body))))
+                                           (when (and ~@(for [pv present-variables]  ;; do not want to match something that has already been matched
+                                                          `(not= ~pv ~rexpr-context)))
+                                                 ~(make-rexpr-matching-function rexpr-context (conj present-variables rexpr-context) context-match body)))))
 
 
 (defn- make-rexpr-matching-function [source-variable present-variables matcher body]
@@ -864,11 +867,14 @@
 
 (when system/track-where-rexpr-constructed
   (let [orig-simplify simplify
-        orig-simplify-construct simplify-construct]
+        orig-simplify-construct simplify-construct
+        orig-simplify-inference simplify-inference]
     (defn simplify [rexpr] (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
                              (orig-simplify rexpr)))
     (defn simplify-construct [rexpr] (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
-                                       (orig-simplify-construct rexpr)))))
+                                       (orig-simplify-construct rexpr)))
+    (defn simplify-inference [rexpr] (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
+                                       (orig-simplify-inference rexpr)))))
 
 (defn simplify-top [rexpr]
   (let [ctx (context/make-empty-context rexpr)]
@@ -877,10 +883,17 @@
                                (catch UnificationFailure e (make-multiplicity 0))))))
 
 (defn simplify-rexpr-query [query-id rexpr]
-  ;; TODO: we might want to make this construct some table for the expression.  So what representation would come back from the expression
+  ;; TODO: we might want to make this construct some table for the expression.
+  ;; So what representation would come back from the expression
+
+  ;; this could callback async, so we don't want something to depend on this
+  ;; having finished a computation before the function returns.
+
   (let [ctx (context/make-empty-context rexpr)
         res (context/bind-context ctx
                                   (simplify-fully rexpr))]
+    ;; TODO: this might not want to have the context added back into the R-expr?
+    ;; in which case this is not going
     ;; there needs to be a better way to get the bindigns to variables rather than doing this "hack" to get the map
     (system/query-output query-id {:context ctx
                                    :context-value-map (get (ctx-get-inner-values ctx) 4)
@@ -1049,7 +1062,7 @@
       (make-multiplicity 0) ;; the types do not match, so this is nothing
       (let [conj-map (into [] (map (fn [a b] (make-unify a (make-constant b)))
                                    arguments (.arguments ^DynaTerm out-val)))]
-        (when-not conj-map (debug-repl "uf2"))
+        ;(when-not conj-map (debug-repl "uf2"))
         (make-conjunct conj-map)))))
 
 (def-rewrite
@@ -1058,8 +1071,10 @@
   :run-at :inference
   (if (or (not= name-str name-str2) (not= (count arguments) (count arguments2)))
     (make-multiplicity 0) ;; then these two failed to unify together
-    (do ;; this needs to unify all of the arguments together
-      (make-conjunct (doall (map make-unify arguments arguments2))))))
+    (let [res  ;; this needs to unify all of the arguments together
+          (make-conjunct (doall (map make-unify arguments arguments2)))]
+      ;(debug-repl "unify context")
+      res)))
 
 
 (def-rewrite
@@ -1205,9 +1220,10 @@
 
 (def-iterator
   :match (disjunct (:rexpr-list children))
-  (let [all-iteres (vec (map find-iterators children))]
-    ;; this has to intersect
-    ))
+  (let [all-iters (vec (map find-iterators children))]
+    ;; this has to intersect the iterators for the same variables
+    (when (every? #(not (empty? %)) all-iters)
+      (iterators/make-disjunct-iterator all-iters))))
 
 (def-rewrite
   ;; this is proj(A, 0) -> 0
@@ -1252,6 +1268,37 @@
 
 
 (def-rewrite
+  ;; lift disjuncts out of projection
+  :match (proj (:variable A) (disjunct (:rexpr-list Rs)))
+  (let [res (make-disjunct (doall (map #(make-proj A %) Rs)))]
+    ;;(debug-repl "proj disjunct")
+    res))
+
+(def-rewrite
+  ;; lift conjuncts which don't depend on the variable out of the projection
+  :match (proj (:variable A) (conjunct (:rexpr-list Rs)))
+  (let [not-contain-var (transient [])
+        conj-children (doall (remove nil? (map (fn [r]
+                                                 (if (contains? (exposed-variables r) A)
+                                                   r
+                                                   (do
+                                                     (conj! not-contain-var r)
+                                                     nil)))
+                                               Rs)))]
+    (let [ncv (persistent! not-contain-var)]
+      (when (empty? conj-children)
+        (debug-repl "proj gg"))
+      (when-not (empty? ncv)
+        (make-conjunct (conj ncv (make-proj A (make-conjunct conj-children))))))))
+
+(def-iterator
+  :match (proj (:variable A) (:rexpr R))
+  (let [iters (find-iterators R)]
+    (into #{} (filter #(not (contains? (iter-what-variables-bound %) A)) iters))))
+
+
+
+(def-rewrite
   :match (if (is-empty-rexpr? A) (:rexpr B) (:rexpr C))
   :run-at :construction
   C)
@@ -1275,13 +1322,11 @@
         s (or (get @system/system-defined-user-term n)
               (get @system/globally-defined-user-term n))]
     (when s
-      (when (.contains (str name) "foo")
-        (debug-repl "fail foo builtin??"))
       (debug-try (remap-variables s var-map)
-           (catch Exception error
-             (try (debug-repl "user call overflow")
-                  (catch Exception error2 (throw error)))
-             (throw error))))))
+                 (catch Exception error
+                   (try (debug-repl "user call stack overflow")
+                        (catch Exception error2 (throw error)))
+                   (throw error))))))
 
 ;; does this want to allow for user defined system terms to expand, if something is recursive, then we don't want to expand those eagerly.  Also, we will want for those to still be stack depth limited
 ;; I suppose that we could have the things which bottom out in built-ins would have it can still expand these early
@@ -1304,13 +1349,3 @@
   [function result args]
   (assert (fn? function))
   (make-simple-function-call function result args))
-
-
-
-;; (def-rewrite
-;;   :match (multiplicity (:unchecked mult))
-;;   :run-at :construction
-;;   (do
-;;     (when (= 0 mult)
-;;       (debug-repl "zero mult"))
-;;     nil))
