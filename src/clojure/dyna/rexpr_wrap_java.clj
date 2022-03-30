@@ -31,3 +31,10 @@
 ;; though that makes things a bit more annowing
 
 ;; if there are some expressions which correspond with
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; could do something like a `$clojure_eval(A,B,C)'{ (+ A B C) }`
+;; Where A, B, C would become bindings to the variables.  The result of this expression would

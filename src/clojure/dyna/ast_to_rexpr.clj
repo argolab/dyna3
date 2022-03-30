@@ -12,19 +12,12 @@
   (:require [aprint.core :refer [aprint]])
   (:import [org.antlr.v4.runtime CharStream CharStreams UnbufferedTokenStream])
   (:import [org.antlr.v4.runtime.misc Interval])
-  (:import [dyna DynaTerm DynaUserAssert ParserUnbufferedInputStream])
+  (:import [dyna DynaTerm DynaUserAssert ParserUnbufferedInputStream DynaUserError])
   (:import [java.net URL])
   (:import [java.nio.file Paths]))
 
 
 
-;; (comment
-;;   (def pending-parser-work (atom clojure.lang.PersistentQueue/EMPTY))
-
-;;   (defn push-parser-work [w] (swap! pending-parser-work conj w))
-;;   (defn pop-parser-work []
-;;     (let [[old new] (swap-vals! pending-parser-work pop)]
-;;       (peek old))))
 
 
 ;; if we provide some way for a string to be converted into an AST, and then
@@ -47,7 +40,8 @@
 (def-user-term "$ast" 1 (make-ast-from-string v1 v0))
 
 
-;; these have to be defined below, as they are going to want to have references to the current file and the current variables which are in scope
+;; $eval etc are are defined inside of the function convert-from-ast.  These are not "normal" functions as they can reference other variables which are in the context rather than what was just passed as an argument.
+;; meaning that something like `f(X) = $eval("X").`  will still reference the same variable X
 ;; (def-user-term "$eval" 1 ...)
 ;; (def-user-term "$eval_from_ast" 1)
 
@@ -349,8 +343,8 @@
                                            ;; use like `:- make_global_term foo/3.`
                                            "make_system_term" (match-term arg1 ("make_system_term" ("/" name arity))
                                                                           (let [call-name {:name name
-                                                                               :arity arity
-                                                                               :source-file source-file}
+                                                                                           :arity arity
+                                                                                           :source-file source-file}
                                                                                 rexpr (make-user-call call-name
                                                                                                       (into {} (map #(let [x (make-variable (str "$" %))] [x x])
                                                                                                                     (range (+ arity 1))))
@@ -419,7 +413,10 @@
                                                                                incoming-variable
                                                                                true ;; meaning that the body is conjunctive, so if the result of the body is 0, the the aggregator will be 0 also (instead of identity)
                                                                                (make-proj-many (vals project-variables-map)
-                                                                                       body-rexpr))]
+                                                                                               body-rexpr))]
+                                            (when (get @system/globally-defined-user-term [functor-name functor-arity])
+                                              (throw (DynaUserError. (str "The term " functor-name "/" functor-arity " is a system defined term, unable to redefine"))))
+
                                             (add-to-user-term source-file dynabase functor-name functor-arity
                                                               (optimize-rexpr rexpr))
                                             ;; the result from the expression should just be to unify the out variable with true
@@ -468,12 +465,12 @@
                                 name (.name quoted-structure)
                                 vals (get-arg-values (.arguments quoted-structure))
                                 ;; in the case that something comes from a top level
-                                dynabase (if (contains? variable-name-mapping "$self")
-                                           (get variable-name-mapping "$self")
-                                           (make-constant DynaTerm/null_term))
+                                ;; dynabase (if (contains? variable-name-mapping "$self")
+                                ;;            (get variable-name-mapping "$self")
+                                ;;            (make-constant DynaTerm/null_term))
                                 structure (make-unify-structure out-variable
                                                                 source-file
-                                                                dynabase
+                                                                (make-constant DynaTerm/null_term) ;dynabase
                                                                 name ;; the name of the structure
                                                                 vals)]
                             structure)
@@ -494,12 +491,16 @@
                                                                          dbval
                                                                          name
                                                                          vals)
-                                         meta-struct (make-unify-structure-get-meta out-variable
-                                                                                    dbval
-                                                                                    (make-intermediate-var) ;; we do not care about the file which this comes from, so we just ignore this
-                                                                                    )]
+                                         ;; we have to do this twice, as make-unify-structure can ignore dbval to make the unification "go through"
+                                         ;; meta-struct (make-unify-structure-get-meta out-variable
+                                         ;;                                            dbval
+                                         ;;                                            (make-intermediate-var) ;; we do not care about the file which this comes from, so we just ignore this
+                                         ;;                                            )
+                                         ]
                                      (debug-repl "db quote")
-                                     (make-conjunct [structure meta-struct]))
+                                     (???)
+                                     ;(make-conjunct [structure meta-struct])
+                                     )
 
             ["$dynabase_call" 2] (let [[dynabase-var call-term] (.arguments ast)
                                        dynabase-val (get-value dynabase-var)
@@ -567,6 +568,11 @@
                                          rexpr (make-dynabase-access dbase-name out-variable args)]
                                      rexpr)
 
+            ["$self" 0] (let [svar (get-value (DynaTerm. "$variable" ["$self"]))]
+                          ;; $self looks like an atom, but it is actually a variable that is getting remapped..
+                          ;; this could probably also be done using a macro in the prelude, but I don't want to have dynabases be dependent on the prelude loading
+                          (make-unify out-variable svar))
+
             ;; the assert can run inline, so it will check some statement before everything has been parsed
             ;; this will make writing tests for something easy
             ["$assert" 4] (let [[expression text-rep line-number wants-to-succeed] (.arguments ast)
@@ -620,6 +626,9 @@
                            (simplify-rexpr-query [text-rep line-number] rexpr)
                            (make-unify out-variable (make-constant true)))
 
+            ["$arg" 1] (let [[expression] (.arguments ast)]
+                         (debug-repl "TODO: getting value from with_key")
+                         (???))
 
             ;; we special case the ,/2 operator as this allows us to pass the info that the first expression will get unified with a constant true earlier
             ;; this should make some generation steps more efficient
@@ -650,7 +659,7 @@
                                                   ast-var
                                                   variable-name-mapping
                                                   source-file))
-            ["$eval_toplevel" 1] (let [[string-arg] (.arguments ast)
+            ["$eval_toplevel" 1] (let [[string-arg] (.arguments ast) ;; this could just be a normal function, as it does not require
                                        arg-val (get-value string-arg)
                                        ast-var (make-intermediate-var)]
                                    (make-conjunct [(make-ast-from-string ast-var arg-val)
@@ -666,7 +675,25 @@
                                                            source-file))
             ["$file" 0] (make-unify out-variable (make-constant source-file))
 
-
+            ;; TODO: this should better support stuff like require and using, where it would lift the require statements outside of the function
+            ["$clojure" 1] (let [[clojure-string] (.arguments ast)
+                                 string-val (get-value clojure-string)
+                                        ;clojure-ast (read-string clojure-string)
+                                 arguments (vec (filter #(re-matches #"[\$a-zA-Z][\$a-zA-Z0-9\-\_]*" %) (keys variable-name-mapping)))
+                                 arguments-symbols (vec (map symbol arguments))
+                                 arguments-vars (vec (map variable-name-mapping arguments))
+                                 clojure-fn (if (is-constant? string-val)
+                                              (eval `(fn ~arguments-symbols
+                                                       ~(read-string (dyna.base-protocols/get-value string-val))))
+                                              (do (???) ;; require the string is a constant for now to make this simpler
+                                                ;; (eval `(fn ~(conj arguments-symbols '$$clojure-eval-string)
+                                                ;;            (eval-with-locals {~@(flatten (for [a arguments-symbols]
+                                                ;;                                            [`(quote ~a) a]))}
+                                                  ;;                              (read-string ~'$$clojure-eval-string))))
+                                                  ))
+                                 ret (make-function-call clojure-fn out-variable arguments-vars)
+                                 ]
+                             ret)
 
             ;; call without any qualification on it.  Just generate the user term
             (let [arity (.arity ast)

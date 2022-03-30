@@ -3,7 +3,7 @@
   (:require [dyna.core])
   (:require [dyna.system :refer [make-new-dyna-system run-under-system]])
   (:require [dyna.ast-to-rexpr :refer [eval-string]])
-  (:import [dyna DynaUserAssert]))
+  (:import [dyna DynaUserAssert DynaUserError]))
 
 (deftest basic-assert-test
   (eval-string "assert 1 = 1.")
@@ -29,7 +29,6 @@
 
 (str-test simple-math
           "assert 1 + 2 * 3 = 7.")
-
 
 (str-test define-function "
 def_fun1(X, Y, Z) = X + Y * Z.
@@ -95,21 +94,29 @@ simple_list_length([X]) := 1.
 assert 0 = simple_list_length([]).
 assert 1 = simple_list_length([1]).
 
-list_length([]) := 0.
-list_length([X|Y]) := list_length(Y) + 1.
+list_length_test([]) := 0.
+list_length_test([X|Y]) := list_length_test(Y) + 1.
 
-assert 0 = list_length([]).
-assert 1 = list_length([1]).
+assert 0 = list_length_test([]).
+assert 1 = list_length_test([1]).
 
-assert 3 = list_length([1,2,3]).
+assert 3 = list_length_test([1,2,3]).
 ")
 
+(deftest system-list-length
+  (eval-string "assert list_length([1,2,3]) = 3.")
+  (try
+    (do (eval-string "list_length(X) = 456.")
+        (assert false))
+    (catch DynaUserError err
+      (do
+        (assert (.contains (.toString err) "is a system defined term"))))))
 
 (str-test compiler-expression-export "
 :- export foo/1.
-:- make_system_term foo/1.
 
 foo(X) = 123.
+:- make_system_term foo/1.
 ")
 
 
@@ -237,12 +244,6 @@ a := 0 for A < A.
 assert a = 1.
 ")
 
-(str-test lessthan-combine "
-a := 1.
-a := 0 for A < B, B < A.
-
-assert a = 1.
-")
 
 (str-test map-type "
 m = {\"A\" -> 123, \"B\" -> 456}.
@@ -313,7 +314,6 @@ assert a.z = 1.
 assert b.z = 2.
 ")
 
-(comment)
 (str-test dynabase6 "
 f(X) = new X { z += 1. }.
 
@@ -321,3 +321,60 @@ a = f(f(f(new {}))).
 
 assert a.z = 3.
 ")
+
+
+(str-test clojure-eval "
+f(X) = $clojure'{
+  (+ X 2)
+}.
+
+assert f(4) = 6.
+")
+
+(str-test reflect1 "
+r(X) = $reflect(X, \"foo\", [Y]), Y.
+
+assert r(&foo(77)) = 77.
+")
+
+
+(str-test reflect2 "
+r(&foo(X)) = X.
+
+assert $reflect(S, \"foo\", [77]), r(S) = 77.
+")
+
+(comment
+  (str-test reflect3 "
+r(X) := 0.
+r(&foo(X,Y,Z)) := 1.
+
+assert $reflect(S, $nil, \"baz\", 2, Arr), r(S) = 0.  % this should be able to resolve this using the name and arity
+
+"))
+
+
+(str-test call-indirect1 "
+foo(X,Y) = X + Y.
+
+assert F=&foo(1), F(2) = 3.
+")
+
+(comment
+ (str-test call-indirect2 "
+foo(1, 2).
+
+r(Z) := Z. % used to make sure we don't unify \"backwards\"
+
+assert F=&foo(X), F(Y), r(X) = 1.
+
+"))
+
+
+(comment
+  (str-test with-key "
+f([]) max= 123 arg 456.
+
+assert $arg(f([])) = 456.
+assert f([]) = 123.
+"))

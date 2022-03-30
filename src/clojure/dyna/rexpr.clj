@@ -5,7 +5,7 @@
   (:require [dyna.context :as context])
   (:require [dyna.system :as system])
   (:require [dyna.iterators :as iterators])
-  (:require [clojure.set :refer [union difference]])
+  (:require [clojure.set :refer [union difference subset?]])
   (:require [clojure.string :refer [trim]])
   (:require [aprint.core :refer [aprint]])
   (:import (dyna UnificationFailure))
@@ -15,7 +15,7 @@
 
 (declare simplify
          simplify-inference)
-(def simplify-construct simplify-identity)
+(def simplify-construct identity)
 (declare find-iterators)
 
 
@@ -61,12 +61,12 @@
                                                              (map cdar vargroup)))
          ~opt
          clojure.lang.ILookup
-         (~'valAt ~'[this name not-found]
-          (case ~'name
-            ~@(apply concat (for [[var idx] (zipmap vargroup (range))]
-                              `(~idx ~(cdar var))))
+         (~'valAt ~'[this name-to-lookup-gg not-found]
+          (case ~'name-to-lookup-gg
+            ~@(apply concat (for [[idx var] (zipmap (range) vargroup)]
+                              `[~idx ~(cdar var)]))
             ~@(apply concat (for [var vargroup]
-                              `(~(keyword (cdar var)) ~(cdar var))))
+                              `[~(keyword (cdar var)) ~(cdar var)]))
             ~@(if system/track-where-rexpr-constructed `[:constructed-where ~'traceback-to-construction
                                                          :where-constructed ~'traceback-to-construction
                                                          :constructing-rexpr ~'traceback-to-rexpr
@@ -520,9 +520,9 @@
 
 ;; read the dynabase from a particular constructed structure.  This will require that structure become ground
 ;; the file reference is also required to make a call to a top level expression
-(def-base-rexpr unify-structure-get-meta [:var structure
-                                          :var dynabase
-                                          :var from-file])
+;; (def-base-rexpr unify-structure-get-meta [:var structure
+;;                                           :var dynabase
+;;                                           :var from-file])
 
 
 
@@ -688,6 +688,10 @@
                                 (recur (cdr matchers)
                                        (fn [c-present-vars]
                                          (make-rexpr-matching-function (cadar matchers) c-present-vars (caddar matchers) body-fn))))))]
+    (assert (= (count (get @rexpr-containers-signature (symbol rexpr-type-matched))) (- (count rexpr-match) 1))
+            "The R-expr match expression does not contain the right number of arguments, it will never match")
+    (assert (or (not (map? matcher)) (subset? (keys matcher) #{:rexpr :context :check}))
+            "matcher map contains unexepxected key")
     `(when (~(symbol (str "is-" rexpr-type-matched "?")) ~source-variable)
        (let [~(vec (map cdar match-args)) (get-arguments ~source-variable)]
          (when (and ~@(remove true? (map car match-args)))
@@ -860,7 +864,7 @@
                     (if (not= cr nr)
                       (recur nr)
                       nr)))
-            nrif (simplify-inference)]
+            nrif (simplify-inference nri)]
         (if (not= nrif nri)
           (recur nrif)
           nrif)))))
@@ -1077,16 +1081,16 @@
       res)))
 
 
-(def-rewrite
-  :match (unify-structure-get-meta (:ground struct) (:any dynabase) (:any from-file))
-  (let [struct-val (get-value struct)]
-    (if-not (instance? DynaTerm struct-val)
-      (make-multiplicity 0)
-      ;; java null should get cast to $nil as the dyna term that represents that value
-      (make-conjunct [(make-unify dynabase (make-constant (or (.dynabase ^DynaTerm struct-val)
-                                                              null-term)))
-                      (make-unify from-file (make-constant (or (.from_file ^DynaTerm struct-val)
-                                                               null-term)))]))))
+;; (def-rewrite
+;;   :match (unify-structure-get-meta (:ground struct) (:any dynabase) (:any from-file))
+;;   (let [struct-val (get-value struct)]
+;;     (if-not (instance? DynaTerm struct-val)
+;;       (make-multiplicity 0)
+;;       ;; java null should get cast to $nil as the dyna term that represents that value
+;;       (make-conjunct [(make-unify dynabase (make-constant (or (.dynabase ^DynaTerm struct-val)
+;;                                                               null-term)))
+;;                       (make-unify from-file (make-constant (or (.from_file ^DynaTerm struct-val)
+;;                                                                null-term)))]))))
 
 
 (comment
@@ -1296,6 +1300,11 @@
   (let [iters (find-iterators R)]
     (into #{} (filter #(not (contains? (iter-what-variables-bound %) A)) iters))))
 
+(def-rewrite
+  :match (proj (:variable A) (:rexpr R))
+  (let [iter (find-iterators R)]
+    (when-not (empty? iter)
+      (debug-repl "proj has iterator"))))
 
 
 (def-rewrite
@@ -1321,7 +1330,9 @@
   (let [n [(:name name) (:arity name)] ;; this is how the name for built-in R-exprs are represented.  There is no info about the file
         s (or (get @system/system-defined-user-term n)
               (get @system/globally-defined-user-term n))]
-    (when s
+    (when (and s
+               (not (and (is-user-call? s)
+                         (= (:name s) name))))
       (debug-try (remap-variables s var-map)
                  (catch Exception error
                    (try (debug-repl "user call stack overflow")

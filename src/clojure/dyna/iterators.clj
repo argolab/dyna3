@@ -72,6 +72,13 @@
      ))
 
 
+;; the iterators which bind variables that are "hidden" might still be useful,
+;; but these variables are not something that can be bound yet.  This must
+;; deduplicate the values which result from the other variables first.
+(defn filter-variables-from-iterators [variables iterators]
+  (filter #(not (contains? (iter-what-variables-bound variables) %)) iterators))
+
+
 
 ;; there should be some way in which we can loop over the disjunctive branches
 ;; of the R-expr but we should also combine the branches back together.  Should

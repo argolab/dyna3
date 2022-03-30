@@ -12,3 +12,17 @@ a += 0.
 
 assert a = 0.
 ")
+
+
+(str-test lessthan-combine "
+a := 1.
+a := 0 for A < B, B < A.
+
+assert a = 1.
+")
+
+(str-test unification-partial-args "
+a += X=&f(1,Z), X=&f(Y,2), Z+Y.
+
+assert a = 3.
+")

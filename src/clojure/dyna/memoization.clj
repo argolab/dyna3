@@ -16,3 +16,12 @@
     :match memoized-rexpr (:rexpr Rmemo) (:rexpr Rorig))
 
   )
+
+(deftype memo-container [Rconditional
+                         Rmemo
+                         Rorig
+                         assumption])
+
+
+(def-base-rexpr memoized-rexpr [
+                                ])

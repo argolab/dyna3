@@ -1,0 +1,47 @@
+
+multiply(A,B) = matrix {
+    elem(X,Y) += A.elem(X,Z) * B.elem(Z,Y).
+}.
+
+add(A, B) = matrix {
+    elem(X,Y) += A.elem(X,Y) ; B.elem(X,Y).
+}.
+
+transpose(A) = matrix {
+    elem(X,Y) = A.elem(Y,X).
+}.
+
+
+matrix(M) = {
+    elem(X,Y) = M.elem(X,Y).
+    transpose = transpose($self).
+    add(Other) = add($self, Other).
+    multiply(Other) = multiply($self,Other).
+
+    rows max= X for _ is $self.elem(X,_).
+    cols max= Y for _ is $self.elem(_,Y).
+}.
+
+zero_matrix(A,B) = matrix {
+    elem(X: range(0, A), Y: range(0,B)) = 0.
+}.
+
+identity_matrix = matrix {
+    elem(X,X) += 1.
+}.
+
+print "running matrix test".
+
+a = matrix {
+  elem(0,0) = 1.
+  elem(0,1) = 2.
+  elem(1,1) = 1.
+  elem(1,0) = 0.
+}.
+
+assert a.elem(0,0) = 1.
+assert a.transpose.elem(1,0) = 2.
+
+b = a.multiply(a.transpose).
+
+assert b.elem(0,0) = 5.

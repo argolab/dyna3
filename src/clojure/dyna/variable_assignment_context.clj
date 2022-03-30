@@ -2,6 +2,8 @@
   (:require [dyna.rexpr :refer :all]))
 
 
+(assert false) ;; not used
+
 ;; there should be some representation which allows for the different values
 ;; to get the contextual info
 

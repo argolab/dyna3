@@ -46,10 +46,18 @@ public final class DynaTerm implements ILookup {
             b.append(from_file.toString());
             b.append("/");
         }
-        if(name == "." && arguments != null && arity() == 2) {
+        if(".".equals(name) && arguments != null && arity() == 2) {
             Object list_as_vec = list_to_vec();
-            if(list_as_vec != null)
-                return list_as_vec.toString();
+            if(list_as_vec != null) {
+                b.append("[");
+                int cnt = ((java.lang.Number)clojure_count.invoke(list_as_vec)).intValue();
+                for(int i = 0; i < cnt; i++) {
+                    if(i != 0) b.append(", ");
+                    b.append(clojure_nth.invoke(list_as_vec, i).toString());
+                }
+                b.append("]");
+                return b.toString();
+            }
         }
         b.append(name);
         if(arguments != null) {
@@ -165,23 +173,6 @@ public final class DynaTerm implements ILookup {
         // so this can be an array or arraylist etc
         return new DynaTerm(name, clojure_vec.invoke(args));
     }
-
-    // public static String gensym_variable_name() {
-    //     // this is used by the parser, not really something that "belongs" on
-    //     // the DynaTerm class, but it should be ok
-
-    //     // this should also get moved off the DynaTerm class to something which
-    //     return clojure_gensym.invoke("$anon_var__").toString();
-    // }
-
-    // private static final AtomicLong colon_line_counter_ = new AtomicLong();
-    // public static long colon_line_counter() {
-    //     // this returns the counter for the number of times that := rules have
-    //     // appeared in the program this really should not appear on the DynaTerm
-    //     // class as there is no point for it here, so it should get move din the
-    //     // future
-    //     return colon_line_counter_.getAndAdd(1);
-    // }
 
     public static DynaTerm make_list(Object arr) {
         DynaTerm ret = DynaTerm.null_term;

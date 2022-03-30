@@ -5,7 +5,6 @@
   (:require [dyna.rexpr-builtins :refer [make-lessthan make-lessthan-eq
                                          make-add make-times make-min make-max make-lor make-land
                                          make-not-equals]])
-  (:require [dyna.term :refer :all])
   (:import (dyna UnificationFailure DynaTerm DynaUserError ParserUtils))
   (:import [dyna.rexpr aggregator-rexpr])
   (:require [dyna.context :as context])
@@ -313,6 +312,21 @@
                                              nR]))))
         (make-aggregator operator result-variable incoming-variable body-is-conjunctive nR)))))
 
+(def-rewrite
+  :match {:rexpr (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (true? _) ;; if the body isn't conjunctive, then there could be some interaction between having different identity elements that needs to be considered
+                             (aggregator (:unchecked operator2) incoming-variable (:any incoming-variable2) (true? _) (:rexpr R2)))
+          :check (not (contains? (exposed-variables R2) incoming-variable))}
+  :run-at :construction
+  (make-aggregator operator2 result-variable incoming-variable2 true R2))
+
+(def-rewrite
+  :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:unchecked body-is-conjunctive)
+                     (conjunct (:rexpr-list Rs)))
+  :run-at :standard
+  (do
+    (debug-repl "agg conj dist")
+    nil))
+
 
 (comment
   (def-rewrite
@@ -334,3 +348,14 @@
                                              (debug-repl "agg iterator inside fn"))
                                       )]
             (debug-repl "iter result")))))))
+
+
+(def-iterator
+  ;; the iterator can only work for conjunctive aggregators, as we are trying to
+  ;; find some upper bound on the possible values for variables.  If the
+  ;; expression is not conjunctive, then in the case that the value is "outside"
+  ;; of what the iterator, but this would just return the identity value
+  :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (true? _) (:rexpr R))
+  (let [iters (find-iterators R)]
+    (when-not (empty? iters)
+      (debug-repl "agg iter"))))

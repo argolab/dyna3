@@ -53,7 +53,7 @@
     ;; res
         ))
 
-(defn- eval-with-locals
+(defn eval-with-locals
   "Evals a form with given locals.  The locals should be a map of symbols to
   values."
   [locals form]
@@ -261,7 +261,7 @@
     `(do ~@args)))
 
 (defmacro debug-try [& args]
-  (if (= "true" (System/getProperty "dyna.debug" "true"))
+  (if true;(= "true" (System/getProperty "dyna.debug" "true"))
     `(try ~@args)
     (first args)))
 

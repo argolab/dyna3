@@ -3,6 +3,12 @@
 Dyna v3 is the latest implementation of the [Dyna](http://dyna.org) programming
 language.
 
+# Trying it out
+```
+./dyna
+```
+This will compile the dyna runtime and start the dyna REPL.
+
 # Building
 ```
 make

@@ -460,7 +460,7 @@
 ;; (def-user-term "$cons" 2 (make-unify v2 (make-structured-rexpr "." [v0 v1])))
 
 (def-user-term "$nil" 0 (make-unify v0 (make-constant DynaTerm/null_term)))  ;; this is $nil
-(def-user-term "$cons" 2 (make-unify-structure v2 nil (make-constant undefined-dynabase) "." [v0 v1]))
+(def-user-term "$cons" 2 (make-unify-structure v2 nil (make-constant DynaTerm/null_term) "." [v0 v1]))
 
 ;; operators for handing a map of elements.  The map is a wrapped clojure map which is associate
 (defrecord DynaMap [map-elements])
@@ -504,6 +504,13 @@
             r (assoc m k v)]
         (make-unify resulting_map (make-constant (DynaMap. r)))))))
 
+;; TODO: there should be some operator which is able to do a many element access
+;; on the map.  This would allow for it to find that there are
+
+;; (def-rewrite
+;;   :match {:rexpr (map-element-access (:ground Key) (:any Value) (:any previous_map) (:ground resulting_map))
+;;           :context }
+;;   )
 
 ;; there should not be any reason to make this into something custom, I suppose that there could be some additional rules defined for
 ;; the different expressions in the case that an identity element has been identified.  Then it would allow for it to rewrite a rule as just a unification

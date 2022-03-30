@@ -377,7 +377,7 @@ termBody[String aname] returns[DynaTerm rterm]
     ;
 
 withKey returns [DynaTerm rterm]
-    : 'arg' e=expression { $rterm = $e.rterm; }
+    : ('arg' | 'with_key') e=expression { $rterm = $e.rterm; }
     ;
 
 forExpr returns [DynaTerm rterm=null]
@@ -546,6 +546,9 @@ expressionRoot returns [DynaTerm rterm]
     //   {
     //     $trm = new InlinedAggregatedExpression($agg.t, $ia.bodies);
     //   }
+    | '&' ilf=inlineFunction2 {
+       assert(false); // TODO: allow for a function to be quoted when it is constructed, such that it can easily return an anon function
+ }
     | a=array { $rterm = $a.rterm; }
     | ':' m=methodCall {  // for supporthing things like f(:int) => f(_:int)
             $rterm = DynaTerm.create("\$variable", gensym_variable_name());

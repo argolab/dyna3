@@ -1,46 +1,55 @@
 (ns dyna.assumptions
-  (:require [dyna.system :as system]))
+  (:require [dyna.system :as system])
+  (:require [dyna.utils :refer :all])
+  (:import [java.util WeakHashMap]))
 
 ;; any assumption which the current expression depends
 (def ^:dynamic *current-watcher*)
 
 (defprotocol Watcher
-  (notify-invalidated! [this watching]))
+  (notify-invalidated! [this watching])
+  (notify-message! [this watching message]))
 
 (defprotocol Assumption
   (invalidate! [this])
   (is-valid? [this])
-  (add-watcher! [this watcher]))
+  (add-watcher! [this watcher])
+  (send-message! [this message]))
 
 (deftype assumption
-  [watchers
+  [^WeakHashMap watchers
    valid]
   Assumption
   (invalidate! [this]
     (let [[old new] (swap-vals! valid (constantly false))]
       (when (= false old)
-        (doseq [w @watchers]
-          (notify-invalidated! w this)))))
+        (locking watchers (doseq [w (.keySet watchers)]
+                            (notify-invalidated! w this))))))
   (is-valid? [this] @valid)
   (add-watcher! [this watcher]
-    (swap! watcher conj watcher))
+    (locking watchers
+      (if (is-valid? this)
+        (.put watchers watcher nil)
+        (notify-invalidated! watcher this))))
+
+  (send-message! [this message]
+    (locking watchers (doseq [w (.keySet watchers)]
+                        (notify-message! w this message))))
 
   Watcher
   (notify-invalidated! [this from-watcher] (invalidate! this))
+  (notify-message! [this from-watcher message] (???))
 
   Object
-  (toString [this] (str "[Assumption isvalid=" (is-valid? this) " watchers=" @watchers "]")))
+  (toString [this] (str "[Assumption isvalid=" (is-valid? this) " watchers=" (locking (str (.keySet watchers))) "]")))
 
 (defmethod print-method assumption [^assumption this ^java.io.Writer w]
   (.write w (.toString this)))
 
 
-;(defmulti print-method assumption [this ^java.io.Writer w]
-;          (.write w (str "(assumption " (is-valid? this) ")")))
-
 (defn make-assumption []
-  (assumption. (atom #{})                                   ; downstream dependents
-               (atom true)                                  ; is still valid, maybe could be atomic boolean?
+  (assumption. (WeakHashMap.)                               ; downstream dependents
+               (atom true)                                  ; if this is still valid, this is atomic
                ))
 
 (defn depend-on-assumption [assumption & {:keys [hard] :or {hard true}}]
@@ -55,32 +64,4 @@
       (throw (RuntimeException. "attempting to use invalid assumption")))))
 
 
-;; there should be some original R-expr which is the thing that the assumption
-;; can rederive itself from in the case that the assumption is invalidated.
-;; That would allow it relook up which expressions it came from.  That
-;; assumption would then gather which of the expressions might need to change
-
-
-;; also would mean that there is some kind of "changable" R-expr which is built
-;; into the assumption system.
-
-;; the call expression would allow for it to somehow depend on something
-
-
-
-;; this would have that there are some expressions
-;; (def-base-rexpr assumption-wrapper
-;;   [:assumption assumption
-;;    :rexpr expression])
-
-;; (def-rewrite
-;;   :match (asusmption-wrapper assumption (:rexpr R))
-;;   :run-at :standard
-;;   (if (is-valid? assumption)
-;;     (make-assumption-wrapper assumption (simplify R))
-;;     ;; this is going to have to somehow identify what the new expression is.  If there is something tha t
-;;     (assert false) ; this is going to need to somehow handle that there are expressions which
-;;     )
-;;   )
-
-(defn make-assumption-wrapper [x] (assert false))
+;; (defn make-assumption-wrapper [x] (assert false))
