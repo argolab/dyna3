@@ -18,8 +18,10 @@ matrix(M) = {
     add(Other) = add($self, Other).
     multiply(Other) = multiply($self,Other).
 
-    rows max= X for _ is $self.elem(X,_).
-    cols max= Y for _ is $self.elem(_,Y).
+    rows max= 0.
+    cols max= 0.
+    rows max= X+1 for _ is $self.elem(X,_).
+    cols max= Y+1 for _ is $self.elem(_,Y).
 }.
 
 zero_matrix(A,B) = matrix {
@@ -41,6 +43,10 @@ a = matrix {
 
 assert a.elem(0,0) = 1.
 assert a.transpose.elem(1,0) = 2.
+
+debug_repl a.rows.
+
+%assert a.rows = 2.
 
 b = a.multiply(a.transpose).
 

@@ -310,7 +310,14 @@
                              (make-conjunct [(make-no-simp-unify incoming-variable
                                                                  (make-constant incom-val))
                                              nR]))))
-        (make-aggregator operator result-variable incoming-variable body-is-conjunctive nR)))))
+        (let [rel-iterators (filter #(contains? (iter-what-variables-bound %) incoming-variable) (find-iterators nR))]
+          (if (and (every? is-ground? (filter #(not= incoming-variable %) (exposed-variables R)))
+                   (not (empty? rel-iterators)))
+            (do
+              ;; attempt to run the iterator to compute the final ground value
+              (debug-repl "attempt to ground out values")
+              nil)
+            (make-aggregator operator result-variable incoming-variable body-is-conjunctive nR)))))))
 
 (def-rewrite
   :match {:rexpr (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (true? _) ;; if the body isn't conjunctive, then there could be some interaction between having different identity elements that needs to be considered
@@ -328,26 +335,43 @@
     nil))
 
 
+;; (comment
+;;   (def-rewrite
+;;     :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:unchecked body-is-conjunctive) (:rexpr R))
+;;     :run-at :standard
+;;     (let [aop (get @aggregators operator)
+;;           ctx (context/make-nested-context-aggregator rexpr incoming-variable body-is-conjunctive)
+;;           interested-variables (disj (exposed-variables R) incoming-variable) ;; these are the variables that we want to bind
+;;           body-iterators (find-iterators R)]
+;;       (debug-repl "gg")
+;;       (when (not (empty? interested-variables))
+;;         (debug-repl "has interested"))
+;;       (when (and (not (empty? body-iterators)) (not (empty? interested-variables)))
+;;         (let [selected (first body-iterators)]
+;;           (assert (subset? (iter-what-variables-bound selected) (exposed-variables R)))
+;;                                         ;(debug-repl "agg iterator")
+;;           (let [iter (iter-create-iterator selected nil) ;; this should indicate somehow which of teh variable bindings is getting selected
+;;                 iter-res (iter-run-cb iter (fn [var-value-mapping]
+;;                                              (debug-repl "agg iterator inside fn"))
+;;                                       )]
+;;             (debug-repl "iter result")))))))
+
 (comment
-  (def-rewrite
-    :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:unchecked body-is-conjunctive) (:rexpr R))
-    :run-at :standard
-    (let [aop (get @aggregators operator)
-          ctx (context/make-nested-context-aggregator rexpr incoming-variable body-is-conjunctive)
-          interested-variables (disj (exposed-variables R) incoming-variable) ;; these are the variables that we want to bind
-          body-iterators (find-iterators R)]
-      (debug-repl "gg")
-      (when (not (empty? interested-variables))
-        (debug-repl "has interested"))
-      (when (and (not (empty? body-iterators)) (not (empty? interested-variables)))
-        (let [selected (first body-iterators)]
-          (assert (subset? (iter-what-variables-bound selected) (exposed-variables R)))
-                                        ;(debug-repl "agg iterator")
-          (let [iter (iter-create-iterator selected nil) ;; this should indicate somehow which of teh variable bindings is getting selected
-                iter-res (iter-run-cb iter (fn [var-value-mapping]
-                                             (debug-repl "agg iterator inside fn"))
-                                      )]
-            (debug-repl "iter result")))))))
+ (def-rewrite
+   :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:unchecked body-is-conjunctive) (:rexpr R))
+   :run-at :inference ;; this is just set so that it is more "delayed", but it should instead be something that will run the iterators as a more frequent operation
+   ;; the only variable that we are going to care about is the incoming-variable
+   ;; as the other varaibles need to get handled at a "higher"
+   (let [body-iterators (find-iterators R)
+         rel-iterators (filter #(contains? (iter-what-variables-bound %) incoming-variable) body-iterators)]
+     (when-not (empty? rel-iterators)
+       (let [agg-vals (transient #{})
+             iter-run (iter-create-iterator (first rel-iterators) incoming-variable)]
+         (iter-run-cb iter-run #(conj! agg-vals (get % incoming-variable)))
+         (make-aggregator operator result-variable incoming-variable body-is-conjunctive
+                          (make-disjunct (doall (for [val (persistent! agg-vals)]
+                                                  (make-conjunct [(make-no-simp-unify incoming-variable (make-constant val))
+                                                                  (remap-variables R {incoming-variable (make-constant val)})]))))))))))
 
 
 (def-iterator
