@@ -32,7 +32,7 @@
 
 
 (defn main [args]
-  ;; (println args)
+  ;(println (vec args))
 
   ;; load the prelude file into the runtime before we start loading stuff
   ;;(import-file-url (resource "dyna/prelude.dyna"))
@@ -82,7 +82,7 @@
             (System/exit 1))
           (let [arg-list (DynaTerm/make_list args)]
             ;; define $args = ["arg1", "arg2", ..., "argN"]
-            (eval-ast (make-term ("$define_function" ("$args") DynaTerm/null_term "=" ("$constant" arg-list))))
+            (eval-ast (make-term ("$define_term" ("$args") DynaTerm/null_term "=" ("$constant" arg-list))))
             (import-file-url (.toURL run-filef))
             ;; TODO: this needs to handle the csv export functions
             (System/exit 0)))

@@ -147,7 +147,7 @@ while [ $# -gt 0 ]; do
             ;;
 
         *)
-            dyna_args+="\"$1\" "
+            dyna_args+="$1 "
             ;;
     esac
     shift
