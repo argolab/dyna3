@@ -357,5 +357,7 @@
   ;; of what the iterator, but this would just return the identity value
   :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (true? _) (:rexpr R))
   (let [iters (find-iterators R)]
-    (when-not (empty? iters)
-      (debug-repl "agg iter"))))
+    (if (is-bound? incoming-variable)
+      iters
+      ;; for iterators which contain the incoming variable, this should get filtered out
+      (filter #(not (contains? (iter-what-variables-bound %) incoming-variable)) iters))))

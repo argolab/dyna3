@@ -53,8 +53,11 @@
                                                                          (let [values-seen (transient #{})]
                                                                            (doseq [b branches]
                                                                              (let [itr (filter #(contains? (iter-what-variables-bound %) var) b)]
-                                                                               (debug-repl "inside constructing union iterator")
-                                                                               (???)))))
+                                                                               (iter-run-cb (iter-create-iterator (first itr) nil)
+                                                                                            (fn [var-bindings]
+                                                                                              (when-not (contains? values-seen var-bindings)
+                                                                                                (conj! values-seen var-bindings)
+                                                                                                (cb-fun var-bindings))))))))
                                                                        (iter-has-next [this] false))))
                         ))
         ]

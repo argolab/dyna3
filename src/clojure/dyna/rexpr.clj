@@ -1302,9 +1302,16 @@
 
 (def-rewrite
   :match (proj (:variable A) (:rexpr R))
-  (let [iter (find-iterators R)]
-    (when-not (empty? iter)
-      (debug-repl "proj has iterator"))))
+  (let [iter (find-iterators R)
+        iter-self (filter #(contains? (iter-what-variables-bound %) A) iter)]
+    (when-not (empty? iter-self)
+      (let [proj-vals (transient #{})
+            iter-run (iter-create-iterator (first iter-self) A)] ;; the binding would need to be which variable is getting bound or something...
+        (iter-run-cb iter-run #(conj! proj-vals (get % A)))
+
+        (let [nR (make-disjunct (doall (for [val (persistent! proj-vals)]
+                                         (remap-variables R {A (make-constant val)}))))]
+          nR)))))
 
 
 (def-rewrite

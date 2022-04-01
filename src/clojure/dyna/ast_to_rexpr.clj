@@ -353,6 +353,15 @@
                                                                             (swap! system/globally-defined-user-term
                                                                                    assoc [name arity] rexpr)))
 
+                                           "make_global_term" (match-term arg1 ("make_global_term" ("/" name arity))
+                                                                          (debug-repl)
+                                                                          ;; a global term should represent something like $memo or $priority which can be defined anywhere
+                                                                          ;; but should still reference the same functor.
+
+                                                                          ;; I suppose that we can also define something like $memo_internal which would reference $memo by directing through the prelude or something
+                                                                          (???) ;; TODO
+                                                                          )
+
                                            "memoize_unk" (???) ;; mark some function as being memoized
                                            "memoize_null" (???)
 

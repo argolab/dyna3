@@ -31,6 +31,7 @@ list(Type, L) :- list_rec(Type, L).
 :- export list_length/2.
 list_length_rec([], 0).
 list_length_rec([_|X], R+1) :- list_length_rec(X, R).
+
 list_length(X) = list_length_rec(X, R), R.
 list_length(X, R) :- list_length_rec(X, R).
 :- make_system_term list_length/1.
