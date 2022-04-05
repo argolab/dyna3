@@ -20,20 +20,32 @@
         args2 (if (nil? (:identity kw-args))
                 (assoc kw-args :identity ((:combine kw-args))) ;; the zero argument call to the combine function should return the identity
                 kw-args)
-        args3 (assoc args2 :name name)]
+        args3 (if (nil? (:combine-mult args2))
+                (assoc args2 :combine-mult (fn [a b mult]
+                                               (loop [val a
+                                                      cnt mult]
+                                                 (if (= cnt 0)
+                                                   val
+                                                   (recur ((:combine args2) val b) (- cnt 1))))))
+                args2)
+        args4 (assoc args3 :name name)]
+    ;(assert (subset? (keys kw-args) #{:combine :identity :}))
+
     ;; this should construct the other functions if they don't already exist, so that could mean that there are some defaults for everything
     ;; when the aggregator is created, it can have whatever oeprations are
-    (swap! aggregators assoc name args3)))
+    (swap! aggregators assoc name args4)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def-aggregator "+="
   :combine +
+  :combine-mult (fn [a b mult] (+ a (* b mult))) ;; a + b*mult
   :many-items *
   :rexpr-binary-op make-add)
 
 (def-aggregator "*="
   :combine *
+  :combine-mult (fn [a b mult] (* a (Math/pow b mult)))
   :many-items (fn [x mult] (Math/pow x mult))
   :rexpr-binary-op make-times)
 
@@ -87,6 +99,7 @@
 
 (def-aggregator "max="
   :combine (fn [a b] (if (> (get-aggregated-value a) (get-aggregated-value b)) a b))
+  :combine-mult (fn [a b mult] (if (> (get-aggregated-value a) (get-aggregated-value b)) a b))
   :identity ##-Inf
   :allows-with-key true
   ;; this will let us add expressions to the R-expr so that this can eleminate branches which are not useful
@@ -99,6 +112,7 @@
 
 (def-aggregator "min="
   :combine (fn [a b] (if (< (get-aggregated-value a) (get-aggregated-value b)) a b))
+  :combine-mult (fn [a b mult] (if (< (get-aggregated-value a) (get-aggregated-value b)) a b))
   :identity ##Inf
   :allows-with-key true
   ;; this add-to-rexpr will have to know if with-key is included in the expression.
@@ -119,6 +133,7 @@
 (def-aggregator ":-"
   :identity false
   :combine (fn [a b] (or a b))
+  :combine-mult (fn [a b mult] (or a b))
   :saturate #(= true %)
   :add-to-out-rexpr (fn [current-value result-variable]  ;; want to force the result to be true
                       (make-unify result-variable (make-constant true))))
@@ -312,11 +327,45 @@
                                              nR]))))
         (let [rel-iterators (filter #(contains? (iter-what-variables-bound %) incoming-variable) (find-iterators nR))]
           (if (and (every? is-ground? (filter #(not= incoming-variable %) (exposed-variables R)))
-                   (not (empty? rel-iterators)))
-            (do
-              ;; attempt to run the iterator to compute the final ground value
-              (debug-repl "attempt to ground out values")
-              nil)
+                   (not (empty? rel-iterators))
+                   (not (is-unify? nR)))
+            ;; this code is not really "efficient" yet, it should attempt to be a lot lazier with getting the values from the different sets
+            ;; and check which values can be reasonably determined.
+            (let [current-value (volatile! (:identity aop))
+                  un-finished-rexprs (transient [])
+                  is-empty-aggregation (volatile! true)
+                  ground-values-set (transient #{})]
+              (println "aggregator found iterator to run")
+              (let [iter-run (iter-create-iterator (first rel-iterators) incoming-variable)]
+                (iter-run-cb iter-run (fn [itv]
+                                        (assert (not (contains? ground-values-set itv)))
+                                        (conj! ground-values-set itv))))
+
+              (doseq [val (persistent! ground-values-set)]
+                (let [child-r (remap-variables R (into {} (for [[k v] val]
+                                                            [k (make-constant v)])))
+                      dctx (context/make-nested-context-disjunct child-r)
+                      new-rexpr (context/bind-context-raw dctx (try (simplify-fully child-r)
+                                                                    (catch UnificationFailure e (make-multiplicity 0))))]
+                  ;; if not, then that means there is something in the expression that could not be rewritten
+                  ;; this is something that that could happen given the user's program, so this should be some kind of warning
+                  ;; along with returning the R-expr which can not be rewritten further
+                  ;;
+                  ;;  We might also consider returning an error from an
+                  ;;  aggregator in this case?  This is the scenario where there
+                  ;;  does not exist a way to rewrite a user's program into a value
+                  ;(assert (is-multiplicity? new-rexpr)) ;; this needs to get handled for the lessthan case, as it is possible some branch will still get eleminated...., though that should already happen as everything is ground already?  So what could possibly cause this
+                  (if-not (is-multiplicity? new-rexpr)
+                    (do (debug-repl "should have reduced to a multiplicity")
+                        (???)))
+                  (when-not (is-empty-rexpr? new-rexpr)
+                    (vreset! is-empty-aggregation false)
+                    (vswap! current-value #((:combine-mult aop) % (get val incoming-variable) (:mult new-rexpr))))))
+              (if @is-empty-aggregation
+                (if body-is-conjunctive
+                  (make-multiplicity 0)
+                  (make-unify result-variable (make-constant ((:lower-value aop identity) (:identity aop)))))
+                (make-unify result-variable (make-constant ((:lower-value aop identity) @current-value)))))
             (make-aggregator operator result-variable incoming-variable body-is-conjunctive nR)))))))
 
 (def-rewrite
@@ -326,13 +375,14 @@
   :run-at :construction
   (make-aggregator operator2 result-variable incoming-variable2 true R2))
 
-(def-rewrite
-  :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:unchecked body-is-conjunctive)
-                     (conjunct (:rexpr-list Rs)))
-  :run-at :standard
-  (do
-    (debug-repl "agg conj dist")
-    nil))
+(dyna-debug
+  (def-rewrite
+    :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:unchecked body-is-conjunctive)
+                       (conjunct (:rexpr-list Rs)))
+    :run-at :standard
+    (do
+      (debug-repl "agg conj dist")
+      nil)))
 
 
 ;; (comment

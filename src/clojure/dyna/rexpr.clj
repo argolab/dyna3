@@ -28,13 +28,13 @@
 (def rexpr-constructors (atom {}))
 (def rexpr-containers-signature (atom {}))
 
-(def ^:dynamic *current-matched-rexpr* nil)
+;(def ^:dynamic *current-matched-rexpr* nil)
 (def ^:dynamic *current-top-level-rexpr* nil)
 (def ^:dynamic *current-simplify-stack* [])
 
 (when system/track-where-rexpr-constructed  ;; meaning that the above variable will be defined
   (swap! debug-useful-variables assoc
-         'rexpr (fn [] *current-matched-rexpr*)
+         'rexpr (fn [] (last *current-simplify-stack*))
          'rexpr-top-level (fn [] *current-top-level-rexpr*)
          'top-level-rexpr (fn [] *current-top-level-rexpr*)
          'simplify-stack (fn [] *current-simplify-stack*)))
@@ -266,7 +266,7 @@
                                   (for [[var idx] (zipmap vargroup (range))]
                                     `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
           nil                           ; the cached unique variables
-          ~@(if system/track-where-rexpr-constructed `[(Throwable.) dyna.rexpr/*current-matched-rexpr*])
+          ~@(if system/track-where-rexpr-constructed `[(Throwable.) (last dyna.rexpr/*current-simplify-stack*)])
           ~@(map cdar vargroup))
          )
 
@@ -288,7 +288,11 @@
                                   (for [[var idx] (zipmap vargroup (range))]
                                     `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
                               nil       ; the cached unique variables
-                              ~@(if system/track-where-rexpr-constructed `[(Throwable.) dyna.rexpr/*current-matched-rexpr*])
+                              ~@(if system/track-where-rexpr-constructed `[(Throwable.) (do
+                                                                                          ;; (when-not (or (not (nil? dyna.rexpr/*current-matched-rexpr*))
+                                                                                          ;;               (empty?  dyna.rexpr/*current-simplify-stack*))
+                                                                                          ;;   (throw (RuntimeException. "failed to set the matched R-expr")))
+                                                                                          (last dyna.rexpr/*current-simplify-stack*))])
                               ~@(map cdar vargroup))))
        (swap! rexpr-constructors assoc ~(str name) ~(symbol (str "make-" name)))
        (defn ~(symbol (str "is-" name "?")) ~'[rexpr]
@@ -325,7 +329,6 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; things like variables and constants should instead be some other type rather than an R-expr
-;; this could be something
 
 
 (defrecord variable-rexpr [varname]
@@ -494,6 +497,8 @@
 (defn is-empty-rexpr? [rexpr]
   (and (rexpr? rexpr) (= (make-multiplicity 0) rexpr)))
 
+
+;; that we are 100% sure that this R-expr will return a non-zero multiplicity
 (defn is-non-empty-rexpr? [rexpr]
   (and (rexpr? rexpr)
        (or (and (is-multiplicity? rexpr) (> (get-argument rexpr 0) 0))
@@ -727,7 +732,10 @@
 (defn- make-rewrite-func-body [kw-args body]
   (cond
     (:infers kw-args) `(let [infered-rexpr# ~(:infers kw-args)]
-                         (when (or (is-empty-rexpr? infered-rexpr#) (not (ctx-contains-rexpr? (context/get-context) infered-rexpr#)))
+                         ;(debug-repl "doing infer1")
+                         (when (or (is-empty-rexpr? infered-rexpr#)
+                                   (not (ctx-contains-rexpr? (context/get-context) infered-rexpr#)))
+                           ;(debug-repl "doing infer")
                            (make-conjunct [(~'simplify infered-rexpr#) ~'rexpr])))
     :else body))
 
@@ -873,12 +881,15 @@
   (let [orig-simplify simplify
         orig-simplify-construct simplify-construct
         orig-simplify-inference simplify-inference]
-    (defn simplify [rexpr] (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
-                             (orig-simplify rexpr)))
-    (defn simplify-construct [rexpr] (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
-                                       (orig-simplify-construct rexpr)))
-    (defn simplify-inference [rexpr] (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
-                                       (orig-simplify-inference rexpr)))))
+    (defn simplify [rexpr]
+      (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
+        (orig-simplify rexpr)))
+    (defn simplify-construct [rexpr]
+      (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
+        (orig-simplify-construct rexpr)))
+    (defn simplify-inference [rexpr]
+      (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
+        (orig-simplify-inference rexpr)))))
 
 (defn simplify-top [rexpr]
   (let [ctx (context/make-empty-context rexpr)]
@@ -1051,8 +1062,8 @@
   (let [dbval (get-value dynabase)
         arg-vals (map get-value arguments)
         sterm (DynaTerm. name-str dbval file-name arg-vals)]
-    (when (is-ground? out)
-        (debug-repl "uf1"))
+    ;; (when (is-ground? out)
+    ;;     (debug-repl "uf1"))
     (let [res (make-unify out (make-constant sterm))]
       res)))
 
@@ -1066,18 +1077,19 @@
       (make-multiplicity 0) ;; the types do not match, so this is nothing
       (let [conj-map (into [] (map (fn [a b] (make-unify a (make-constant b)))
                                    arguments (.arguments ^DynaTerm out-val)))]
-        ;(when-not conj-map (debug-repl "uf2"))
-        (make-conjunct conj-map)))))
+        (make-conjunct [(make-unify dynabase (make-constant (.dynabase ^DynaTerm out)))
+                        (make-conjunct conj-map)])))))
 
 (def-rewrite
   :match {:rexpr (unify-structure (:any out) (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:any-list arguments))
           :context (unify-structure out (:unchecked file-name2) (:any dynabase2) (:unchecked name-str2) (:any-list arguments2))}
   :run-at :inference
-  (if (or (not= name-str name-str2) (not= (count arguments) (count arguments2)))
+  (if (or (not= name-str name-str2)
+          (not= (count arguments) (count arguments2)))
     (make-multiplicity 0) ;; then these two failed to unify together
     (let [res  ;; this needs to unify all of the arguments together
-          (make-conjunct (doall (map make-unify arguments arguments2)))]
-      ;(debug-repl "unify context")
+          (make-conjunct [(make-unify dynabase dynabase2)
+                          (make-conjunct (doall (map make-unify arguments arguments2)))])]
       res)))
 
 
@@ -1244,6 +1256,14 @@
     (make-multiplicity ##Inf)))
 
 (def-rewrite
+  :match (proj (:free A) (:rexpr R))
+  :run-at :construction
+  (do
+    (when-not (contains? (exposed-variables R) A)
+      (debug-repl "proj var not in body")
+      nil)))
+
+(def-rewrite
   :match (proj (:variable A) (:rexpr R))
   :run-at [:standard :inference]
 
@@ -1262,7 +1282,10 @@
           ;; this is either already done via the context?  Or this is going to be slow if we have a large expression where we have to do lots of
           ;; replacements of the variables
         replaced-R)
-      (make-proj A nR))))
+      (do
+        (when-not (contains? (exposed-variables nR) A)
+          (debug-repl "gg9"))
+        (make-proj A nR)))))
 
 (def-rewrite
   :match (proj (:ground A) (:rexpr R))

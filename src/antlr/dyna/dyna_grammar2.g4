@@ -101,7 +101,8 @@ MergedAggregator
     | [a-z][a-z&*\-+:|]* '=' {
     // there needs to be some method which checks if something is defined as an aggregator
     // that can then conditionally enable this lexer rule
-    ("max=".equals(getText()) || "min=".equals(getText()) || "prob+=".equals(getText()))
+    //("max=".equals(getText()) || "min=".equals(getText()) || "prob+=".equals(getText()))
+    aggregator_defined(getText())
 }?
     ;
 
@@ -245,7 +246,7 @@ eval_entry returns [DynaTerm rterm=null]
     ;
 
 // this version can load the data via a callback rather than constructing a single large object
-// this will want for
+// in the case that a large file is getting loaded, this would be better as it should avoid having everything in memory all at once
 program_LoadAsGo[clojure.lang.IFn callback_function]
     : (t=term {
             callback_function.invoke($t.rterm);

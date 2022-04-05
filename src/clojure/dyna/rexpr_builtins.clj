@@ -215,12 +215,30 @@
   :run-at :construction
   (make-unify C (make-constant false)))
 
+;; (def-rewrite
+;;   :match {:rexpr (lessthan (:any A) (:any B) (is-true? _))
+;;           :context (lessthan (:any C) (:any D) (is-true? _))}
+;;   :run-at :inference
+;;   (do
+;;     ;(debug-repl "match lessthan")
+;;     nil))
+
 
 (def-rewrite
   :match {:rexpr (lessthan-eq (:any A) (:any B) (is-true? _))
           :context (lessthan-eq (:any C) A (is-true? _))}
   :run-at :inference
   :infers (make-lessthan-eq C B (make-constant true)))
+
+(def-rewrite
+  :match (lessthan (:any A) (:any B) (#(= % (make-constant false)) _))
+  :run-at :construction
+  (make-lessthan-eq B A (make-constant true)))
+
+(def-rewrite
+  :match (lessthan-eq (:any A) (:any B) (#(= % (make-constant false)) _))
+  :run-at :construction
+  (make-lessthan B A (make-constant true)))
 
 (def-builtin-rexpr equals 3
   (:allground (= v2 (= v0 v1)))

@@ -15,6 +15,7 @@ transpose(A) = matrix {
 matrix(M) = {
     elem(X,Y) = M.elem(X,Y).
     transpose = transpose($self).
+    transpose2 = matrix { elem(X,Y) = Parent.elem(Y,X). } for Parent=$self.
     add(Other) = add($self, Other).
     multiply(Other) = multiply($self,Other).
 
@@ -43,11 +44,12 @@ a = matrix {
 
 assert a.elem(0,0) = 1.
 assert a.transpose.elem(1,0) = 2.
+assert a.transpose2.elem(1,0) = 2.
 
-debug_repl a.rows.
-
-%assert a.rows = 2.
+assert a.rows = 2.
 
 b = a.multiply(a.transpose).
+c = a.add(a).
 
 assert b.elem(0,0) = 5.
+assert c.elem(0,1) = 4.

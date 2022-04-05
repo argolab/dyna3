@@ -21,9 +21,10 @@ class ParserUtils {
         clojure_check_aggregator_defined = Clojure.var("dyna.aggregator", "is-aggregator-defined?");
     }
 
-    public static boolean aggrator_defined(String name) {
-        Object result = clojure_check_aggregator_defined.invoke(name);
-        return true;
+    public static boolean aggregator_defined(String name) {
+        return "max=".equals(name) || "min=".equals(name) || "prob+=".equals(name);
+        // Object result = clojure_check_aggregator_defined.invoke(name);
+        // return true;
     }
 
     public static String gensym_variable_name() {
@@ -36,7 +37,5 @@ class ParserUtils {
         // appeared in the program
         return colon_line_counter_.getAndAdd(1);
     }
-
-
 
 }

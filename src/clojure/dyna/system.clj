@@ -77,14 +77,14 @@
 ;; this should ensure that there are system-defined-user-terms also.  could have some flag which is "system is inited" and that it would parse
 ;; the prelude in the case that it wasn't already inited or something?  It would want for
 (defn make-new-dyna-system []
-  {:user-defined-terms (atom {})
+  {:globally-defined-user-term (atom {})
+   :user-defined-terms (atom {})
    :user-exported-terms (atom {})
    :imported-files (atom #{})
    :work-agenda (atom #{})
    :user-recursion-limit (atom default-recursion-limit)
    :query-output println
    :system-is-inited (atom false)
-   :globally-defined-user-term (atom {})
    })
 
 

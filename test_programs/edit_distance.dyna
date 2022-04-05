@@ -12,7 +12,10 @@ ins := 1.
 
 subst := 1.
 
-assert dist(["a","b","c","d"], ["s","b","c","t","d"]) = 2.
+assert dist(["a", "b"], ["s", "a", "b"]) = 1.
+
+% this is slow without haivng a dynamic program/forward chaining working yet
+% assert dist(["a","b","c","d"], ["s","b","c","t","d"]) = 2.
 
 %subst := 1.5.
 %assert dist(["a","b","c","d"], ["s","b","c","t","d"]) = 2.5.
