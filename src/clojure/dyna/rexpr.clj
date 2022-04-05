@@ -133,36 +133,38 @@
                  (throw ~'error)))
            ))
          (~'remap-variables ~'[this variable-map]
-          (context/bind-no-context  ;; this is annoying, this will want to be
-                                    ;; something that we can avoid doing
-                                    ;; multiple times.  Which rewrites that we
-                                    ;; can perform should be something that is
-                                    ;; collected ahead of time, so there will be
-                                    ;; some rewrites which are "renaming-safe",
-                                    ;; or it will want to denote that it
-                                    ;; requires a context
-           (if (empty? ~'variable-map)
-             ~'this ;; in this case, there are no variables in the expression to rename, so don't do any replacements and just return our selves
-             (let ~(vec (apply concat (for [v vargroup]
-                                        [(symbol (str "new-" (cdar v)))
-                                         (case (car v)
-                                           :var `(get ~'variable-map ~(cdar v) ~(cdar v))
-                                           :value `(get ~'variable-map ~(cdar v) ~(cdar v))
-                                           :hidden-var `(get ~'variable-map ~(cdar v) ~(cdar v))
-                                           :var-list `(map #(get ~'variable-map % %) ~(cdar v))
-                                           :var-map `(into {} (for [~'[kk vv] ~(cdar v)] [~'kk (get ~'variable-map ~'vv ~'vv)]))
-                                           :var-set-map `(into #{} (for [~'s ~(cdar v)]
-                                                                     (into {} (for [~'[kk vv] ~'s] [~'kk (get ~'variable-map ~'vv ~'vv)]))))
-                                           :rexpr `(remap-variables ~(cdar v) ~'variable-map)
-                                           :rexpr-list `(map #(remap-variables % ~'variable-map) ~(cdar v))
-                                           (cdar v) ;; the default is that this is the same
-                                           )])))
-               (if (and ~@(for [v vargroup]
-                            `(= ~(cdar v) ~(symbol (str "new-" (cdar v))))))
-                 ~'this ;; then there was no change, so we can just return ourself
-                 ;; there was some change, so we are going to need to create a new object with the new values
-                 (~(symbol (str "make-" name)) ~@(for [v vargroup]
-                                                   (symbol (str "new-" (cdar v))))))))))
+          (debug-binding
+           [*current-simplify-stack* (conj *current-simplify-stack* ~'this)]
+           (context/bind-no-context  ;; this is annoying, this will want to be
+            ;; something that we can avoid doing
+            ;; multiple times.  Which rewrites that we
+            ;; can perform should be something that is
+            ;; collected ahead of time, so there will be
+            ;; some rewrites which are "renaming-safe",
+            ;; or it will want to denote that it
+            ;; requires a context
+            (if (empty? ~'variable-map)
+              ~'this ;; in this case, there are no variables in the expression to rename, so don't do any replacements and just return our selves
+              (let ~(vec (apply concat (for [v vargroup]
+                                         [(symbol (str "new-" (cdar v)))
+                                          (case (car v)
+                                            :var `(get ~'variable-map ~(cdar v) ~(cdar v))
+                                            :value `(get ~'variable-map ~(cdar v) ~(cdar v))
+                                            :hidden-var `(get ~'variable-map ~(cdar v) ~(cdar v))
+                                            :var-list `(map #(get ~'variable-map % %) ~(cdar v))
+                                            :var-map `(into {} (for [~'[kk vv] ~(cdar v)] [~'kk (get ~'variable-map ~'vv ~'vv)]))
+                                            :var-set-map `(into #{} (for [~'s ~(cdar v)]
+                                                                      (into {} (for [~'[kk vv] ~'s] [~'kk (get ~'variable-map ~'vv ~'vv)]))))
+                                            :rexpr `(remap-variables ~(cdar v) ~'variable-map)
+                                            :rexpr-list `(map #(remap-variables % ~'variable-map) ~(cdar v))
+                                            (cdar v) ;; the default is that this is the same
+                                            )])))
+                (if (and ~@(for [v vargroup]
+                             `(= ~(cdar v) ~(symbol (str "new-" (cdar v))))))
+                  ~'this ;; then there was no change, so we can just return ourself
+                  ;; there was some change, so we are going to need to create a new object with the new values
+                  (~(symbol (str "make-" name)) ~@(for [v vargroup]
+                                                    (symbol (str "new-" (cdar v)))))))))))
          (~'rewrite-rexpr-children ~'[this remap-function]
           (let ~(vec (apply concat
                             (for [v vargroup]
@@ -820,76 +822,81 @@
 
 
 (defn simplify [rexpr]
-  (assert (context/has-context))
-  (let [ret  ((get @rexpr-rewrites-func (type rexpr) simplify-identity) rexpr simplify)]
-    (if (or (nil? ret) (= ret rexpr))
-      rexpr ;; if not changed, don't do anything
-      (do
-        (dyna-assert (rexpr? ret))
-        (ctx-add-rexpr! (context/get-context) ret)
-        ret))))
+  (debug-binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
+                 (assert (context/has-context))
+                 (let [ret  ((get @rexpr-rewrites-func (type rexpr) simplify-identity) rexpr simplify)]
+                   (if (or (nil? ret) (= ret rexpr))
+                     rexpr ;; if not changed, don't do anything
+                     (do
+                       (dyna-assert (rexpr? ret))
+                       (ctx-add-rexpr! (context/get-context) ret)
+                       ret)))))
 
 (swap! debug-useful-variables assoc 'simplify (fn [] simplify))
 
 (defn simplify-construct [rexpr]
-  (let [ret ((get @rexpr-rewrites-construct-func (type rexpr) simplify-identity) rexpr simplify-construct)]
-    (if (nil? ret)
-      rexpr
-      (do
-        (dyna-assert (rexpr? ret))
-        ret))))
+  (debug-binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
+                 (let [ret ((get @rexpr-rewrites-construct-func (type rexpr) simplify-identity) rexpr simplify-construct)]
+                   (if (nil? ret)
+                     rexpr
+                     (do
+                       (dyna-assert (rexpr? ret))
+                       ret)))))
 
 (defn simplify-inference [rexpr]
-  (let [ctx (context/get-context)]
-    (ctx-add-rexpr! ctx rexpr)
-    (let [ret ((get @rexpr-rewrites-inference-func (type rexpr) simplify-identity) rexpr simplify-inference)]
-      (if (nil? ret)
-        rexpr
-        (do (dyna-assert (rexpr? ret))
-            (ctx-add-rexpr! ctx ret)
-            ret)))))
+  (debug-binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
+                 (let [ctx (context/get-context)]
+                   (ctx-add-rexpr! ctx rexpr)
+                   (let [ret ((get @rexpr-rewrites-inference-func (type rexpr) simplify-identity) rexpr simplify-inference)]
+                     (if (nil? ret)
+                       rexpr
+                       (do (dyna-assert (rexpr? ret))
+                           (ctx-add-rexpr! ctx ret)
+                           ret))))))
 
 ;; the context is assumed to be already constructed outside of this function
 ;; this will need for something which needs for the given functionq
-(if system/track-where-rexpr-constructed
-  (defn simplify-fully [rexpr]
-    (loop [cri rexpr]
-      (let [nri (loop [cr cri]
-                  (let [nr (binding [*current-top-level-rexpr* cr]
-                             (simplify cr))]
-                    (if (not= cr nr)
-                      (recur nr)
-                      nr)))
-            nrif (binding [*current-top-level-rexpr* nri]
-                   (simplify-inference nri))]
-        (if (not= nrif nri)
-          (recur nrif)
-          nrif))))
-  (defn simplify-fully [rexpr]
-    (loop [cri rexpr ]
-      (let [nri (loop [cr cri]
-                  (let [nr (simplify cr)]
-                    (if (not= cr nr)
-                      (recur nr)
-                      nr)))
-            nrif (simplify-inference nri)]
-        (if (not= nrif nri)
-          (recur nrif)
-          nrif)))))
+;; (if system/track-where-rexpr-constructed
+;;   (defn simplify-fully [rexpr]
+;;     (loop [cri rexpr]
+;;       (let [nri (loop [cr cri]
+;;                   (let [nr (binding [*current-top-level-rexpr* cr]
+;;                              (simplify cr))]
+;;                     (if (not= cr nr)
+;;                       (recur nr)
+;;                       nr)))
+;;             nrif (binding [*current-top-level-rexpr* nri]
+;;                    (simplify-inference nri))]
+;;         (if (not= nrif nri)
+;;           (recur nrif)
+;;           nrif))))
+(defn simplify-fully [rexpr]
+  (loop [cri rexpr ]
+    (let [nri (loop [cr cri]
+                (let [nr (debug-binding [*current-top-level-rexpr* cr]
+                                        (simplify cr))]
+                  (if (not= cr nr)
+                    (recur nr)
+                    nr)))
+          nrif (debug-binding [*current-top-level-rexpr* nri]
+                              (simplify-inference nri))]
+      (if (not= nrif nri)
+        (recur nrif)
+        nrif))))
 
-(when system/track-where-rexpr-constructed
-  (let [orig-simplify simplify
-        orig-simplify-construct simplify-construct
-        orig-simplify-inference simplify-inference]
-    (defn simplify [rexpr]
-      (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
-        (orig-simplify rexpr)))
-    (defn simplify-construct [rexpr]
-      (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
-        (orig-simplify-construct rexpr)))
-    (defn simplify-inference [rexpr]
-      (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
-        (orig-simplify-inference rexpr)))))
+;; (when system/track-where-rexpr-constructed
+;;   (let [orig-simplify simplify
+;;         orig-simplify-construct simplify-construct
+;;         orig-simplify-inference simplify-inference]
+;;     (defn simplify [rexpr]
+;;       (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
+;;         (orig-simplify rexpr)))
+;;     (defn simplify-construct [rexpr]
+;;       (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
+;;         (orig-simplify-construct rexpr)))
+;;     (defn simplify-inference [rexpr]
+;;       (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
+;;         (orig-simplify-inference rexpr)))))
 
 (defn simplify-top [rexpr]
   (let [ctx (context/make-empty-context rexpr)]
@@ -1094,6 +1101,13 @@
 
 
 ;; (def-rewrite
+;;   :match (unify-structure (:any out) (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:any-list arguments))
+;;   :run-at :inference
+;;   (do
+;;     (debug-repl "uifi")
+;;     nil))
+
+;; (def-rewrite
 ;;   :match (unify-structure-get-meta (:ground struct) (:any dynabase) (:any from-file))
 ;;   (let [struct-val (get-value struct)]
 ;;     (if-not (instance? DynaTerm struct-val)
@@ -1111,7 +1125,8 @@
     :run-at [:standard :inference]
     (let [res (make-conjunct (doall (map #(let [r (simplify %)]
                                             (if (is-empty-rexpr? r) (throw (UnificationFailure.))
-                                                r)) children)))]
+                                                r))
+                                         children)))]
       res)))
 
 (def-rewrite
@@ -1268,8 +1283,11 @@
   :run-at [:standard :inference]
 
   (let [ctx (context/make-nested-context-proj rexpr [A])
+        vv (volatile! nil)
         nR (context/bind-context ctx
-                                 (simplify R))]
+                                 (let [zz (simplify R)]
+                                   (vreset! vv zz)
+                                   zz))]
     (if (ctx-is-bound? ctx A)
       ;; if there is some unified expression, it would be nice if we could also attempt to identify if some expression is unified together
       ;; in which case we can remove the proj using the expression of
@@ -1283,8 +1301,8 @@
           ;; replacements of the variables
         replaced-R)
       (do
-        (when-not (contains? (exposed-variables nR) A)
-          (debug-repl "gg9"))
+        (dyna-debug (when-not (or (is-empty-rexpr? nR) (contains? (exposed-variables nR) A))
+                      (debug-repl "gg9")))
         (make-proj A nR)))))
 
 (def-rewrite

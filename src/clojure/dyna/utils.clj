@@ -265,6 +265,10 @@
     `(try ~@args)
     (first args)))
 
+(defmacro debug-binding [b & body]
+  (if (= "true" (System/getProperty "dyna.debug" "true"))
+    `(binding ~b ~@body)
+    `(do ~@body)))
 
 (def ^{:private true} warnings-shown-so-far (atom {}))
 

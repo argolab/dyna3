@@ -345,8 +345,11 @@
                 (let [child-r (remap-variables R (into {} (for [[k v] val]
                                                             [k (make-constant v)])))
                       dctx (context/make-nested-context-disjunct child-r)
+                      ;zzz (debug-repl "zzz")
                       new-rexpr (context/bind-context-raw dctx (try (simplify-fully child-r)
-                                                                    (catch UnificationFailure e (make-multiplicity 0))))]
+                                                                    (catch UnificationFailure e (make-multiplicity 0))))
+                      ;zzz2 (debug-repl "zzz2")
+                      ]
                   ;; if not, then that means there is something in the expression that could not be rewritten
                   ;; this is something that that could happen given the user's program, so this should be some kind of warning
                   ;; along with returning the R-expr which can not be rewritten further
