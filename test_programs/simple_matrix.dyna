@@ -42,14 +42,27 @@ a = matrix {
   elem(1,0) = 0.
 }.
 
+print "part 1".
+
 assert a.elem(0,0) = 1.
 assert a.transpose.elem(1,0) = 2.
 assert a.transpose2.elem(1,0) = 2.
 
+print "part 2".
+
 assert a.rows = 2.
+
+print "part 3".
 
 b = a.multiply(a.transpose).
 c = a.add(a).
 
+print "part 4".
+
 assert b.elem(0,0) = 5.
+
+print "part 5".
+
 assert c.elem(0,1) = 4.
+
+print "done".

@@ -63,11 +63,7 @@
   (ctx-all-rexprs [this]
     (if (nil? parent)
       rexprs
-      (union rexprs (.all-rexprs ^context parent))))
-  ;; (construct-context-rexpr [this] nil)
-    ;; the unification constraints are not going to be present in the expression, so we are going to have to
-    ;(dyna.rexpr/make-conjunct (for [x value-map]
-    ;                                    (dyna.rexpr/unify-rexpr. (car x) (cdar x)))))
+      (union rexprs (.ctx-all-rexprs ^context parent))))
 
   (ctx-get-inner-values [this] [parent context-kind root-rexpr rexprs value-map])
   (ctx-get-all-bindings [this] (merge (when parent (ctx-get-all-bindings parent))
@@ -212,13 +208,12 @@
 (swap! debug-useful-variables assoc 'context get-context)
 
 
-
 ;; these should be replaced with something that is more efficient.  like if this is going to require
 (defmacro scan-through-full-context [ctx argument & body]
   ;; scan through all of the conjunctive constraints in the context and assign them to the argument variable
   ;; keep scanning as long as body does not return nil, otherwise return the value from body
   `(let [scan-fun# (fn [~argument] ~@body)]
-     (ctx-scan-through-conjuncts ~ctx scan-fn#)))
+     (ctx-scan-through-conjuncts ~ctx scan-fun#)))
 
 ;; these methods should be made more efficient in the future, for now, they are
 ;; just going to scan through the full list of conjunctive constraints and
@@ -240,3 +235,10 @@
          scan-fun# (fn [~argument] (when (contains? (exposed-variables ~argument) var#)
                                      ~@body))]
      (ctx-scan-through-conjuncts ~ctx scan-fun#)))
+
+
+(swap! debug-useful-variables assoc 'all-context-conjuncts
+       (fn []
+         (fn [] (let [ret (transient #{})]
+                  (scan-through-full-context (get-context) a (conj! ret a))
+                  (persistent! ret)))))

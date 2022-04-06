@@ -24,7 +24,7 @@ public final class DynaTerm implements ILookup {
         assert name != null;
         assert clojure_seqable.invoke(arguments) == Boolean.TRUE;
         this.name = name; // .intern(); // it would be nice to intern all of the names.  Then we can just use pointer equality between these different values
-        this.dynabase = null;
+        this.dynabase = null_term;
         this.from_file = null;
         this.arguments = arguments;
     }

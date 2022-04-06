@@ -24,8 +24,15 @@
            (throw e#))))))
 
 
-(doseq [f (file-seq test-dir)]
-  (let [name (.getName f)]
-    (when (and (.isFile f) (.endsWith name ".dyna"))
-      (let [fname (.substring name 0 (- (.length name) 5))]
-        (eval `(make-file-test ~fname))))))
+(make-file-test "basic1")
+(make-file-test "edit_distance")
+(make-file-test "quicksort")
+(make-file-test "simple_matrix")
+
+(comment
+  (eval `(do
+           ~@(for [f (file-seq test-dir)]
+               (let [name (.getName f)]
+                 (when (and (.isFile f) (.endsWith name ".dyna"))
+                   (let [fname (.substring name 0 (- (.length name) 5))]
+                     `(make-file-test ~fname))))))))

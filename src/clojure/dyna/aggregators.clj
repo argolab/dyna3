@@ -364,6 +364,7 @@
                   (when-not (is-empty-rexpr? new-rexpr)
                     (vreset! is-empty-aggregation false)
                     (vswap! current-value #((:combine-mult aop) % (get val incoming-variable) (:mult new-rexpr))))))
+              (println "aggregator done running iterator")
               (if @is-empty-aggregation
                 (if body-is-conjunctive
                   (make-multiplicity 0)

@@ -14,7 +14,8 @@
 (defn simplify-identity [a b] a)
 
 (declare simplify
-         simplify-inference)
+         simplify-inference
+         simplify-fast)
 (def simplify-construct identity)
 (declare find-iterators)
 
@@ -28,9 +29,30 @@
 (def rexpr-constructors (atom {}))
 (def rexpr-containers-signature (atom {}))
 
+
+;; functions which are used to perform matchings against a given Rexpr
+(def rexpr-matchers (atom {}))
+(def rexpr-matchers-mappers (atom {}))
+(def rexpr-matchers-meta (atom {}))
+
+;; functions which actually perform rewrites against an Rexpr
+;; these functions perform their own internal matching
+(def rexpr-rewrites (atom {})) ; run at standard time
+(def rexpr-rewrites-construct (atom {})) ; run at the time of construction
+(def rexpr-rewrites-inference (atom {})) ; run to construct new objects, but there are
+
+(def rexpr-rewrites-func (atom {}))
+(def rexpr-rewrites-construct-func (atom {}))
+(def rexpr-rewrites-inference-func (atom {}))
+
+;; functions which define how iterators are accessed for a given Rexpr
+(def rexpr-iterators-accessors (atom {}))
+
+
 ;(def ^:dynamic *current-matched-rexpr* nil)
 (def ^:dynamic *current-top-level-rexpr* nil)
 (def ^:dynamic *current-simplify-stack* [])
+(def ^:dynamic *current-simplify-running* nil)
 
 (when system/track-where-rexpr-constructed  ;; meaning that the above variable will be defined
   (swap! debug-useful-variables assoc
@@ -305,6 +327,10 @@
        (intern 'dyna.rexpr-constructors '~(symbol (str "make-" name)) ~(symbol (str "make-" name)))
        (intern 'dyna.rexpr-constructors '~(symbol (str "make-no-simp-" name)) ~(symbol (str "make-no-simp-" name)))
        (intern 'dyna.rexpr-constructors '~(symbol (str "is-" name "?")) ~(symbol (str "is-" name "?")))
+       (swap! rexpr-rewrites-func           assoc ~(symbol rname) (fn ~'[a b] (~(symbol "dyna.rexpr-constructors" (str "simplify-" name)) ~'a ~'b)))
+       (swap! rexpr-rewrites-construct-func assoc ~(symbol rname) (fn ~'[a b] (~(symbol "dyna.rexpr-constructors" (str "simplify-construct-" name)) ~'a ~'b)))
+       (swap! rexpr-rewrites-inference-func assoc ~(symbol rname) (fn ~'[a b] (~(symbol "dyna.rexpr-constructors" (str "simplify-inference-" name)) ~'a ~'b)))
+
        ;; (swap! rexpr-rewrites-func assoc ~(symbol (str name "-rexpr")) identity)
        ;; (swap! rexpr-rewrites-construct-func assoc ~(symbol (str name "-rexpr")) identity)
        ;; (swap! rexpr-rewrites-inference-func assoc ~(symbol (str name "-rexpr")) identity)
@@ -374,7 +400,7 @@
 
 
 (defn make-constant [val]
-  (when (nil? val) (debug-repl))
+  (dyna-debug (when (nil? val) (debug-repl)))
   (assert (not (nil? val))) ;; otherwise this is a bug
   (constant-value-rexpr. val))
 (intern 'dyna.rexpr-constructors 'make-constant make-constant)
@@ -604,33 +630,18 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; functions which are used to perform matchings against a given Rexpr
-(def rexpr-matchers (atom {}))
-(def rexpr-matchers-mappers (atom {}))
-(def rexpr-matchers-meta (atom {}))
-
-;; functions which actually perform rewrites against an Rexpr
-;; these functions perform their own internal matching
-(def rexpr-rewrites (atom {})) ; run at standard time
-(def rexpr-rewrites-construct (atom {})) ; run at the time of construction
-(def rexpr-rewrites-inference (atom {})) ; run to construct new objects, but there are
-
-(def rexpr-rewrites-func (atom {}))
-(def rexpr-rewrites-construct-func (atom {}))
-(def rexpr-rewrites-inference-func (atom {}))
-
-;; functions which define how iterators are accessed for a given Rexpr
-(def rexpr-iterators-accessors (atom {}))
-
 ;; make a linked list of functions which match against a given type
 (defn- combine-rewrite-function [first-function second-function]
-  (fn [rexpr simplify]
-    (let [res (first-function rexpr simplify)]
-      (if (or (nil? res) (= res rexpr))
-        (second-function rexpr simplify) ;; second function will likely be the new added function
-        (do
-          (assert (rexpr? res))
-          res)))))
+  (cond (= first-function simplify-identity) second-function
+        (= second-function simplify-identity) first-function
+        :else
+        (fn [rexpr simplify]
+          (let [res (first-function rexpr simplify)]
+            (if (or (nil? res) (= res rexpr))
+              (second-function rexpr simplify) ;; second function will likely be the new added function
+              (do
+                (assert (rexpr? res))
+                res))))))
 
 
 (defmacro def-rewrite-matcher
@@ -659,12 +670,14 @@
 
 (defn- make-context-matching-function [present-variables context-match body]
   (let [rexpr-context (gensym 'rexpr-context)]
-    `(context/scan-through-context-by-type (context/get-context)
-                                           ~(symbol (str (car context-match) "-rexpr"))
-                                           ~rexpr-context
-                                           (when (and ~@(for [pv present-variables]  ;; do not want to match something that has already been matched
-                                                          `(not= ~pv ~rexpr-context)))
-                                                 ~(make-rexpr-matching-function rexpr-context (conj present-variables rexpr-context) context-match body)))))
+    `(do (dyna-debug (dyna-assert (= simplify-inference *current-simplify-running*)))
+       (context/scan-through-context-by-type (context/get-context)
+                                               ~(symbol (str (car context-match) "-rexpr"))
+                                               ~rexpr-context
+                                               (do ;(debug-repl "ctx mm")
+                                                   (when (and ~@(for [pv present-variables] ;; do not want to match something that has already been matched
+                                                                  `(not= ~pv ~rexpr-context)))
+                                                     ~(make-rexpr-matching-function rexpr-context (conj present-variables rexpr-context) context-match body)))))))
 
 
 (defn- make-rexpr-matching-function [source-variable present-variables matcher body]
@@ -779,7 +792,8 @@
                                                                               )
                                                                             functor-name))
                                     combined-func#)
-                            (swap-vals! rewrite-collection-func# assoc functor-name# combined-func#))))))]
+                            ;(swap-vals! rewrite-collection-func# assoc functor-name# combined-func#)
+                            )))))]
       ret)))
 
 (defmacro def-iterator [& args]
@@ -822,56 +836,52 @@
 
 
 (defn simplify [rexpr]
-  (debug-binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
-                 (assert (context/has-context))
-                 (let [ret  ((get @rexpr-rewrites-func (type rexpr) simplify-identity) rexpr simplify)]
-                   (if (or (nil? ret) (= ret rexpr))
-                     rexpr ;; if not changed, don't do anything
-                     (do
-                       (dyna-assert (rexpr? ret))
-                       (ctx-add-rexpr! (context/get-context) ret)
-                       ret)))))
+  (debug-binding
+   [*current-simplify-stack* (conj *current-simplify-stack* rexpr)
+    *current-simplify-running* simplify]
+   (assert (context/has-context))
+   ;(ctx-add-rexpr! rexpr)
+   (let [ret ((get @rexpr-rewrites-func (type rexpr) simplify-identity) rexpr simplify)]
+     (if (or (nil? ret) (= ret rexpr))
+       rexpr ;; if not changed, don't do anything
+       (do
+         (dyna-assert (rexpr? ret))
+         ;(ctx-add-rexpr! (context/get-context) ret)
+         ret)))))
 
-(swap! debug-useful-variables assoc 'simplify (fn [] simplify))
+(def simplify-fast simplify)
+
+(swap! debug-useful-variables assoc
+       'simplify (fn [] simplify)
+       'simplify-fast (fn [] simplify))
+
 
 (defn simplify-construct [rexpr]
-  (debug-binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
-                 (let [ret ((get @rexpr-rewrites-construct-func (type rexpr) simplify-identity) rexpr simplify-construct)]
-                   (if (nil? ret)
-                     rexpr
-                     (do
-                       (dyna-assert (rexpr? ret))
-                       ret)))))
+  (debug-binding
+   [*current-simplify-stack* (conj *current-simplify-stack* rexpr)
+    *current-simplify-running* simplify-construct]
+   (let [ret ((get @rexpr-rewrites-construct-func (type rexpr) simplify-identity) rexpr simplify-construct)]
+     (if (nil? ret)
+       rexpr
+       (do
+         (dyna-assert (rexpr? ret))
+         ret)))))
 
 (defn simplify-inference [rexpr]
-  (debug-binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
-                 (let [ctx (context/get-context)]
-                   (ctx-add-rexpr! ctx rexpr)
-                   (let [ret ((get @rexpr-rewrites-inference-func (type rexpr) simplify-identity) rexpr simplify-inference)]
-                     (if (nil? ret)
-                       rexpr
-                       (do (dyna-assert (rexpr? ret))
-                           (ctx-add-rexpr! ctx ret)
-                           ret))))))
+  (debug-binding
+   [*current-simplify-stack* (conj *current-simplify-stack* rexpr)
+    *current-simplify-running* simplify-inference]
+   (let [ctx (context/get-context)]
+     (ctx-add-rexpr! ctx rexpr)
+     (let [ret ((get @rexpr-rewrites-inference-func (type rexpr) simplify-identity) rexpr simplify-inference)]
+       (if (nil? ret)
+         rexpr
+         (do (dyna-assert (rexpr? ret))
+             (ctx-add-rexpr! ctx ret)
+             ret))))))
 
-;; the context is assumed to be already constructed outside of this function
-;; this will need for something which needs for the given functionq
-;; (if system/track-where-rexpr-constructed
-;;   (defn simplify-fully [rexpr]
-;;     (loop [cri rexpr]
-;;       (let [nri (loop [cr cri]
-;;                   (let [nr (binding [*current-top-level-rexpr* cr]
-;;                              (simplify cr))]
-;;                     (if (not= cr nr)
-;;                       (recur nr)
-;;                       nr)))
-;;             nrif (binding [*current-top-level-rexpr* nri]
-;;                    (simplify-inference nri))]
-;;         (if (not= nrif nri)
-;;           (recur nrif)
-;;           nrif))))
 (defn simplify-fully [rexpr]
-  (loop [cri rexpr ]
+  (loop [cri rexpr]
     (let [nri (loop [cr cri]
                 (let [nr (debug-binding [*current-top-level-rexpr* cr]
                                         (simplify cr))]
@@ -883,20 +893,6 @@
       (if (not= nrif nri)
         (recur nrif)
         nrif))))
-
-;; (when system/track-where-rexpr-constructed
-;;   (let [orig-simplify simplify
-;;         orig-simplify-construct simplify-construct
-;;         orig-simplify-inference simplify-inference]
-;;     (defn simplify [rexpr]
-;;       (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
-;;         (orig-simplify rexpr)))
-;;     (defn simplify-construct [rexpr]
-;;       (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
-;;         (orig-simplify-construct rexpr)))
-;;     (defn simplify-inference [rexpr]
-;;       (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
-;;         (orig-simplify-inference rexpr)))))
 
 (defn simplify-top [rexpr]
   (let [ctx (context/make-empty-context rexpr)]
@@ -1063,6 +1059,15 @@
   :match (unify (:iterate A) (:ground B))
   (iterators/make-unit-iterator A (get-value B)))
 
+
+;; (def-rewrite
+;;   :match (unify-structure (:any out) (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:any-list arguments))
+;;   ;:run-at :inference
+;;   (do
+;;     (debug-repl "uifi")
+;;     nil))
+
+
 (def-rewrite
   :match (unify-structure (:free out) (:unchecked file-name) (:ground dynabase) (:unchecked name-str) (:ground-var-list arguments))
   :run-at [:construction :standard]
@@ -1084,7 +1089,7 @@
       (make-multiplicity 0) ;; the types do not match, so this is nothing
       (let [conj-map (into [] (map (fn [a b] (make-unify a (make-constant b)))
                                    arguments (.arguments ^DynaTerm out-val)))]
-        (make-conjunct [(make-unify dynabase (make-constant (.dynabase ^DynaTerm out)))
+        (make-conjunct [(make-unify dynabase (make-constant (.dynabase ^DynaTerm out-val)))
                         (make-conjunct conj-map)])))))
 
 (def-rewrite
@@ -1099,13 +1104,6 @@
                           (make-conjunct (doall (map make-unify arguments arguments2)))])]
       res)))
 
-
-;; (def-rewrite
-;;   :match (unify-structure (:any out) (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:any-list arguments))
-;;   :run-at :inference
-;;   (do
-;;     (debug-repl "uifi")
-;;     nil))
 
 ;; (def-rewrite
 ;;   :match (unify-structure-get-meta (:ground struct) (:any dynabase) (:any from-file))
@@ -1322,6 +1320,7 @@
 (def-rewrite
   ;; lift conjuncts which don't depend on the variable out of the projection
   :match (proj (:variable A) (conjunct (:rexpr-list Rs)))
+  :run-at :inference
   (let [not-contain-var (transient [])
         conj-children (doall (remove nil? (map (fn [r]
                                                  (if (contains? (exposed-variables r) A)
@@ -1343,6 +1342,7 @@
 
 (def-rewrite
   :match (proj (:variable A) (:rexpr R))
+  :run-at :inference
   (let [iter (find-iterators R)
         iter-self (filter #(contains? (iter-what-variables-bound %) A) iter)]
     (when-not (empty? iter-self)

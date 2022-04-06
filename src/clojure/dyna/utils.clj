@@ -87,7 +87,7 @@
                                                            fresh-request)
                      (contains? #{'locals} res) (do (aprint local-bindings)
                                                     fresh-request)
-                     (contains? #{'locals-names} res) (do (print (keys local-bindings) "\n")
+                     (contains? #{'locals-names 'local-names} res) (do (print (keys local-bindings) "\n")
                                                           fresh-request)
                      ;; TODO: this should attempt to lookup names in some context
                      :else res)))
