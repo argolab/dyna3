@@ -17,6 +17,9 @@ clean:
 	rm -rf target/ $(TARGET)
 
 test:
+	_JAVA_OPTIONS='-Ddyna.debug=false -Ddyna.trace_rexpr_construction=false' $(LEIN) test
+
+test-debug:
 	$(LEIN) test
 
 # start the repl for dyna code from the source directory

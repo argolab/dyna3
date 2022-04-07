@@ -74,7 +74,7 @@ echo ""
 dyna_args=""
 import_args=""
 jvm_args=""
-memory="2G"
+memory="4G"
 perf_mode="safe"
 debug_mode="false"
 

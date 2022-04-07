@@ -1,5 +1,6 @@
 (ns dyna.utils
   (:require [aprint.core :refer [aprint]])
+  (:require [dyna.system :refer [debug-on-assert-fail debug-statements]])
   (:import [dyna DynaTerm]))
 
 ;; make functions like car caar cdr etc
@@ -252,21 +253,22 @@
 
 (defmacro dyna-assert [expression]
   `(when-not ~expression
-     (debug-repl ~(str "assert failed " expression))
-     (assert false)))
+     (when debug-on-assert-fail
+       (debug-repl ~(str "assert failed " expression)))
+     (throw (AssertionError. ~(str "assert failed " expression)))))
 
 
 (defmacro dyna-debug [& args]
-  (if (= "true" (System/getProperty "dyna.debug" "true"))
+  (if debug-statements ;(= "true" (System/getProperty "dyna.debug" "true"))
     `(do ~@args)))
 
 (defmacro debug-try [& args]
-  (if true;(= "true" (System/getProperty "dyna.debug" "true"))
+  (if debug-statements
     `(try ~@args)
     (first args)))
 
 (defmacro debug-binding [b & body]
-  (if (= "true" (System/getProperty "dyna.debug" "true"))
+  (if debug-statements;(= "true" (System/getProperty "dyna.debug" "true"))
     `(binding ~b ~@body)
     `(do ~@body)))
 

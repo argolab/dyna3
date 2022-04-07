@@ -11,6 +11,9 @@
 (def track-where-rexpr-constructed
   (= "true" (System/getProperty "dyna.trace_rexpr_construction" "true")))
 
+(def debug-statements
+  (= "true" (System/getProperty "dyna.debug" "true")))
+
 (def default-recursion-limit
   (Integer/valueOf (System/getProperty "dyna.recursion_limit" "20")))
 

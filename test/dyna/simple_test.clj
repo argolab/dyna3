@@ -229,8 +229,8 @@ assert test(5) = 10.
 my_macro(X) := X.
 my_macro(`(`X + 2)) := `(`X + 3).
 
-f1(X) = my_macro(X + 1).
-f2(X) = my_macro(X + 2).
+f1(W) = my_macro(W + 1).
+f2(W) = my_macro(W + 2).
 
 assert f1(3) = 4.
 assert f2(3) = 6.
