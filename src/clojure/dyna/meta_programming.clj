@@ -118,7 +118,7 @@
       (let [value-map (merge
                        (into {} (for [[i v] (zipmap (range) (.arguments call-ref-val))]
                                   [(make-variable (str "$" i)) (make-constant v)]))
-                       (if-not (dnil? (.dynabase call-ref-val)) {"$self" (.dynabase call-ref-val)})
+                       (if-not (dnil? (.dynabase call-ref-val)) {(make-variable "$self") (make-constant (.dynabase call-ref-val))})
                        (into {} (for [[i v] (zipmap (range) arguments)]
                                   [(make-variable (str "$" (+ i (.arity call-ref-val)))) v]))
                        {(make-variable (str "$" (+ (.arity call-ref-val) (count arguments)))) result})
@@ -137,10 +137,11 @@
 
 
 ;; need to gather the conjunctive constraints first, otherwise this might not find the relevant parts of the expression
-(def-rewrite
-  :match {:rexpr (indirect-user-call (:free call-ref) (:any-list arguments) (:any result))
-          :context (unify-structure call-ref (:unchecked file-name) (:ground dynabase) (:unchecked name-str) (:any-list arguments))}
-  :run-at :inference
-  (do
-    (debug-repl "idr2")
-    (???)))
+(comment
+  (def-rewrite
+    :match {:rexpr (indirect-user-call (:free call-ref) (:any-list arguments) (:any result))
+            :context (unify-structure call-ref (:unchecked file-name) (:ground dynabase) (:unchecked name-str) (:any-list arguments))}
+    :run-at :inference
+    (do
+      (debug-repl "idr2")
+      (???))))

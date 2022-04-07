@@ -506,10 +506,10 @@
                                          ;;                                            (make-intermediate-var) ;; we do not care about the file which this comes from, so we just ignore this
                                          ;;                                            )
                                          ]
-                                     (debug-repl "db quote")
-                                     (???)
+                                     ;; (debug-repl "db quote")
+                                     ;; (???)
                                      ;(make-conjunct [structure meta-struct])
-                                     )
+                                     structure)
 
             ["$dynabase_call" 2] (let [[dynabase-var call-term] (.arguments ast)
                                        dynabase-val (get-value dynabase-var)

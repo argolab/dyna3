@@ -187,9 +187,6 @@ primitive returns[Object v]
     // TODO: should have $null in this list
     ;
 
-// escapedVariable returns [DynaTerm rterm]
-//     : e=EscapedVariable { $rterm = DynaTerm.create("\$escaped_variable", $e.getText().substring(1)); }
-//     ;
 
 
 // the entry point for parsing a file
@@ -500,7 +497,7 @@ dynabaseInnerBracket returns[DynaTerm rterm]
 
 dynabaseInnerBracketTerms returns[DynaTerm dterms=null]
     : (t=term_unended EndTerm {$dterms = ($dterms == null ? $t.rterm : DynaTerm.create(",", $dterms, $t.rterm));})*
-       t=term_unended (EndTerm|'.') {$dterms = ($dterms == null ? $t.rterm : DynaTerm.create(",", $dterms, $t.rterm));}
+       t=term_unended (EndTerm|'.') {$dterms = ($dterms == null ? $t.rterm : DynaTerm.create(",", $dterms, $t.rterm));} // the new line after the last term in a dynabase is optional
     ;
 
 
@@ -525,10 +522,10 @@ expressionRoot returns [DynaTerm rterm]
     : m=methodCall { $rterm = DynaTerm.create_arr($m.name, $m.args); }
     | '&' m=methodCall {
           $rterm = DynaTerm.create("\$quote1", DynaTerm.create_arr($m.name, $m.args)); }
-    | '&' dbase=expression '.' m=methodCall {
-            assert(false);
-            // this is something like constructing, or deconstructing a structured term in a specific dynabase
-        }
+    // | '&' dbase=expression '.' m=methodCall {
+    //         assert(false);
+    //        $rterm = DynaTerm.create("\$dynabase_quote1", $dbase.rterm, DynaTerm.create_arr($m.name, $m.args));
+    //     }
     | brt=bracketTerm { $rterm = DynaTerm.create("\$quote1", DynaTerm.create_arr($brt.name, $brt.args)); }
     | v=Variable {
             if($v.getText().equals("_")) {
@@ -539,17 +536,8 @@ expressionRoot returns [DynaTerm rterm]
             }
       }
     | primitive { $rterm = DynaTerm.create("\$constant", $primitive.v); }
-    //| ia=inlineAggregated { $rterm = $ia.rterm; }
-    //| iaf=inlineAnonFunction {$rterm = $iaf.rterm; }
     | '(' e=expression ')' { $rterm = $e.rterm; }
     | ilf=inlineFunction2 { $rterm = $ilf.rterm; }
-        // | '(' agg=aggregatorName ia=inlineAggregatedBodies')'
-    //   {
-    //     $trm = new InlinedAggregatedExpression($agg.t, $ia.bodies);
-    //   }
-    | '&' ilf=inlineFunction2 {
-       assert(false); // TODO: allow for a function to be quoted when it is constructed, such that it can easily return an anon function
- }
     | a=array { $rterm = $a.rterm; }
     | ':' m=methodCall {  // for supporthing things like f(:int) => f(_:int)
             $rterm = DynaTerm.create("\$variable", gensym_variable_name());
@@ -557,7 +545,6 @@ expressionRoot returns [DynaTerm rterm]
             $rterm = DynaTerm.create(",", DynaTerm.create($m.name, $m.args), $rterm); }
     | mp=assocativeMap { $rterm=$mp.rterm; }
     | db=dynabase { $rterm = $db.rterm; }
-    //| dba=dynabaseAccess[$prog] { $rterm = $dba.rterm; }
     | v=Variable '(' arguments ')' {
             // for doing an indirect call to some value
             $arguments.args.add(0, DynaTerm.create("\$variable", $v.getText()));
@@ -566,8 +553,7 @@ expressionRoot returns [DynaTerm rterm]
     | '(' e=expression ')' '(' arguments ')' {
         $arguments.args.add(0, $e.rterm);
         $rterm = DynaTerm.create_arr("\$call", $arguments.args);
-    }
-//    | ea=escapedVariable { $rterm = $ea.rterm; }
+       }
     | '`' '(' e=expression ')' { $rterm = DynaTerm.create("\$escaped", $e.rterm); }
     | '`' v=Variable { $rterm = DynaTerm.create("\$escaped", DynaTerm.create("\$variable", $v.getText())); }
     ;
@@ -576,8 +562,25 @@ expressionRoot returns [DynaTerm rterm]
 
 expressionDynabaseAccess returns[DynaTerm rterm]
     : a=expressionRoot {$rterm=$a.rterm;}
-      ('.' m=methodCall {$rterm = DynaTerm.create("\$dynabase_call", $rterm, DynaTerm.create_arr($m.name, $m.args));})*
-      ('.' bracketTerm { assert(false); })? // todo, represent the construction of a term refering a dynabase somehow
+      ('.' m=methodCall {
+                if($rterm.name.equals("\$quote") || $rterm.name.equals("\$inline_function")) {
+                    assert(false); /// should be a syntax error
+                }
+                if($rterm.name.equals("\$quote1")) {
+                    // this is something like `&f(5).foo` which should be converted into `f(5).foo[]`
+                    $rterm = DynaTerm.create("\$dynabase_quote1", $rterm.get(0), DynaTerm.create_arr($m.name, $m.args));
+                } else if($rterm.name.equals("\$dynabase_quote1")) {
+                    $rterm = DynaTerm.create("\$dynabase_quote1", DynaTerm.create("\$dynabase_call", $rterm.get(0), $rterm.get(1)),
+                                                                  DynaTerm.create_arr($m.name, $m.args));
+                } else {
+                    $rterm = DynaTerm.create("\$dynabase_call", $rterm, DynaTerm.create_arr($m.name, $m.args));
+                }
+        })*
+      ('.' bracketTerm {
+        if($rterm.name.equals("\$quote") || $rterm.name.equals("\$quote1") || $rterm.name.equals("\$dynabase_quote1")) {
+            assert(false); // should be a syntax error
+        }
+        $rterm = DynaTerm.create("\$dynbase_quote1", $rterm, DynaTerm.create_arr($bracketTerm.name, $bracketTerm.args)); })?
     ;
 
 expressionAddBrakcetsCall returns [DynaTerm rterm]
@@ -597,12 +600,14 @@ locals [DynaTerm add_arg=null]
         {
             $rterm = $a.rterm;
             assert($add_arg != null);
-            if($rterm.name.equals("\$quote1") || $rterm.name.equals("\$quote") || $rterm.name.equals("\$variable") || $rterm.name.equals("\$constant")
-               || $rterm.name.equals("\$escaped") || $rterm.name.equals("\$inline_function"))
+            if($rterm.name.equals("\$quote1") || $rterm.name.equals("\$quote") || $rterm.name.equals("\$constant")
+               || $rterm.name.equals("\$escaped") || $rterm.name.equals("\$inline_function") || $rterm.name.equals("\$dynabase_quote1"))
                assert(false); // this should return a syntax error rather than an assert(false)
             if($rterm.name.equals("\$dynabase_call")) {
                 // have to put the argument onto the dynabase call element,
-                $rterm = DynaTerm.create("\$dynabase_call", $rterm.get(0), ((DynaTerm)$rterm.get(1)).extend_args($add_arg));
+                $rterm = DynaTerm.create($rterm.name, $rterm.get(0), ((DynaTerm)$rterm.get(1)).extend_args($add_arg));
+            } else if($rterm.name.equals("\$variable")) {
+                $rterm = DynaTerm.create("\$call", $rterm, $add_arg); // to support expressions like `X { x=123. }` which are like `X(){ x=123.}`
             } else {
                 $rterm = $rterm.extend_args($add_arg);
             }
@@ -654,36 +659,36 @@ expressionAdditive returns [DynaTerm rterm]
 
 expressionRelationCompare returns [DynaTerm rterm]
 locals[ArrayList<DynaTerm> expressions, ArrayList<String> ops]
-    :   a=expressionAdditive {$rterm = $a.rterm;}
-    |   a=expressionAdditive {
-            $expressions = new ArrayList<>();
-            $ops = new ArrayList<>();
-            $expressions.add($a.rterm);
-        }
-        (op=('>'|'<'|'<='|'>=') b=expressionAdditive
-            { $ops.add($op.getText());
-              $expressions.add($b.rterm);
-            })+
-        {
-            // this creates tmp vars for all of the values used more than once, but they are now evaluated out of order?
-            // given the declaritive nature of the program, that shouldn't be a "problem" per say
-            $rterm = null;
-            for(int i = 1; i < $expressions.size() - 1; i++) {
-                // this isn't needed in the case that the nested expression is a variable or constant
-                // those can just get duplicated
-                if(!("\$variable".equals($expressions.get(i).name) || "\$constant".equals($expressions.get(i).name))) {
-                    DynaTerm tmp_var = DynaTerm.create("\$variable", gensym_variable_name());
-                    DynaTerm uf = DynaTerm.create("\$unify", tmp_var, $expressions.get(i));
-                    $rterm = $rterm == null ? uf : DynaTerm.create(",", $rterm, uf);
-                    $expressions.set(i, tmp_var);
-                }
-            }
-            for(int i = 0; i < $ops.size(); i++) {
-                DynaTerm o = DynaTerm.create($ops.get(i), $expressions.get(i), $expressions.get(i+1));
-                $rterm = $rterm == null ? o : DynaTerm.create(",", $rterm, o);
-            }
-        }
-        ;
+    : a=expressionAdditive {$rterm = $a.rterm;}
+    | a=expressionAdditive {
+          $expressions = new ArrayList<>();
+          $ops = new ArrayList<>();
+          $expressions.add($a.rterm);
+      }
+      (op=('>'|'<'|'<='|'>=') b=expressionAdditive
+          { $ops.add($op.getText());
+            $expressions.add($b.rterm);
+          })+
+      {
+          // this creates tmp vars for all of the values used more than once, but they are now evaluated out of order?
+          // given the declaritive nature of the program, that shouldn't be a "problem" per say
+          $rterm = null;
+          for(int i = 1; i < $expressions.size() - 1; i++) {
+              // this isn't needed in the case that the nested expression is a variable or constant
+              // those can just get duplicated
+              if(!("\$variable".equals($expressions.get(i).name) || "\$constant".equals($expressions.get(i).name))) {
+                  DynaTerm tmp_var = DynaTerm.create("\$variable", gensym_variable_name());
+                  DynaTerm uf = DynaTerm.create("\$unify", tmp_var, $expressions.get(i));
+                  $rterm = $rterm == null ? uf : DynaTerm.create(",", $rterm, uf);
+                  $expressions.set(i, tmp_var);
+              }
+          }
+          for(int i = 0; i < $ops.size(); i++) {
+              DynaTerm o = DynaTerm.create($ops.get(i), $expressions.get(i), $expressions.get(i+1));
+              $rterm = $rterm == null ? o : DynaTerm.create(",", $rterm, o);
+          }
+      }
+      ;
 
 expressionEqualsCompare returns [DynaTerm rterm]
     : a=expressionRelationCompare {$rterm = $a.rterm;}

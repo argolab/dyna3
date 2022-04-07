@@ -322,6 +322,16 @@ a = f(f(f(new {}))).
 assert a.z = 3.
 ")
 
+(str-test dynabase-indirect "
+f(X) = {
+g(Y) = X + Y.
+}.
+
+a = &f(5).g.
+
+assert (a)(6) = 11.
+")
+
 
 (str-test clojure-eval "
 f(X) = $clojure'{
