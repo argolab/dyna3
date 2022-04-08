@@ -1,4 +1,4 @@
-(ns dyna.aggregators
+(ns dyna.rexpr-aggregators
   (:require [dyna.utils :refer :all])
   (:require [dyna.base-protocols :refer :all])
   (:require [dyna.rexpr :refer :all])

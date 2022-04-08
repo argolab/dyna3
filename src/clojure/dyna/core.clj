@@ -10,9 +10,9 @@
   (:require [dyna.base-protocols :refer :all])
   (:require [dyna.context :as context])
   (:require [dyna.rexpr-builtins])
-  (:require [dyna.aggregators])
+  (:require [dyna.rexpr-aggregators])
   (:require [dyna.rexpr-dynabase])
-  (:require [dyna.meta-programming])
+  (:require [dyna.rexpr-meta-programming])
   (:require [dyna.ast-to-rexpr :refer [parse-string
                                        import-file-url
                                        eval-string

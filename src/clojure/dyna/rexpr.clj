@@ -681,8 +681,9 @@
 
 
 (defn- make-rexpr-matching-function [source-variable present-variables matcher body]
-  (let [rexpr-match (if (map? matcher) (:rexpr matcher) matcher)
-        context-matcher (if (map? matcher) (:context matcher))
+  (let [matcher (if (map? matcher) matcher {:rexpr matcher})
+        rexpr-match (:rexpr matcher)
+        context-matcher (:context matcher)
         rexpr-type-matched (car rexpr-match)
         match-args (vec (map (fn [a]
                                (cond
@@ -710,7 +711,7 @@
                                          (make-rexpr-matching-function (cadar matchers) c-present-vars (caddar matchers) body-fn))))))]
     (assert (= (count (get @rexpr-containers-signature (symbol rexpr-type-matched))) (- (count rexpr-match) 1))
             "The R-expr match expression does not contain the right number of arguments, it will never match")
-    (assert (or (not (map? matcher)) (subset? (keys matcher) #{:rexpr :context :check}))
+    (assert (subset? (keys matcher) #{:rexpr :context :check})
             "matcher map contains unexepxected key")
     `(when (~(symbol (str "is-" rexpr-type-matched "?")) ~source-variable)
        (let [~(vec (map cdar match-args)) (get-arguments ~source-variable)]
@@ -752,6 +753,13 @@
                                    (not (ctx-contains-rexpr? (context/get-context) infered-rexpr#)))
                            ;(debug-repl "doing infer")
                            (make-conjunct [(~'simplify infered-rexpr#) ~'rexpr])))
+    (:assigns kw-args) (do
+                         (assert (map? (:assigns kw-args)))
+                         ;; if there is only a single value, then this does not need a conjunct.
+                         ;; would be interesting if make-conjunct was a macro  Then it could check if there is anything that could
+                         ;; match at the location of the code.  That would mean that
+                         `(make-conjunct [~@(for [[k v] (:assigns kw-args)]
+                                              `(make-unify ~k (make-constant ~v)))]))
     :else body))
 
 (defmacro def-rewrite [& args]

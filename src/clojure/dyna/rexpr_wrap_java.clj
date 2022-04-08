@@ -2,6 +2,10 @@
   (:require [dyna.rexpr :refer :all])
   )
 
+(assert false) ;; this is not used the $clojure builtin could be used instead
+;; when calling something from java?  Though might still be nicer if there was
+;; something specific to java?
+
 ;; would be nice if there were some operations which wrapped java operations.
 ;; That way there could be some ability to have callouts to matrix libraries or
 ;; other useful libraries.  One issue is that dyna is potentially running things

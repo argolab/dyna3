@@ -1,4 +1,4 @@
-(ns dyna.meta-programming
+(ns dyna.rexpr-meta-programming
   (:require [dyna.utils :refer :all])
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.user-defined-terms :refer [def-user-term]])

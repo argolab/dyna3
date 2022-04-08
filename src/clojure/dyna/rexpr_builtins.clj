@@ -240,6 +240,31 @@
   :run-at :construction
   (make-lessthan B A (make-constant true)))
 
+(def-rewrite
+  :match {:rexpr (lessthan (:any A) (:any B) (is-true? _))
+          :context (lessthan-eq B (:any C) (is-true? _))}
+  :run-at :inference
+  :infers (make-lessthan-eq A C (make-constant true)))
+
+
+(def-rewrite
+  :match {:rexpr (lessthan (:any A) (:any B) (is-true? _))
+          :context (lessthan-eq (:any C) A (is-true? _))}
+  :run-at :inference
+  :infers (make-lessthan-eq C B (make-constant true)))
+
+(def-rewrite
+  :match {:rexpr (lessthan-eq (:any A) (:any B) (is-true? _))
+          :context (lessthan B (:any C) (is-true? _))}
+  :run-at :inference
+  :infers (make-lessthan-eq A C (make-constant true)))
+
+(def-rewrite
+  :match {:rexpr (lessthan-eq (:any A) (:any B) (is-true? _))
+          :context (lessthan (:any C) A (is-true? _))}
+  :run-at :inference
+  :infers (make-lessthan-eq C B (make-constant true)))
+
 (def-builtin-rexpr equals 3
   (:allground (= v2 (= v0 v1)))
   (v2 (= v0 v1)))
@@ -256,6 +281,32 @@
           :check (= A B)}
   :run-at :construction
   (make-unify C (make-constant true)))
+
+(def-rewrite
+  :match {:rexpr (equals (:any A) (:any B) (is-true? _))
+          :context (equals A (:any C) (is-true? _))}
+  :run-at :inference
+  :infers (make-equals B C (make-constant true)))
+
+(def-rewrite
+  :match {:rexpr (equals (:any A) (:any B) (is-true? _))
+          :context (equals (:any C) A (is-true? _))}
+  :run-at :inference
+  :infers (make-equals B C (make-constant true)))
+
+
+(def-rewrite
+  :match {:rexpr (equals (:any A) (:any B) (is-true? _))
+          :context (equals B (:any C) (is-true? _))}
+  :run-at :inference
+  :infers (make-equals B C (make-constant true)))
+
+(def-rewrite
+  :match {:rexpr (equals (:any A) (:any B) (is-true? _))
+          :context (equals (:any C) B (is-true? _))}
+  :run-at :inference
+  :infers (make-equals B C (make-constant true)))
+
 
 ;; this should maybe just be unification rather than having something different for equals checking?
 (def-user-term ["equals" "=="] 2 (make-equals v0 v1 v2))

@@ -11,28 +11,39 @@
 (def test-dir (as-file "./test_programs"))
 ;;(debug-repl)
 
+(defn run-file [fname]
+  (let [sstate (make-new-dyna-system)]
+    (try
+      (run-under-system sstate
+                        (import-file-url (.toURL (as-file (str "./test_programs/" fname ".dyna")))))
+      (is true)
+      (catch DynaUserAssert e
+        (is false)
+        (throw e)))))
+
+;; (defmacro make-file-test [fname]
+;;   `(deftest ~(symbol fname)
+;;      (let [sstate# (make-new-dyna-system)]
+;;        (try
+;;          (run-under-system sstate#
+;;                            (import-file-url (.toURL (as-file (str "./test_programs/" ~fname ".dyna")))))
+;;          (is true)
+;;          (catch DynaUserAssert e#
+;;            (is false)
+;;            (throw e#))))))
 
 (defmacro make-file-test [fname]
   `(deftest ~(symbol fname)
-     (let [sstate# (make-new-dyna-system)]
-       (try
-         (run-under-system sstate#
-                           (import-file-url (.toURL (as-file (str "./test_programs/" ~fname ".dyna")))))
-         (is true)
-         (catch DynaUserAssert e#
-           (is false)
-           (throw e#))))))
+     (run-file ~(str fname))))
 
+;; (make-file-test "basic1")
+;; (make-file-test "edit_distance")
+;; (make-file-test "quicksort")
+;; (make-file-test "simple_matrix")
 
-(make-file-test "basic1")
-(make-file-test "edit_distance")
-(make-file-test "quicksort")
-(make-file-test "simple_matrix")
-
-(comment
-  (eval `(do
-           ~@(for [f (file-seq test-dir)]
-               (let [name (.getName f)]
-                 (when (and (.isFile f) (.endsWith name ".dyna"))
-                   (let [fname (.substring name 0 (- (.length name) 5))]
-                     `(make-file-test ~fname))))))))
+(eval `(do
+         ~@(for [f (file-seq test-dir)]
+             (let [name (.getName f)]
+               (when (and (.isFile f) (.endsWith name ".dyna"))
+                 (let [fname (.substring name 0 (- (.length name) 5))]
+                   `(make-file-test ~fname)))))))
