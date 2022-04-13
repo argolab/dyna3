@@ -1,7 +1,7 @@
 (ns dyna.rexpr-dynabase
   (:require [dyna.utils :refer :all])
   (:require [dyna.base-protocols :refer :all])
-  (:import [dyna.base_protocols Dynabase])
+  (:import  [dyna.base_protocols Dynabase])
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.user-defined-terms :refer [def-user-term]])
   (:require [dyna.assumptions :refer [make-assumption]])
@@ -133,8 +133,8 @@
                                    ;; rewrites to avoid having to process the
                                    ;; dynabase more than once
             :referenced-variables (vec referenced-variables)
-            :assumption (make-assumption)  ;; there should be some assumption about the
-                             ;; dynabase not inheriting from itself.  This willx
+            :does-not-self-inerhit-assumption (make-assumption)  ;; there should be some assumption about the
+                                           ;; dynabase not inheriting from itself.  This willx
                              ;; enable us to have more "efficient" code where an
                              ;; expression can again make the same assumptions
                              ;; as the there not being any parents

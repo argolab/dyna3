@@ -6,7 +6,7 @@
                  [org.clojure/tools.namespace "1.2.0"]
                  [aprint "0.1.3"]  ;; for formatted printing
                  ;[clj-python/libpython-clj "2.00-beta-22"]
-                 ;[com.clojure-goes-fast/clj-java-decompiler "0.3.0"] ;; for debugging what the generated code looks like
+                 [com.clojure-goes-fast/clj-java-decompiler "0.3.0"] ;; for debugging what the generated code looks like
                  [org.antlr/antlr4-runtime "4.7.2"] ;; for the front end parser
                  [org.jline/jline "3.20.0"]  ;; for the front end repl
                  [robert/hooke "1.3.0"]

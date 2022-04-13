@@ -362,8 +362,21 @@
                                                                           (???) ;; TODO
                                                                           )
 
-                                           "memoize_unk" (???) ;; mark some function as being memoized
-                                           "memoize_null" (???)
+                                           "memoize_unk" (match-term arg1 ("memoize_unk" ("/" name arity))
+                                                                     (let [call-name {:name name
+                                                                                      :arity arity
+                                                                                      :source-file source-file}]
+                                                                       ;(set-user-term-as-memoized call-name :unk)
+
+                                                                       (debug-repl))
+                                                                     (???))
+                                           "memoize_null" (match-term arg1 ("memoize_null" ("/" name arity))
+                                                                      (let [call-name {:name name
+                                                                                       :arity arity
+                                                                                       :source-file source-file}]
+                                                                        ;(set-user-term-as-memoized call-ast :null)
+                                                                        (debug-repl))
+                                                                      (???))
 
                                            "import_csv" (let [[term-name term-arity file-name] (.arguments ^DynaTerm (get arg1 0))]
                                                           ;; import some CSV file as a term

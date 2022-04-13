@@ -13,11 +13,11 @@
   (:require [dyna.rexpr-aggregators])
   (:require [dyna.rexpr-dynabase])
   (:require [dyna.rexpr-meta-programming])
+  (:require [dyna.memoization])
   (:require [dyna.ast-to-rexpr :refer [parse-string
                                        import-file-url
                                        eval-string
                                        eval-ast]])
-
   (:require [dyna.repl :refer [repl]])
   (:import [dyna DynaTerm]))
 

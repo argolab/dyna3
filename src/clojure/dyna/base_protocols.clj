@@ -1,5 +1,9 @@
 (ns dyna.base-protocols)
 
+;; this file defines the base protocols (interfaces) which are referenced
+;; throughout the rest of the project in different files.  The implementations
+;; for these methods are scattered around
+
 (defprotocol Rexpr
   (primitive-rexpr [this]) ;; return a primitive r-expr for the expression
   ;;(replace-expressions [this expressions-map]) ;; replace a given nested expression
@@ -76,3 +80,9 @@
 (defprotocol DIterator
   (iter-run-cb [this cb-fun])
   (iter-has-next [this]))
+
+
+(defrecord MemoizationContainer [RConditional
+                                 Rmemo
+                                 Rorig
+                                 assumption])

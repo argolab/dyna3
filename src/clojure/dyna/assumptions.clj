@@ -43,14 +43,23 @@
   Object
   (toString [this] (str "[Assumption isvalid=" (is-valid? this) " watchers=" (locking (str (.keySet watchers))) "]")))
 
+
+(deftype reactive-value
+  [assumption
+   value])
+
+
 (defmethod print-method assumption [^assumption this ^java.io.Writer w]
   (.write w (.toString this)))
-
 
 (defn make-assumption []
   (assumption. (WeakHashMap.)                               ; downstream dependents
                (atom true)                                  ; if this is still valid, this is atomic
                ))
+
+(defn make-reactive-value [initial-value]
+  (reactive-value. (make-assumption)
+                   (atom initial-value)))
 
 (defn depend-on-assumption [assumption & {:keys [hard] :or {hard true}}]
   ;; in this case, we are stating that the current computation would need to get
@@ -62,6 +71,3 @@
       ;; there should be some exception to restart the computation or something
       ;; it would allow for the runtime to check which of the expressions
       (throw (RuntimeException. "attempting to use invalid assumption")))))
-
-
-;; (defn make-assumption-wrapper [x] (assert false))
