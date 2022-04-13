@@ -140,7 +140,7 @@ StringConst2
 // ' stupid highlighting
 
 fragment StringConstBracketsrec
-    : '{' ( StringConstBracketsrec | '%' ~[\n\r]* [\n\r] | ~[{}] )* '}'
+    : '{' ( StringConstBracketsrec | '%' ~[\n\r]* [\n\r] | ~[{}%] )* '}'
     ;
 
 StringConstBrackets
@@ -601,7 +601,9 @@ locals [DynaTerm add_arg=null]
             $rterm = $a.rterm;
             assert($add_arg != null);
             if($rterm.name.equals("\$quote1") || $rterm.name.equals("\$quote") || $rterm.name.equals("\$constant")
-               || $rterm.name.equals("\$escaped") || $rterm.name.equals("\$inline_function") || $rterm.name.equals("\$dynabase_quote1"))
+               || $rterm.name.equals("\$escaped") || $rterm.name.equals("\$inline_function") || $rterm.name.equals("\$dynabase_quote1")
+               || $rterm.name.equals("\$dynabase_create") || $rterm.name.equals("\$map_empty") || $rterm.name.equals("\$map_element")
+               || $rterm.name.equals("\$nil") || $rterm.name.equals("\$cons"))
                assert(false); // this should return a syntax error rather than an assert(false)
             if($rterm.name.equals("\$dynabase_call")) {
                 // have to put the argument onto the dynabase call element,

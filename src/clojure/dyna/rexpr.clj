@@ -714,7 +714,7 @@
     (assert (subset? (keys matcher) #{:rexpr :context :check})
             "matcher map contains unexepxected key")
     `(when (~(symbol (str "is-" rexpr-type-matched "?")) ~source-variable)
-       (let [~(vec (map cdar match-args)) (get-arguments ~source-variable)]
+       (let [~(vec (map cdar match-args)) (get-arguments ~source-variable)]  ;; would be nice if get values was more "efficient" than destructing?
          (when (and ~@(remove true? (map car match-args)))
            ~(if (not (nil? context-matcher))
               (make-context-matching-function present-variables context-matcher generate-body)

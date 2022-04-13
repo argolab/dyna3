@@ -45,8 +45,11 @@
                                                         db (Dynabase. dbm)]
                                                     ;; this needs to track which kinds of dynabases this is going to inherit from
                                                     (make-unify dynabase (make-constant db)))
-                  :else (do (debug-repl "unexpected dynabase parent type")
-                            (assert false)))]
+                  :else (do ;; this means the user did something like `new (5) {foo = 123. }` which is ill-formed
+                          (dyna-debug
+                           (debug-repl "unexpected dynabase parent type")
+                           (assert false))
+                          (make-multiplicity 0)))]
     ret))
 
 (def-rewrite
@@ -71,6 +74,29 @@
                                               (fn [var val] (make-no-simp-unify var (make-constant val)))
                                               args ae))))
                        arr)))))))))
+
+(comment
+  (def-rewrite
+    :match {:rexpr (dynabase-access (:str name) (:any dynabase) (:variable-list args))
+            :context (dynabase-constructor (:str name) (:variable-list arguments) (:ground parent-dynabase) dynabase)}
+    :run-at :inference
+    (do
+      (debug-repl "dynabase constructor inference")
+      ;; if the constructor is from some dynabase which has different values
+      (???)
+      )
+    ))
+
+(comment
+  (def-rewrite
+    :match {:rexpr (dynabase-access (:str name) (:any dynabase) (:variable-list args))
+            :context (dynabase-access (:str name) dynabase (:variable-list args2))}
+    :run-at :inference
+    (do
+      (debug-repl "dynabase two access combine")
+      ;; this should check if the types are compiable, and then also replace the
+      ;; expression with the variables which are present at the higher scope.
+      (???))))
 
 (comment
   (def-iterator

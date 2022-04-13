@@ -1,16 +1,17 @@
 (defproject dyna "0.1.0-SNAPSHOT"
   :description "Dyna built on R-exprs"
-  :url "https://github.com/matthewfl/dyna-R"
+  :url "https://github.com/argolab/dyna3"
   :license {:name "LGPL-3.0-or-later WITH Classpath-exception"}
   :dependencies [[org.clojure/clojure "1.10.3"]
                  [org.clojure/tools.namespace "1.2.0"]
-                 [aprint "0.1.3"]
+                 [aprint "0.1.3"]  ;; for formatted printing
                  ;[clj-python/libpython-clj "2.00-beta-22"]
-                 [com.clojure-goes-fast/clj-java-decompiler "0.3.0"]
-                 [org.antlr/antlr4-runtime "4.7.2"]
-                 [org.jline/jline "3.20.0"]
+                 ;[com.clojure-goes-fast/clj-java-decompiler "0.3.0"] ;; for debugging what the generated code looks like
+                 [org.antlr/antlr4-runtime "4.7.2"] ;; for the front end parser
+                 [org.jline/jline "3.20.0"]  ;; for the front end repl
                  [robert/hooke "1.3.0"]
-                 [jise "0.1.0-SNAPSHOT"] ;; can get more control over the generated java classes
+                 ;[jise "0.1.0-SNAPSHOT"] ;; can get more control over the generated java classes
+                 ;[datalevin "0.6.6"]
                  ]
   :repl-options {:init-ns dyna.core}
   ;; :aot [dyna.interface

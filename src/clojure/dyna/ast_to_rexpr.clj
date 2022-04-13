@@ -752,10 +752,10 @@
 
 ;; this will be something that could be used by some user level operation
 ;; the program will have that the names of variables can be controlled
-(def-base-rexpr eval-from-ast-dmap [:var out-variable
-                                    :var ast
-                                    :var dyna-variable-name-mapping ;; this is like the above, but the map should instead be a dynaMap which means that it can be constructed by the user to set the "context" in which some ast would be evaluated in
-                                    :file-name source-file])
+;; (def-base-rexpr eval-from-ast-dmap [:var out-variable
+;;                                     :var ast
+;;                                     :var dyna-variable-name-mapping ;; this is like the above, but the map should instead be a dynaMap which means that it can be constructed by the user to set the "context" in which some ast would be evaluated in
+;;                                     :file-name source-file])
 
 
 

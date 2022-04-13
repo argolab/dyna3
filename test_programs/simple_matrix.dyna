@@ -15,7 +15,7 @@ transpose(A) = matrix {
 matrix(M) = {
     elem(X,Y) = M.elem(X,Y).
     transpose = transpose($self).
-    transpose2 = matrix { elem(X,Y) = Parent.elem(Y,X). } for Parent=$self.
+    transpose2 = matrix { elem(X,Y) = Owner.elem(Y,X). } for Owner=$self.
     add(Other) = add($self, Other).
     multiply(Other) = multiply($self,Other).
 
@@ -23,10 +23,16 @@ matrix(M) = {
     cols max= 0.
     rows max= X+1 for _ is $self.elem(X,_).
     cols max= Y+1 for _ is $self.elem(_,Y).
+
+    row(X) :- _ = $self.elem(X, _).
+    rows2 += 0.
+    rows2 += 1 for $self.row(X).
 }.
 
 zero_matrix(A,B) = matrix {
     elem(X: range(0, A), Y: range(0,B)) = 0.
+
+    %elem(X, Y) = 0 for range(0, A, X), range(0, B, Y).
 }.
 
 identity_matrix = matrix {
@@ -51,6 +57,7 @@ assert a.transpose2.elem(1,0) = 2.
 print "part 2".
 
 assert a.rows = 2.
+%assert a.rows2 = 2.
 
 print "part 3".
 

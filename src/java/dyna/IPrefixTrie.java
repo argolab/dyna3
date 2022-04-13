@@ -21,4 +21,18 @@ interface IPrefixTrie extends Associative {
     // only the selected keys updated
     IPrefixTrie update_map_subset(IPrefixTrie subset_selector, clojure.lang.IFn fn);
 
+    IPrefixTrie zip_tries(IPrefixTrie other);
+
+
+    IPrefixTrie assoc(Object key, Object val);
+
+    Object valAt(Object key);// { return valAt(key, null); }
+    Object valAt(Object key, Object notFound);
+
+    int count();// { throw RuntimeException("Not implemented"); }
+
+    IPrefixTrie cons(Object other);
+
+    boolean equiv(Object other);
+
 }

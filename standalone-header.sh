@@ -156,7 +156,7 @@ done
 jvm_args+="-Xmx$memory -Ddyna.print_rewrites_performed=$debug_mode -Ddyna.debug=$debug_mode -Ddyna.trace_rexpr_construction=$debug_mode"
 
 if [ -z "$dyna_args" ]; then
-   welcome_message
+    welcome_message
 fi
 
 

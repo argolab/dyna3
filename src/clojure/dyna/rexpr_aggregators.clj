@@ -66,7 +66,8 @@
              (if (not= a b)
                (throw (UnificationFailure. "The equals aggregator (=) requires only one contribution"))
                a))
-  :identity DynaTerm/null_term)
+  :identity DynaTerm/null_term
+  :many-items (fn [val mul] (throw (UnificationFailure. "The equals aggregator (=) requires only one contribution"))))
 
 ;; used if there are multiple aggregators on a single rule which need to get combined together
 ;; this will throw an exception if we attempt to combine multiple expressions together at once
@@ -107,7 +108,8 @@
                            (make-lessthan-eq (make-constant current-value) incoming-variable))
   :add-to-rexpr-result (fn [current-value result-variable]
                          (make-lessthan-eq (make-constant current-value) result-variable))
-  :rexpr-binary-op make-max)
+  :rexpr-binary-op make-max
+  :many-items (fn [val mul] val))
 
 
 (def-aggregator "min="
@@ -127,7 +129,8 @@
   ;; to eleminate branches
   :add-to-rexpr-result (fn [current-value result-variable]
                          (make-lessthan-eq result-variable (make-constant current-value)))
-  :rexpr-binary-op make-min)
+  :rexpr-binary-op make-min
+  :many-items (fn [val mul] val))
 
 
 (def-aggregator ":-"
@@ -136,7 +139,8 @@
   :combine-mult (fn [a b mult] (or a b))
   :saturate #(= true %)
   :add-to-out-rexpr (fn [current-value result-variable]  ;; want to force the result to be true
-                      (make-unify result-variable (make-constant true))))
+                      (make-unify result-variable (make-constant true)))
+  :many-items (fn [val mul] val))
 
 (comment
   ;; this aggregator is already going to have that the incoming variable is unified with the expression which corresponds with
@@ -192,7 +196,8 @@
                  (let [[la va] (.arguments ^DynaTerm x)]
                    (when (= va colon-identity-elem)
                      (throw (UnificationFailure. "$null on :=")))
-                   va)))
+                   va))
+  :many-items (fn [val mul] val))
 
 
                                         ; this should merge a map together.  This would not have which of the expressions would
