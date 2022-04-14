@@ -741,6 +741,16 @@ locals [ArrayList<Object> args]
       'from' name=primitive {
          $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create("import", DynaTerm.make_list($args), $name.v));
       }
+    | 'from' name=primitive
+      'import' {$args = new ArrayList<>();}
+        (m=methodId Comma  {$args.add($m.rterm);})*
+         m=methodId Comma? {$args.add($m.rterm);}
+      {
+         $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create("import", DynaTerm.make_list($args), $name.v));
+      }
+    | 'import' name=primitive {
+         $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create("import", $name.v));
+       }
     | a=atom p=compilerExpressionParams {$rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create_arr($a.t, $p.args));}
     | a=atom b=atom p=compilerExpressionParams {$rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create($a.t, DynaTerm.create_arr($b.t, $p.args)));}
     | a=atom m=methodId { $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create($a.t, $m.rterm)); }

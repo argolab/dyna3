@@ -276,22 +276,23 @@
                                            "import" (let [imported-filename (if (= (.arity arg1) 2)
                                                                               (get arg1 1)
                                                                               (get arg1 0))
-                                                          file (URL. source-file imported-filename)
-                                                          imported-names (if (= (.arity arg1) 2)
-                                                                          (.list_to_vec ^DynaTerm (get arg1 0))
-                                                                          ;; then this should lookup the exported terms
-                                                                          (get @system/user-exported-terms file))
-                                                          ]
+                                                          file (URL. source-file (if-not (.endsWith ^String imported-filename ".dyna")
+                                                                                   (str imported-filename ".dyna")
+                                                                                   imported-filename))]
                                                       (import-file-url file)
-                                                      (doseq [imported-term imported-names]
-                                                        (let [[name arity] imported-term]
-                                                          (update-user-term {:name name
-                                                                             :arity (int arity)
-                                                                             :source-file source-file}
-                                                                            (fn [o]
-                                                                              (assoc o :imported-from-another-file {:source-file file
-                                                                                                                    :name name
-                                                                                                                    :arity arity}))))))
+                                                      (let [imported-names (if (= (.arity arg1) 2)
+                                                                             (.list_to_vec ^DynaTerm (get arg1 0))
+                                                                             ;; then this should lookup the exported terms
+                                                                             (get @system/user-exported-terms file))]
+                                                        (doseq [imported-term imported-names]
+                                                          (match-term imported-term ("/" name arity)
+                                                                      (update-user-term {:name name
+                                                                                         :arity (int arity)
+                                                                                         :source-file source-file}
+                                                                                        (fn [o]
+                                                                                          (assoc o :imported-from-another-file {:source-file file
+                                                                                                                                :name name
+                                                                                                                                :arity arity})))))))
 
                                            ;; use like `:- export name/arity`.  we
                                            ;; will have a set of symbols which are
@@ -307,7 +308,8 @@
                                            "export" (match-term arg1 ("export" ("/" lname larity))
                                                                 (swap! system/user-exported-terms
                                                                        (fn [o]
-                                                                         (assoc o source-file (conj [lname (int larity)] (get o source-file #{}))))))
+                                                                         (assoc o source-file (conj (get o source-file #{})
+                                                                                                    (DynaTerm. "/" [lname larity]))))))
 
                                            ;; some of the arugments to a function should get escaped escaped, or quoted
                                            ;; used like `:- dispose foo(quote1,eval).`
@@ -811,7 +813,7 @@
           (println "===================================================================================================="))))
     (reportUnwantedToken [recognizer]
       (when print-parser-errors
-        (debug-repl)
+        ;(debug-repl)
         (println "=============> unwanted token")))
     ))
 

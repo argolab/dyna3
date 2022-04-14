@@ -1,0 +1,13 @@
+:- import foo/1,foo2/1 from "imported_file.dyna".
+:- from "imported_file" import baz/0, idr/0.
+
+
+:- import "imported_file2".  % the name auto_export/0 is listed as an exported term in this file
+
+assert foo(3) = 126.
+
+assert baz = 456.
+
+assert auto_export = "baz".
+
+assert (idr)(10) = 17.

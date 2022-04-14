@@ -1,0 +1,11 @@
+
+foo(X) += X.
+foo(X) += 123.
+
+foo2(X) = X*2.
+
+baz = 456.
+
+idr = &indirect_call_me.
+
+indirect_call_me(X) = X + 7.
