@@ -5,7 +5,10 @@
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.user-defined-terms :refer [def-user-term]])
   (:require [dyna.assumptions :refer [make-assumption]])
-  (:require [dyna.system :as system]))
+  (:require [dyna.system :as system])
+  (:require [dyna.rexpr-builtins :refer [def-builtin-rexpr]])
+  (:require [clojure.set :refer [subset?]])
+  (:import [dyna DynaTerm]))
 
 ;; R-exprs which represent construction of dynabases
 ;; dynabases are a prototype styled inheritiance system for dyna
@@ -51,6 +54,28 @@
                            (assert false))
                           (make-multiplicity 0)))]
     ret))
+
+(def-rewrite
+  :match (dynabase-constructor (:str name) (:variable-list args) (:any parent-dynabase) (:ground dynabase))
+  ;; then this is something that we can attempt to figure out what the arguments
+  ;; to the dynabase were the order in which something inherited from another
+  ;; dynabase should be tracked somehow?  This could end up in some case where
+  ;; it pulls arguments out which don't make much since?
+  (let [^Dynabase dbase (get-value dynabase)]
+    (if-not (and (instance? Dynabase dbase)
+                 (contains? (.access-map dbase) name))
+      (make-multiplicity 0)
+      (let [selfs (get (.access-map dbase) name)
+            self-val (first selfs)
+            new-map (if (> 1 (count selfs))
+                      (assoc (.access-map dbase) name
+                             (cdr selfs))
+                      (dissoc (.access-map dbase) name))]
+        (make-conjunct [(make-unify parent-dynabase (make-constant (if (empty? new-map)
+                                                                     DynaTerm/null_term
+                                                                     (Dynabase. new-map))))
+                        (make-conjunct (vec (map (fn [a b] (make-unify a (make-constant b)))
+                                                 args self-val)))])))))
 
 (def-rewrite
   :match (dynabase-access (:str name) (:ground dynabase) (:variable-list args))
@@ -141,7 +166,30 @@
             })
     name))
 
+(def-builtin-rexpr is-dynabase 2
+  (:allground (= v1 (instance? Dynabase v0)))
+  (v1 (instance? Dynabase v0)))
 
+(def-user-term "dynabase" 1 (make-is-dynabase v0 v1))
+
+(defn is-dynabase-subset [^Dynabase A ^Dynabase B]
+  ;; check that A is a subset of B
+  (let [am (.access-map A)
+        bm (.access-map B)]
+    (and (subset? (keys am) (keys bm))
+         (every? (fn [[k v]]
+                   (subset? v (get bm k)))
+                 am))))
+
+(def-builtin-rexpr is-dynabase-instance 3
+  (:allground (v2 (and (instance? Dynabase v0)
+                       (instance? Dynabase v1)
+                       (is-dynabase-subset v0 v1))))
+  (v2 (and (instance? Dynabase v0)
+           (instance? Dynabase v1)
+           (is-dynabase-subset v0 v1))))
+
+(def-user-term "instance" 2 (make-is-dynabase-instance v0 v1 v2))
 
 ;; if some variable is an instance of a dynabase.  This would be that the
 ;; dynabases are equal to each other, or the instance is a superset of the first

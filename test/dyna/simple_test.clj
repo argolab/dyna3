@@ -16,12 +16,13 @@
        (catch DynaUserAssert e
          (is (not= -1 (.indexOf (.toString e) "Assert "))))))
 
-(defmacro str-test [name str]
+(defmacro str-test [name test-str]
   `(deftest ~name
+     (println ~(str "Running test " name))
      (try
        (let [sstate# (make-new-dyna-system)]
          (run-under-system sstate#
-          (eval-string ~str))
+                           (eval-string ~test-str))
          (is true))
        (catch DynaUserAssert e#
          (is false (str (.toString e#) "\nREXPR: " (.assert_rexpr e#)))))))

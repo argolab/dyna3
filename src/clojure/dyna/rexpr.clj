@@ -861,7 +861,7 @@
 
 (swap! debug-useful-variables assoc
        'simplify (fn [] simplify)
-       'simplify-fast (fn [] simplify))
+       'simplify-fast (fn [] simplify-fast))
 
 
 (defn simplify-construct [rexpr]

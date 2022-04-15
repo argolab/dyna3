@@ -13,19 +13,25 @@ transpose(A) = matrix {
 
 matrix(M) = {
     elem(X,Y) = M.elem(X,Y).
-    transpose = transpose(Self).
-    add(Other) = add(Self, Other).
-    multiply(Other) = multiply(Self,Other).
+    transpose = transpose($self).
+    add(Other) = add($self, Other).
+    multiply(Other) = multiply($self,Other).
+
+    row(X) :- _ = elem(X, _).
+    col(Y) :- _ = elem(_, Y).
+    rows += 1 for row(_).
+    cols += 1 for col(_).
 }.
 
 zero_matrix(A,B) = matrix {
     elem(X: range(0, A), Y: range(0,B)) = 0.
 }.
 
-parameter_matrix(Name) = matrix {
-                             elem(X,Y) = $parameter(&matrix(Name,X,Y)).
-                         }.
+% parameter_matrix(Name) = matrix {
+%                              elem(X,Y) = $parameter(&matrix(Name,X,Y)).
+%                          }.
 
 :- export matrix/1.
 :- export zero_matrix/2.
-:- export parameter_matrix/1.
+%:- export parameter_matrix/1.
+x

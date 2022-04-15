@@ -16,5 +16,5 @@ public class UnificationFailure extends RuntimeException {
         }
     }
 
-    static final private boolean is_debugging = true;
+    static final private boolean is_debugging = "true".equals(System.getProperty("dyna.debug", "true"));
 }
