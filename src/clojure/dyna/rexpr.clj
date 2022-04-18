@@ -758,8 +758,16 @@
                          ;; if there is only a single value, then this does not need a conjunct.
                          ;; would be interesting if make-conjunct was a macro  Then it could check if there is anything that could
                          ;; match at the location of the code.  That would mean that
-                         `(make-conjunct [~@(for [[k v] (:assigns kw-args)]
-                                              `(make-unify ~k (make-constant ~v)))]))
+                         (if (map? (:assigns kw-args))
+                           `(make-conjunct [~@(for [[k v] (:assigns kw-args)]
+                                                `(make-unify ~k (make-constant ~v)))])
+                           `(let [map-val# ~(:assigns kw-args)]
+                              ;; there could be some check here that the thing returned a map, or that this is some function
+                              (make-conjunct (vec (for [[k# v#] map-val#]
+                                                    (make-unify k# (make-constant v#))))))))
+    (:check kw-args) `(if ~(:check kw-args)
+                        (make-multiplicity 1)
+                        (make-multiplicity 0))
     :else body))
 
 (defmacro def-rewrite [& args]
@@ -1315,7 +1323,7 @@
   :match (proj (:ground A) (:rexpr R))
   :run-at [:standard :construction]
   (if (is-constant? A) R
-      (remap-variables R {A (get-value A)})))
+      (remap-variables R {A (make-constant (get-value A))})))
 
 
 (def-rewrite

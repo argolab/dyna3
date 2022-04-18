@@ -556,6 +556,7 @@ expressionRoot returns [DynaTerm rterm]
        }
     | '`' '(' e=expression ')' { $rterm = DynaTerm.create("\$escaped", $e.rterm); }
     | '`' v=Variable { $rterm = DynaTerm.create("\$escaped", DynaTerm.create("\$variable", $v.getText())); }
+    | '*' { $rterm = DynaTerm.create("\$self_term_uid"); }
     ;
 
 

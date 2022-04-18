@@ -389,3 +389,14 @@ f([]) max= 123 arg 456.
 assert $arg(f([])) = 456.
 assert f([]) = 123.
 "))
+
+(str-test ref-self-term "
+f(X) = *.
+
+assert f(1) = f(1).
+")
+
+
+(str-test random-gen "
+print random.
+")

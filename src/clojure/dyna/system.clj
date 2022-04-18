@@ -1,4 +1,5 @@
-(ns dyna.system)
+(ns dyna.system
+  (:import [dyna DynaAgenda IDynaAgendaWork]))
 
 ;; variables which control how the system runs
 
@@ -41,30 +42,10 @@
 
 (def ^:dynamic imported-files (atom #{}))
 
-;; expressions after they have been rewritten or optimized to some degree
-;(def ^:dynamic optimized-user-defined-terms (atom {}))
-
-;; memo tables for the current state
-;(def ^:dynamic memoized-terms (atom {}))
-
 ;; the agenda of pending work.  When an assumption is invalidated, this will want to push the work onto this object
 ;; this should probably be a queue type rather than just a set, also some priority function will want to be constructed
 ;; for this also
-(def ^:dynamic work-agenda (atom #{})) ;; this should really be a priority quieue instead of just a set
-
-
-;; (declare get-priority)
-;; (def work-agenda2 {:contains-set (java.util.HashSet.)
-;;                    :contains-queue (java.util.PriorityQueue.
-;;                                     100
-;;                                     (reify java.util.Comparator
-;;                                       (compare ^int [this a b]
-;;                                         (let [pa (get-priority a)
-;;                                               pb (get-priority b)]
-;;                                           (cond (< pa pb) 1
-;;                                                 (> pa pb) -1
-;;                                                 :else 0)))))
-;;                    :lock (Object.)})
+(def ^:dynamic work-agenda (DynaAgenda.)) ;; this should really be a priority quieue instead of just a set
 
 ;; how many times a user-defined function can be expanded before we stop expanding
 (def ^:dynamic user-recursion-limit (atom default-recursion-limit))  ;; this does not need to really be an atom?  it can just hold the value directly
@@ -84,7 +65,7 @@
    :user-defined-terms (atom {})
    :user-exported-terms (atom {})
    :imported-files (atom #{})
-   :work-agenda (atom #{})
+   :work-agenda (DynaAgenda.)
    :user-recursion-limit (atom default-recursion-limit)
    :query-output println
    :system-is-inited (atom false)
@@ -105,29 +86,14 @@
          (reset! (:system-is-inited state#) true))
        ~@args)))
 
-
-;; the memozied expressions should be somehow embedded into the
-
-;; ;; this should first have that this is going to find which of the defined expression will be used for something
-;; (defn lookup-named-expression
-;;   ([name] (lookup-named-expression name :all))
-;;   ([name what]
-;;    (or (get memoized-expressions name)
-;;        (get optimized-user-defined-expressions name)
-;;        (get user-defined-expressions name)
-;;        (get system-defined-user-term name)))
-;;   )
-
-
-;; (defn add-user-atom [name arity rexpr]
-;;   ;; this is going to need to combine the aggregators together.  Which means that this is going to have to figure out where in the expression this should be combined into it
-;;   )
-
-
-;; (defn set-user-expression [name rexpr]
-;;   (swap! user-defined-expressions
-;;          (fn [prev]
-;;            (let [pv (get prev name)]
-;;              (if ()))
-;;            (assoc prev name rexpr)
-;;            )))
+(defn push-agenda-work [work]
+  (.push_work ^DynaAgenda work-agenda
+              (if (instance? IDynaAgendaWork work)
+                work
+                (reify IDynaAgendaWork
+                  (run [this] (work))
+                  ;; there should be some fixed priority configured for which
+                  ;; internal tasks run at.  Then some stuff could run before it
+                  ;; when it wants, but the internal stuff should probably be
+                  ;; let to run first?
+                  (priority [this] 1e16)))))

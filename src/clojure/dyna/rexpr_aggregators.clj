@@ -384,14 +384,15 @@
   :run-at :construction
   (make-aggregator operator2 result-variable incoming-variable2 true R2))
 
-(dyna-debug
-  (def-rewrite
-    :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:unchecked body-is-conjunctive)
-                       (conjunct (:rexpr-list Rs)))
-    :run-at :standard
-    (do
-      (debug-repl "agg conj dist")
-      nil)))
+(comment
+  (dyna-debug
+   (def-rewrite
+     :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:unchecked body-is-conjunctive)
+                        (conjunct (:rexpr-list Rs)))
+     :run-at :standard
+     (do
+       (debug-repl "agg conj dist")
+       nil))))
 
 
 ;; (comment

@@ -6,6 +6,7 @@
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
   (:require [dyna.user-defined-terms :refer [add-to-user-term update-user-term def-user-term get-user-term]])
+  (:require [dyna.memoization :refer [set-user-term-as-memoized]])
   (:require [clojure.set :refer [union intersection difference rename-keys]])
   (:require [clojure.string :refer [join]])
   (:require [clojure.java.io :refer [resource]])
@@ -178,7 +179,6 @@
     (case [(.name ^DynaTerm ast) (.arity ^DynaTerm ast)]
       ["$variable" 1] #{(get ast 0)}
       ["$constant" 1] #{}  ;; no variables in a constant
-      ;;["$quote" 1] #{}  ;; do not look through quote expressions, as those could be $variables that are just escaped
       ["$quote1" 1] (apply union (map find-all-variables (.arguments ^DynaTerm (get ast 0))))
       ["$dynabase_quote1" 2] (union (apply union (map find-all-variables (.arguments ^DynaTerm (get ast 1))))
                                     (find-all-variables (get ast 0)))
@@ -195,7 +195,6 @@
       ["$dynabase_create" 2] (find-term-variables (get ast 0))  ;; the first argument could reference a parent variable name
       ;;"$inline_aggregated_function" #{}  ;; do not look through an inline aggregator
       ["$inline_function" 3] #{}
-      ;;["$quote" 1] #{}
       ["$quote1" 1] (let [qs (get ast 0)
                           args (.arguments ^DynaTerm qs)
                           res (apply union (map find-term-variables args))]
@@ -215,20 +214,20 @@
 (def current-dir (-> (java.io.File. (System/getProperty "user.dir")) .toURI .toURL))
 (def current-dir-path (Paths/get (.toURI current-dir)))
 
-(defn convert-from-escaped-ast-to-ast [^DynaTerm ast]
+(defn convert-from-escaped-ast-to-ast [^DynaTerm ast source-file]
   (if-not (instance? DynaTerm ast)
-    (DynaTerm. "$constant" [ast])
+    (DynaTerm. "$constant" DynaTerm/null_term source-file [ast])
     (case [(.name ast) (.arity ast)]
       ["$escaped" 1] (get ast 0) ;; then this is hitting something that is "unescaped" so we do not have to keep this around
-      (let [arguments (doall (map convert-from-escaped-ast-to-ast (.arguments ast)))
+      (let [arguments (doall (map #(convert-from-escaped-ast-to-ast % source-file) (.arguments ast)))
             ;; the arguments are going to be wrapped in $quote if they are the same
             ;; so if all of the
             all-consts (every? true? (map #(and (= "$constant" (.name ^DynaTerm %))
                                                 (= 1 (.arity ^DynaTerm %)))
                                           arguments))]
         (if all-consts
-          (DynaTerm. "$constant" [(DynaTerm. (.name ast) (vec (map #(get % 0) arguments)))]) ;; if this does not have nested structure, then can optimize and just use a constant structure
-          (DynaTerm. "$quote1" [(DynaTerm. (.name ast) arguments)]))))))
+          (DynaTerm. "$constant" [(DynaTerm. (.name ast) DynaTerm/null_term source-file (vec (map #(get % 0) arguments)))]) ;; if this does not have nested structure, then can optimize and just use a constant structure
+          (DynaTerm. "$quote1" [(DynaTerm. (.name ast) DynaTerm/null_term source-file arguments)]))))))
 
 
 (defn convert-from-ast [^DynaTerm ast out-variable variable-name-mapping source-file]
@@ -316,12 +315,12 @@
                                            "dispose" (let [^DynaTerm disp-term (get arg1 0)
                                                            disp-arg-map (vec (map #({"*" "$eval"
                                                                                      "&" "$quote1"
-                                                                                     "&&" "$quote"
+                                                                                     "&&" "$constant"
                                                                                      "eval" "$eval"
                                                                                      "quote1" "$quote1"
-                                                                                     "quote" "$quote"
+                                                                                     "quote" "$constant"
                                                                                      (DynaTerm. "quote1" []) "$quote1"
-                                                                                     (DynaTerm. "quote" []) "$quote"
+                                                                                     (DynaTerm. "quote" []) "$constant"
                                                                                      (DynaTerm. "eval" []) "$eval"} % "$eval")
                                                                                   (.arguments disp-term)))]
                                                        (update-user-term {:name (.name disp-term)
@@ -368,7 +367,7 @@
                                                                      (let [call-name {:name name
                                                                                       :arity arity
                                                                                       :source-file source-file}]
-                                                                       ;(set-user-term-as-memoized call-name :unk)
+                                                                       (set-user-term-as-memoized call-name :unk)
 
                                                                        (debug-repl))
                                                                      (???))
@@ -376,7 +375,7 @@
                                                                       (let [call-name {:name name
                                                                                        :arity arity
                                                                                        :source-file source-file}]
-                                                                        ;(set-user-term-as-memoized call-ast :null)
+                                                                        (set-user-term-as-memoized call-name :null)
                                                                         (debug-repl))
                                                                       (???))
 
@@ -429,7 +428,9 @@
                                                 incoming-variable (make-variable (str (gensym "$incoming_variable_")))
                                                 body-rexpr (convert-from-ast body
                                                                              incoming-variable
-                                                                             (merge project-variables-map
+                                                                             (merge {"$functor_name" (make-constant functor-name)
+                                                                                     "$functor_arity" (make-constant functor-arity)}
+                                                                                    project-variables-map
                                                                                     argument-variables)
                                                                              source-file)
                                                 rexpr (make-no-simp-aggregator aggregator
@@ -503,7 +504,7 @@
             ;;                (make-unify out-variable (make-constant quoted-structure)))
 
             ["$escaped" 1] (let [[escaped-expression] (.arguments ast)
-                                 basic-ast (convert-from-escaped-ast-to-ast escaped-expression)]
+                                 basic-ast (convert-from-escaped-ast-to-ast escaped-expression source-file)]
                              (convert-from-ast basic-ast out-variable variable-name-mapping source-file))
 
             ["$dynabase_quote1" 2] (let [[dynabase ^DynaTerm quoted-structure] (.arguments ast)
@@ -596,6 +597,20 @@
                           ;; $self looks like an atom, but it is actually a variable that is getting remapped..
                           ;; this could probably also be done using a macro in the prelude, but I don't want to have dynabases be dependent on the prelude loading
                           (make-unify out-variable svar))
+
+            ;; this is only taking the "named" variables, so something that is "returned" is not included.  I suppose that should be ok?
+            ;; the return variables are also going
+            ["$self_term_uid" 0] (let [tkeys (sort (keys variable-name-mapping))
+                                       tvals (conj (vec (map #(get variable-name-mapping %) tkeys))
+                                                   (make-constant source-file))]
+                                   ;; this should capture all of the variable names.  This would be used by random or something
+                                   ;; if there was random(0,1), I suppose that could just be a macro which expands into something which will also
+                                   ;; reference this variable
+                                   (make-unify-structure out-variable
+                                                         source-file
+                                                         (make-constant DynaTerm/null_term) ;; no dynabase
+                                                         "$term_ref"
+                                                         tvals))
 
             ;; the assert can run inline, so it will check some statement before everything has been parsed
             ;; this will make writing tests for something easy
@@ -727,6 +742,8 @@
                              }
                   user-term (get-user-term call-name) ;; this can return a user or system term
                   is-macro (:is-macro user-term false)
+                  zzz (when (= (:name call-name) "local_random")
+                        (debug-repl))
                   dispose-arguments (:dispose-arguments user-term)
                   call-vals (doall (if is-macro
                                      (map make-constant (.arguments ast))

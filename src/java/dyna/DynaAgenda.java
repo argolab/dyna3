@@ -2,7 +2,7 @@ package dyna;
 
 import java.util.PriorityQueue;
 
-class DynaAgenda {
+public class DynaAgenda {
 
     private final PriorityQueue<IDynaAgendaWork> queue = new PriorityQueue<>(100, IDynaAgendaWork.comparator);
     private long work_processed = 0;

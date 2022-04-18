@@ -1,10 +1,15 @@
 (ns dyna.assumptions
   (:require [dyna.system :as system])
   (:require [dyna.utils :refer :all])
-  (:import [java.util WeakHashMap]))
+  (:import [java.util WeakHashMap])
+  (:import [dyna InvalidAssumption IDynaAgendaWork]))
 
 ;; any assumption which the current expression depends
 (def ^:dynamic *current-watcher*)
+(def ^:dynamic *fast-fail-on-invalid-assumption* false)
+
+(declare depend-on-assumption
+         make-assumption)
 
 (defprotocol Watcher
   (notify-invalidated! [this watching])
@@ -30,7 +35,9 @@
     (locking watchers
       (if (is-valid? this)
         (.put watchers watcher nil)
-        (notify-invalidated! watcher this))))
+        (do (notify-invalidated! watcher this)
+            (when *fast-fail-on-invalid-assumption*
+              (throw (InvalidAssumption. "invlaid assumption")))))))
 
   (send-message! [this message]
     (locking watchers (doseq [w (.keySet watchers)]
@@ -41,12 +48,48 @@
   (notify-message! [this from-watcher message] (???))
 
   Object
-  (toString [this] (str "[Assumption isvalid=" (is-valid? this) " watchers=" (locking (str (.keySet watchers))) "]")))
+  (toString [this] (str "[Assumption isvalid=" (is-valid? this) " watchers=" (let [w watchers]
+                                                                               (if-not (nil? w)
+                                                                                 (locking w (str (.keySet w))))) "]")))
 
+(defn add-watcher-function! [assumption func]
+  (add-watch assumption (reify Watcher
+                          (notify-message! [this assumpt message] (func message))
+                          (notify-invalidated! [this assumpt] (func nil)))))
+
+(defprotocol Modifable-value
+  (set-value! [this value])
+  (set-recompute-function! [this func]))
 
 (deftype reactive-value
-  [assumption
-   value])
+    [value
+     ^:unsynchronized-mutable recompute-function]
+  clojure.lang.IDeref
+  (deref [this] (let [[assumption v] @value]
+              (depend-on-assumption assumption)
+              v))
+
+  Modifable-value
+  (set-value! [this v]
+    (let [[[old-assumpt _] _] (swap-vals! value (fn [old] [(make-assumption)
+                                                           v]))]
+      (invalidate! old-assumpt)))
+  (set-recompute-function! [this function]
+    (set! recompute-function function)
+    (???))
+
+  Watcher
+  (notify-invalidated! [this watching]
+    (let [rcf recompute-function]
+      (if (nil? rcf)
+        ;; then there is no way to recompute
+        (set-value! this nil)
+        (system/push-agenda-work (fn []
+                                   (???)))
+        )))
+  (notify-message! [this watching message]
+    ;; just invalidate and force a clean recompute for now.
+    (notify-invalidated! this watching)))
 
 
 (defmethod print-method assumption [^assumption this ^java.io.Writer w]
@@ -57,9 +100,13 @@
                (atom true)                                  ; if this is still valid, this is atomic
                ))
 
+(defn make-invalid-assumption []
+  (assumption. nil (atom false)))
+
 (defn make-reactive-value [initial-value]
-  (reactive-value. (make-assumption)
-                   (atom initial-value)))
+  (reactive-value. (atom [(make-assumption)
+                          initial-value])
+                   (fn [] nil)))
 
 (defn depend-on-assumption [assumption & {:keys [hard] :or {hard true}}]
   ;; in this case, we are stating that the current computation would need to get

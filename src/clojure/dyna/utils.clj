@@ -277,7 +277,7 @@
 (defn dyna-warning [msg]
   (let [shown-count (get @warnings-shown-so-far msg 0)]
     (when (< shown-count 3)
-      (swap! warnings-shown-so-far update msg inc)
+      (swap! warnings-shown-so-far update msg (fnil inc 0))
       (println "=============================================")
       (println "WARNING" msg)
       (println "============================================="))))

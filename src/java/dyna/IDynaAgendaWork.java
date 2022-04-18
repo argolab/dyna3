@@ -2,7 +2,7 @@ package dyna;
 
 import java.util.Comparator;
 
-interface IDynaAgendaWork extends Runnable {
+public interface IDynaAgendaWork extends Runnable {
 
     public void run();
 

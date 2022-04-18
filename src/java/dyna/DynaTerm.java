@@ -89,7 +89,7 @@ public final class DynaTerm implements ILookup {
                 // .get does not work with a list
                 h = h * 31 + ((java.lang.Number)clojure_hash.invoke(clojure_nth.invoke(arguments, i))).intValue();
             }
-            hashcode_cache = h;
+            hashcode_cache = hash_scramble(h);
         }
         return hashcode_cache;
     }
@@ -202,5 +202,20 @@ public final class DynaTerm implements ILookup {
         }
         // vec is going to alias java arrays?  So this should just keep a reference to the above array rather than copying it?
         return clojure_vec.invoke(tmp);
+    }
+
+    private static int hash_scramble(int h) {
+        // based off murmer 3 finalizer
+        h *= 0xcc9e2d51;
+        h = (h << 15) | (h >> 17);
+        h *= 0x1b873593;
+
+        h ^= h >> 16;
+        h *= 0x85ebca6b;
+        h ^= h >> 13;
+        h *= 0xc2b2ae35;
+        h ^= h >> 16;
+
+        return h;
     }
 }

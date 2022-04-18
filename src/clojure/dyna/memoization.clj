@@ -2,7 +2,8 @@
   (:require [dyna.utils :refer :all])
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.base-protocols :refer :all])
-  (:import  [dyna.base_protocols MemoizationContainer]))
+  (:import  [dyna.base_protocols MemoizationContainer])
+  (:require [dyna.user-defined-terms :refer [update-user-term]]))
 
 ;; this is going to have to have some way in which the expression can be updated
 ;; in the case that the assumption is updated, then it would have that there are
@@ -49,5 +50,14 @@
     (debug-repl "matching against a memoized expression")))
 
 
-(defn set-user-term-as-memoized [term-name]
-  ())
+
+;; there should be something that is more "flexible" for setting something as memoized
+;; but this is going
+(defn set-user-term-as-memoized [term-name mode]
+  (assert (contains? #{:unk :null :none} mode))
+  (update-user-term term-name
+                    (fn [dat]
+                      ;; this is going to need create the memo table and set up the assumptions that this is the result
+                      ;; if there is something that is memoized, then this should
+                      (debug-repl)
+                      )))

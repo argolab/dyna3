@@ -55,8 +55,8 @@
              :assignment-computes-expression (quote ~(cdar body)) ;; the code which is going to do the computation
              ])
 
-
-
+       ;; because of the let-expression, it is a little hard to pull apart the map value that is going to be returned
+       ;; how efficient is it going to be about destructuring the representation
      (let ~(vec (apply concat
                        (for [v required-ground]
                          `[~v (get-value ~(symbol (str "g" v)))])))
@@ -449,16 +449,22 @@
 ;; there is no way to define a range with 3 arguments, as it would use the same name here
 ;; that would have to be represented with whatever is some named mapped from a symbol to what is being created
 
+(def random-seed (Integer/valueOf (System/getProperty "dyna.random_seed" (str (rand-int 10000000)))))
 
 (defn generate-random [x]
-  ;; this should map to a uniform float between 0-1.  Which will mean that this finds
-  (.hashCode ^Object x))
+  ;; this will generate a random int32 value
+  ;; not sure if the random seed should be improved in how it gets included
+  (let [h (.hashCode ^Object x)]
+    (unchecked-add-int
+     (unchecked-multiply-int h random-seed)
+     (bit-xor h random-seed))))
 
 (def-builtin-rexpr random 2
   (:allground (= v1 (generate-random v0)))
   (v1 (generate-random v0)))
 
-(def-user-term "random" 1 (make-random v0 v1))
+(def-user-term "builtin_random_int32" 1 (make-random v0 v1))
+
 
 
 ;; this will cast to a string as well as concat strings together.

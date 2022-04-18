@@ -4,7 +4,7 @@
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
-  (:require [dyna.assumptions :refer [invalidate! make-assumption depend-on-assumption]])
+  (:require [dyna.assumptions :refer [invalidate! make-assumption make-invalid-assumption depend-on-assumption]])
   (:require [clojure.set :refer [subset? union]])
   (:import [dyna.rexpr user-call-rexpr]))
 
@@ -27,8 +27,17 @@
 
 (defn empty-user-defined-term [name]
   {:def-assumption (make-assumption) ;; the assumption for the definition
-   :optimized-assumption (make-assumption) ;; the assumption that there is no more optimized version of this term
-   :memoized-assumption (make-assumption) ;; if there is some changed to the memoized value for this term
+   :optimized-rexpr-assumption (make-invalid-assumption) ;; if the optimized R-expr changes, this assumption needs to be invalidated
+
+   :is-not-memoized-null (make-assumption) ;; if there is a memo table which _must_ be read, then this assumption should be made invalid
+   :is-memoized-null (make-invalid-assumption)
+
+   :is-memoized-unk (make-invalid-assumption)
+
+   :memoization-mode :none  ;; should either be :none, :null or :unk depending
+
+   ;:optimized-assumption (make-assumption) ;; the assumption that there is no more optimized version of this term
+   ;:memoized-assumption (make-assumption) ;; if there is some changed to the memoized value for this term
 
    ;; if there are macros, then those are going to want to reference the files that they are coming from then I suppoes
    ;; this can check the from_file information on any term which is created I suppose
@@ -40,7 +49,12 @@
 
    :rexprs () ;; R-exprs which have to get merged to gether to represent this term
 
-   :dynabases #{} ;; a set of which dynabases appear on this term.  We might be able to use this to perform some kind of type inference between expressions
+   :optimized-rexpr nil ;; the R-exprs already combined together and "simplified" (optimized) such that
+
+   :memoized-rexpr nil ;; if the term is memoized, then this should be the correponding structure
+
+   :dynabases #{} ;; a set of dynabases that appear on this term.  We might be able to use this to perform some kind of type inference between expressions
+
 
    ;; if this is imported from somewhere else, then this is the entire name of that other declared object
    ;; this will then have to recurse in finding the other thing
@@ -100,19 +114,23 @@
       ;; invalidate after the swap so that if something goes to the object, it will find the new value already in place
       (if assumpt (invalidate! assumpt)))))
 
-
 (defn get-user-term [name]
-  (let [sys (get @system/system-defined-user-term [(:name name) (:arity name)])]
+  (let [sys-name [(:name name) (:arity name)]
+        sys (get @system/system-defined-user-term sys-name)]
     (if-not (nil? sys)
       {:builtin-def true
        :rexpr sys}
-      (let [u (get @system/user-defined-terms name)
-            another-file (:imported-from-another-file u)]
-        (if another-file
-          (recur another-file)
-          u)))))
+      (let [gterm (get @system/globally-defined-user-term sys-name)]
+        (if (and (not (nil? gterm)) (not= (:name gterm) name))
+          (do ;(debug-repl)
+            (recur (:name gterm)))
+          (let [u (get @system/user-defined-terms name)
+                another-file (:imported-from-another-file u)]
+            (if another-file
+              (recur another-file)
+              u)))))))
 
-(defn- combine-user-rexprs [term-bodies]
+(defn- combine-user-rexprs-bodies [term-bodies]
   ;; this will combine multiple rexprs from a uesr's definition together
   ;; this should
   (context/bind-no-context ;; this is something that should be the same regardless of whatever nested context we are in
@@ -152,6 +170,23 @@
                       (map #(remap-variables-handle-hidden % {(first out-vars) intermediate-var}) (vals groupped-aggs))))
          (first (vals groupped-aggs)))))))
 
+(defn user-rexpr-combined-no-memo [term-rep]
+  ;; this should check if there is some
+  )
+
+(defn user-rexpr-combined [term-rep]
+  (if (:builtin-def term-rep)
+    (:rexpr term-rep)
+    (case (:memoization-mode term-rep)
+      :none (do
+              (depend-on-assumption (:is-not-memoized-null term-rep))
+              (user-rexpr-combined-no-memo term-rep))
+      :unk (do
+             (depend-on-assumption (:is-memoized-unk term-rep))
+             (:memoized-rexpr term-rep))
+      :null (do
+              (depend-on-assumption (:is-memoized-null term-rep))
+              (:memoized-rexpr term-rep)))))
 
 (def-rewrite
   :match (user-call (:unchecked name) (:unchecked var-map) (#(< % @system/user-recursion-limit) call-depth) (:unchecked parent-call-arguments))
@@ -162,7 +197,7 @@
 
     (when ut  ;; this should really be a warning or something in the case that it can't be found. Though we might also need to create some assumption that nothing is defined...
       (let [rexprs (:rexprs ut)
-            rexpr (combine-user-rexprs rexprs)
+            rexpr (combine-user-rexprs-bodies rexprs)
             rewrite-user-call-depth (fn rucd [rexpr]
                                       (dyna-assert (rexpr? rexpr))
                                       (if (is-user-call? rexpr)
@@ -176,20 +211,6 @@
                                         (let [ret (rewrite-rexpr-children rexpr rucd)]
                                           (when-not (rexpr? ret) (debug-repl "call fail rexpr"))
                                           ret)))
-            ;; all-variables (get-all-variables-rec rexpr)
-            ;; var-map-all (merge
-            ;;              (into {} (remove nil? (for [k all-variables]
-            ;;                                      (when-not (contains? k var-map)
-            ;;                                        ;; these remapped variables could just be a unique object, where the object
-            ;;                                        ;; would use its hascode and define equals as the identity.
-            ;;                                        ;; but that would prevent it from creating a representation for the variable that could be used later
-            ;;                                        ;; so maybe keeping this something that can be represented as clojure code is better
-            ;;                                        [k (make-variable (gensym 'remaped-var))]))))
-            ;;              var-map)
-            ;; variable-map-rr-old (context/bind-no-context
-            ;;                  (remap-variables
-            ;;                   (rewrite-user-call-depth rexpr)
-            ;;                   var-map-all))
             variable-map-rr (context/bind-no-context
                              (remap-variables-handle-hidden (rewrite-user-call-depth rexpr)
                                                             var-map))]

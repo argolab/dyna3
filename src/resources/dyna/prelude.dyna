@@ -36,3 +36,24 @@ list_length(X) = list_length_rec(X, R), R.
 list_length(X, R) :- list_length_rec(X, R).
 :- make_system_term list_length/1.
 :- make_system_term list_length/2.
+
+
+:- export random/3.
+:- export random/1.
+:- export random/0.
+random(Key, Lower, Upper) = (builtin_random_int32(Key) + 2147483648) / 4294967296.0 * (Upper - Lower) + Lower.
+random(Key) = random(Key, 0, 1).
+
+:- macro random/0.
+random = `(random(*)).
+
+:- make_system_term random/0.
+:- make_system_term random/1.
+:- make_system_term random/3.
+
+$null = &$null.
+:- make_system_term $null/0.
+
+
+:- macro is_defined/1.
+is_defined(X) = `((|= false ; true for _ is `X)).
