@@ -12,6 +12,7 @@
                  [robert/hooke "1.3.0"]
                  ;[jise "0.1.0-SNAPSHOT"] ;; can get more control over the generated java classes
                  ;[datalevin "0.6.6"]
+                 [org.clojure/tools.analyzer.jvm "0.7.3"]
                  ]
   :repl-options {:init-ns dyna.core}
   ;; :aot [dyna.interface
@@ -22,14 +23,16 @@
   :java-source-paths ["target/gen-src" "src/java"]
   :resource-paths ["src/resources"]
   :test-paths ["test"]
-  ;;:profiles {:uberjar {:aot :all}}
+  ;:profiles {:uberjar {:aot :all}}
   ;;:profiles {:uberjar {:aot [dyna.rexpr]}}
   :plugins [[lein-antlr-plugin "0.1.0"]
             [me.shalakapatil/retest-failures "0.1.0-SNAPSHOT" :hooks false]]
   :antlr-src-dir "src/antlr"
   :antlr-dest-dir "target/gen-src"
 
-  :profiles {:uberjar {:main dyna.DynaMain}}
+  :profiles {:uberjar {:main dyna.DynaMain
+                       ;:aot [dyna.core] ;; this makes it start faster but run slower....
+                       }}
   :main dyna.core
 
   ;; this is needed to generate the uberjar, but it makes it slower to run when working on stuff

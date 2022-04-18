@@ -742,8 +742,6 @@
                              }
                   user-term (get-user-term call-name) ;; this can return a user or system term
                   is-macro (:is-macro user-term false)
-                  zzz (when (= (:name call-name) "local_random")
-                        (debug-repl))
                   dispose-arguments (:dispose-arguments user-term)
                   call-vals (doall (if is-macro
                                      (map make-constant (.arguments ast))
@@ -926,6 +924,7 @@
             (when-not (= result (make-multiplicity 1))
               (println (str "failed to load file " url))
               (aprint result)
+              ;(debug-repl "failed to load properly")
               (assert false))))))))
 
 

@@ -15,6 +15,9 @@
 (def debug-statements
   (= "true" (System/getProperty "dyna.debug" "true")))
 
+(def status-counters
+  (= "true" (System/getProperty "dyna.status_counters" "true")))
+
 (def default-recursion-limit
   (Integer/valueOf (System/getProperty "dyna.recursion_limit" "20")))
 

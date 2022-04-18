@@ -55,5 +55,9 @@ $null = &$null.
 :- make_system_term $null/0.
 
 
+% this is the ?(foo(X)) operator right now.  But there is no support for that in the parser atm
+% not sure if `?` should be given such a privalaged value
 :- macro is_defined/1.
 is_defined(X) = `((|= false ; true for _ is `X)).
+
+:- make_system_term is_defined/1.

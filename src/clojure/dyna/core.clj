@@ -4,6 +4,7 @@
   (:require [clj-java-decompiler.core :refer [decompile]])
   (:require [clojure.java.io :refer [resource file]])
 
+  (:require [dyna.system :as system])
   (:require [dyna.utils :refer :all])
   (:require [dyna.rexpr])
   (:require [dyna.rexpr-constructors :refer :all])
@@ -19,7 +20,7 @@
                                        eval-string
                                        eval-ast]])
   (:require [dyna.repl :refer [repl]])
-  (:import [dyna DynaTerm]))
+  (:import [dyna DynaTerm StatusCounters]))
 
 
 (defn init-system []
@@ -83,14 +84,22 @@
           (let [arg-list (DynaTerm/make_list args)]
             ;; define $args = ["arg1", "arg2", ..., "argN"]
             (eval-ast (make-term ("$define_term" ("$args") DynaTerm/null_term "=" ("$constant" arg-list))))
+            (when system/status-counters
+              (StatusCounters/program_start))
             (import-file-url (.toURL run-filef))
             ;; TODO: this needs to handle the csv export functions
+            (when system/status-counters
+              (StatusCounters/print_counters))
             (System/exit 0)))
         (do
           ;; then there are no arguments, so just start the repl
           (repl)
+
           ;; TODO: is there some exception that can be caught in the case that the repl is getting quit, in which case, we should run the
           ;; csv save file operations at that point?
+
+          (if system/status-counters
+            (StatusCounters/print_counters))
           ))))
 
   ;(println "End of main function for dyna")

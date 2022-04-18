@@ -8,7 +8,7 @@
 ;; being able to evaluate an expression
 
 
-(def generate-parser [Grammar Result]
+(defn generate-parser [Grammar Result]
   ;; this can return an R-expr which corresponds with what the computation is represented as
   (make-unify Result (make-constant true))
   )

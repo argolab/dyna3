@@ -8,15 +8,14 @@
   (:require [clojure.set :refer [union difference subset?]])
   (:require [clojure.string :refer [trim]])
   (:require [aprint.core :refer [aprint]])
-  (:import (dyna UnificationFailure))
-  (:import (dyna DynaTerm)))
+  (:import [dyna UnificationFailure DynaTerm StatusCounters]))
 
 (defn simplify-identity [a b] a)
 
 (declare simplify
          simplify-inference
          simplify-fast)
-(def simplify-construct identity)
+(def ^{:redef true} simplify-construct identity) ;; should get rid of this and have the constructors just called directly based off the type of object which is created
 (declare find-iterators)
 
 
@@ -77,6 +76,10 @@
        (intern 'dyna.rexpr-constructors '~(symbol (str "simplify-" name)) simplify-identity)
        (intern 'dyna.rexpr-constructors '~(symbol (str "simplify-construct-" name)) simplify-identity)
        (intern 'dyna.rexpr-constructors '~(symbol (str "simplify-inference-" name)) simplify-identity)
+
+       (alter-meta! (var ~(symbol "dyna.rexpr-constructors" (str "simplify-" name))) assoc :redef true)
+       (alter-meta! (var ~(symbol "dyna.rexpr-constructors" (str "simplify-construct-" name))) assoc :redef true)
+       (alter-meta! (var ~(symbol "dyna.rexpr-constructors" (str "simplify-inference-" name))) assoc :redef true)
 
        (deftype-with-overrides ~(symbol rname) ~(vec (concat (quote [^int cached-hash-code ^:unsynchronized-mutable cached-exposed-variables])
                                                              (if system/track-where-rexpr-constructed (quote [traceback-to-construction traceback-to-rexpr]))
@@ -283,6 +286,7 @@
                              (do (.printStackTrace (Throwable. (str "Argument value check failed: " ~(car x) ~(cdar x))) System/err)
                                  (debug-repl ~(str "check argument " (car x)))
                                  (assert false)))) vargroup))
+         ~(if system/status-counters `(StatusCounters/rexpr_created))
          (~(symbol (str rname "."))
           ;; this hash implementation needs to match the one below....
           (unchecked-int ~(reduce (fn [a b] `(unchecked-add-int ~a ~b))
@@ -302,7 +306,7 @@
             (map (fn [x] `(if (not (~(resolve (symbol (str "check-argument-" (symbol (car x))))) ~(cdar x)))
                             (do (debug-repl ~(str "check argument " (car x)))
                                 (assert false)))) vargroup))
-
+         ~(if system/status-counters `(StatusCounters/rexpr_created))
          (simplify-construct (~(symbol (str rname "."))
                               ;; this might do the computation as a big value, would be nice if this could be forced to use a small int value
                               ;; I suppose that we could write this in java and call out to some static function if that really became necessary
@@ -729,7 +733,11 @@
   (car (if (map? matcher) (:rexpr matcher) matcher)))
 
 (defmacro match-rexpr [source-variable matcher & body]
-  (match-rexpr-fn source-variable matcher `(do ~@body)))
+  `(do ~(if system/status-counters `(StatusCounters/match_attempt))
+       ~(match-rexpr-fn source-variable matcher
+                        `(do
+                           ~(when system/status-counters `(StatusCounters/match_sucessful))
+                           ~@body))))
 
 (defn- make-rewriter-function [matcher body from-file]
   ;; this needs to go through and define something where the different functions
@@ -741,6 +749,9 @@
                            ~(when system/print-rewrites-performed
                               `(when (and (not (nil? ~res)) (not= ~res ~'rexpr))
                                  (print ~(str "Performed rewrite:"  (meta from-file) "\nOLD: ") ~'rexpr "NEW: " ~res "CONTEXT:" (context/get-context))))
+                           ~(when system/status-counters
+                              `(when (and (not (nil? ~res)) (not= ~res ~'rexpr))
+                                 (StatusCounters/rewrite_performed)))
                            ~res)]
     `(fn (~'[rexpr simplify]
           (match-rexpr ~'rexpr ~matcher ~do-rewrite-body)))))
