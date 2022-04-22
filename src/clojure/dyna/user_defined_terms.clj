@@ -54,7 +54,7 @@
    :memoized-rexpr nil ;; if the term is memoized, then this should be the correponding structure
 
    :dynabases #{} ;; a set of dynabases that appear on this term.  We might be able to use this to perform some kind of type inference between expressions
-
+   :dynabases-assumptions (make-assumption)
 
    ;; if this is imported from somewhere else, then this is the entire name of that other declared object
    ;; this will then have to recurse in finding the other thing
@@ -71,9 +71,11 @@
 
 
 (defn update-user-term [name function]
-  (swap! system/user-defined-terms (fn [old]
-                                     (let [v (get old name nil)]
-                                       (assoc old name (function (if-not (nil? v) v (empty-user-defined-term name))))))))
+  (let [[old new](swap-vals! system/user-defined-terms
+                             (fn [old]
+                               (let [v (get old name nil)]
+                                 (assoc old name (function (if-not (nil? v) v (empty-user-defined-term name)))))))]
+    [(get old name) (get new name)]))
 
 (defn add-to-user-term [source-file dynabase name arity rexpr]
   (let [object-name (merge {:name name
@@ -107,12 +109,17 @@
                                                                       :rexprs (conj (:rexprs v) value)
                                                                       :def-assumption (make-assumption))))
                                                         nv2 (if (not (dnil? dynabase))
-                                                              (assoc nv :dynabases (conj (:dynabases nv #{}) dynabase))
+                                                              (assoc nv
+                                                                     :dynabases (conj (:dynabases nv #{}) dynabase)
+                                                                     :dynabases-assumptions (make-assumption))
                                                               nv)]
                                                     (assoc old object-name nv2))))
-          assumpt (get-in old-defs [object-name :def-assumption])]
+          assumpt (get-in old-defs [object-name :def-assumption])
+          assumpt-db (get-in old-defs [object-name :dynabases-assumptions])]
       ;; invalidate after the swap so that if something goes to the object, it will find the new value already in place
-      (if assumpt (invalidate! assumpt)))))
+      (if assumpt (invalidate! assumpt))
+      (if (and (not (nil? assumpt-db)) (not (identical? assumpt-db (get-in new-defs [object-name :dynabases-assumptions]))))
+        (invalidate! assumpt-db)))))
 
 (defn get-user-term [name]
   (let [sys-name [(:name name) (:arity name)]
@@ -161,6 +168,7 @@
                                             new-children (for [c children]
                                                            (strip-agg new-in c))]
                                         [op (make-aggs op (first out-vars) new-in new-children)]))))]
+       (assert (= 1 (count out-vars))) ;; the out var should have the same name as we have standarized the names of the arguments
 
        ;; if there is more than 1 group, then that means there are multiple aggregators, in which case we are going to have to have "two levels" of
        ;; aggregation created as a result.  This will
@@ -171,8 +179,9 @@
          (first (vals groupped-aggs)))))))
 
 (defn user-rexpr-combined-no-memo [term-rep]
-  ;; this should check if there is some
-  )
+  ;; this should check if there is some optimized
+  (assert (nil? (:optimized-rexpr term-rep)))
+  (combine-user-rexprs-bodies (:rexprs term-rep)))
 
 (defn user-rexpr-combined [term-rep]
   (if (:builtin-def term-rep)
@@ -220,3 +229,20 @@
                       (when-not (subset? exp-var (set (vals var-map)))
                         (debug-repl "should not happen, extra exposed variables"))))
         variable-map-rr))))
+
+
+;; get a user defined function and turn it into something which can be called
+;; not 100% sure that this should be included in this file.  Should maybe also
+;; allow for there to be a textual representation that can be called into.  But
+;; that is going to have to go through the parser first.
+(defn get-user-defined-function [term-name arity]
+  (fn [& args]
+    (assert (= arity (count args)))
+    (let [result-var (make-variable 'Result)
+          rexpr (make-user-call term-name (merge (into {} (for [[k v] (zipmap (range) args)]
+                                                            [(make-variable (str "$" k)) (make-constant v)]))
+                                                 {(make-variable (str "$" arity)) result-var}))
+          ctx (context/make-empty-context rexpr)
+          result-rexpr (context/bind-context-raw ctx (simplify-fully rexpr))]
+      (assert (= (make-multiplicity 1) (result-rexpr)))
+      (ctx-get-value ctx result-var))))

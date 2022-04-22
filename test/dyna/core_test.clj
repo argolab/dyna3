@@ -5,7 +5,7 @@
             [dyna.rexpr :refer :all]
             [dyna.context :as context]
             [dyna.rexpr-builtins :refer :all]
-            [dyna.utils :refer [debug-repl make-term match-term]]))
+            [dyna.utils :refer [debug-repl make-term match-term defsimpleinterface]]))
 
 
 (deftest basic-rexpr
@@ -114,4 +114,23 @@
                  (swap! cnt inc)
                  (assert (= avar (make-variable 'a))))
 
-    (assert (= @cnt 1))))
+    (is (= @cnt 1))))
+
+
+(defsimpleinterface my-simple-interface
+  (my-simple-interface-fn1 [a b c])
+  (my-simple-interface-fn2 [a d]))
+
+(deftype my-simple-type [v]
+    my-simple-interface
+  (my-simple-interface-fn1 [this a b c]
+    (+ a (* b 5) (* c 7)))
+  (my-simple-interface-fn2 [this a d]
+    (+ a (* d 5) (* v 7))))
+
+(deftest simple-interface
+  (let [val (my-simple-type. 17)
+        r1 (my-simple-interface-fn1 val 3 11 13)
+        r2 (my-simple-interface-fn2 val 3 11)]
+    (is (= r1 (+ 3 (* 11 5) (* 13 7))))
+    (is (= r2 (+ 3 (* 11 5) (* 17 7))))))

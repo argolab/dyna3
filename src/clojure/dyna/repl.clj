@@ -17,7 +17,7 @@
 ;; if this is a command and not something that we want to run through the parser, then it should still accept the input
 ;; I suppose there could be things like a help command or some list table command.
 (defn is-command? [line]
-  (contains? #{"exit" "quit"} (trim line)))
+  (contains? #{"exit" "quit" "run-agenda" "run_agenda"} (trim line)))
 
 
 ;; https://github.com/jline/jline3/blob/master/console/src/test/java/org/jline/example/Console.java
@@ -67,12 +67,17 @@
           (let [input (.readLine line-reader "dyna> ")]
             ;(println "read input" input)
             (when-not (contains? #{"exit" "quit"} (trim input))
-              (try
-                (let [rexpr-result (eval-string input :fragment-allowed false)]
-                  (if (= (make-multiplicity 1) rexpr-result)
-                    (println "ok")
-                    (println rexpr-result)))
-                (catch DynaUserAssert e
-                  (println (.getMessage e))))
+              (if (is-command? input)
+                (case (trim input)
+                  "run-agenda" (system/run-agenda)
+                  "run_agenda" (system/run-agenda))
+
+                (try
+                  (let [rexpr-result (eval-string input :fragment-allowed false)]
+                    (if (= (make-multiplicity 1) rexpr-result)
+                      (println "ok")
+                      (println rexpr-result)))
+                  (catch DynaUserAssert e
+                    (println (.getMessage e)))))
               (recur)))))
       (catch UserInterruptException err nil))))

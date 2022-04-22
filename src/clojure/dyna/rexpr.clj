@@ -102,6 +102,7 @@
                                 r))
          Rexpr
          ~'(primitive-rexpr [this] this) ;; this is a primitive expression so we are going to just always return ourselves
+         ~'(is-constraint? [this] false) ;; if this is going to return a multiplicity of at most 1
          (~'get-variables ~'[this]
           (filter is-variable?
                   (union (set (list ~@(map cdar (filter #(contains?  #{:var :value} (car %1)) vargroup))))
@@ -493,7 +494,8 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-(def-base-rexpr multiplicity [:mult mult])
+(def-base-rexpr multiplicity [:mult mult]
+  (is-constraint? [this] (<= mult 1)))
 
 ;; there is meta information on this which needs to be carried forward
 (when-not system/track-where-rexpr-constructed ;; if we are tracing where it was
@@ -515,7 +517,8 @@
         1 true-mul
         (prev x)))))
 
-(def-base-rexpr conjunct [:rexpr-list args])
+(def-base-rexpr conjunct [:rexpr-list args]
+  (is-constraint? [this] (every? is-constraint? args)))
 
 (def make-* make-conjunct)
 
@@ -542,7 +545,8 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def-base-rexpr unify [:value a ;; this should be changed to just use :var
-                       :value b])
+                       :value b]
+  (is-constraint? [this] true))
 
 (def-base-rexpr unify-structure [:var out
                                  :file-name file-name
@@ -553,7 +557,8 @@
                                                ;; will _not_ unify with this
                                                ;; variable
                                  :str name
-                                 :var-list arguments])
+                                 :var-list arguments]
+  (is-constraint? [this] true))
 
 ;; read the dynabase from a particular constructed structure.  This will require that structure become ground
 ;; the file reference is also required to make a call to a top level expression
@@ -933,6 +938,8 @@
 
   ;; this could callback async, so we don't want something to depend on this
   ;; having finished a computation before the function returns.
+
+  (system/maybe-run-agenda)
 
   (let [ctx (context/make-empty-context rexpr)
         res (context/bind-context ctx
@@ -1422,7 +1429,8 @@
 
 (def-base-rexpr simple-function-call [:unchecked function
                                       :var result
-                                      :var-list arguments])
+                                      :var-list arguments]
+  (is-constraint? [this] true))
 
 (def-rewrite
   :match (simple-function-call (:unchecked function) (:any result) (:ground-var-list arguments))

@@ -28,11 +28,16 @@
   (import-file-url (resource "dyna/prelude.dyna"))
   )
 
+(defn exit-system []
+  ;; there should be something for when the system is going to be destroyed.
+  ;; this can run stuff like
+  )
+
 
 (init-system)
 
 
-(defn main [args]
+(defn real-main [args]
   ;(println (vec args))
 
   ;; load the prelude file into the runtime before we start loading stuff
@@ -105,9 +110,14 @@
   ;(println "End of main function for dyna")
   )
 
+(defn main [args]
+  (try
+    (real-main args)
+    (finally (exit-system))))
 
 
-(defn main2 [& args]
-  (main (vec args)))
+
+;; (defn main2 [& args]
+;;   (main (vec args)))
 
 (defn -main [] (main []))

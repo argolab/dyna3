@@ -89,7 +89,8 @@
   ;;          (construct-rewrite-for-expression name nargs rr)))
   `(do
      (def-base-rexpr ~name ~(vec (flatten (for [i (range 0 nargs)]
-                                            [:var (symbol (str "v" i))]))))
+                                            [:var (symbol (str "v" i))])))
+       (is-constraint? [this] true))
      ~@(for [rr rewrites]
          (construct-rewrite-for-expression name nargs rr)
         )
@@ -471,7 +472,8 @@
 ;; I suppose that if all but one of the arguments are ground, then it could still run.
 ;; this would be finding which of the expressions would correspond with
 (def-base-rexpr cast-to-string [:var Out
-                                :var-list Args])
+                                :var-list Args]
+  (is-constraint? [this] true))
 
 (def-rewrite
   :match (cast-to-string (:any Out) (:ground-var-list Args))
@@ -491,7 +493,8 @@
 
 (def-user-term "string" 1 (make-is-string v0 v1))
 
-(def-base-rexpr unify-with-return [:var A :var B :var Return])
+(def-base-rexpr unify-with-return [:var A :var B :var Return]
+  (is-constraint? [this] true))
 
 (def-rewrite
   :match (unify-with-return (:ground A) (:ground B) (:free Return))
@@ -546,7 +549,8 @@
 (def-base-rexpr map-element-access [:var Key
                                     :var Value
                                     :var previous_map
-                                    :var resulting_map])
+                                    :var resulting_map]
+  (is-constraint? [this] true))
 
 (def-user-term "$map_empty" 0 (make-unify v0 (make-constant (DynaMap. {})))) ;; return an empty map value
 (def-user-term "$map_element" 3 (make-map-element-access v0 v1 v2 v3))

@@ -8,6 +8,8 @@ public class StatusCounters {
     static private long primitive_builtin_evaluated = 0;
 
     static private long program_start_time = 0;
+    static private long agenda_work_processed = 0;
+    static private long agenda_time_processing = 0;
 
     private StatusCounters() {}
 
@@ -28,4 +30,11 @@ public class StatusCounters {
     public static void match_sucessful() { matches_successful++; }
     public static void rexpr_created() { rexprs_created++; }
     public static void program_start() { program_start_time = System.currentTimeMillis(); }
+
+    public static void agenda_processing_time(long work, long time) {
+        agenda_work_processed += work;
+        agenda_time_processing += time;
+    }
+
+    public static final boolean run_counters = Boolean.parseBoolean(System.getProperty("dyna.status_counters", "true"));
 }

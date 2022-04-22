@@ -2,7 +2,8 @@
   :description "Dyna built on R-exprs"
   :url "https://github.com/argolab/dyna3"
   :license {:name "LGPL-3.0-or-later WITH Classpath-exception"}
-  :dependencies [[org.clojure/clojure "1.10.3"]
+  :dependencies [[org.clojure/clojure "1.11.1" ;"1.12.0-mfl-SNAPSHOT"
+                  ]
                  [org.clojure/tools.namespace "1.2.0"]
                  [aprint "0.1.3"]  ;; for formatted printing
                  ;[clj-python/libpython-clj "2.00-beta-22"]
@@ -45,4 +46,6 @@
   :global-vars {;*warn-on-reflection* true  ;; useful for identifying where it uses clojure's reflection which is slow...
                                         ;*unchecked-math* :warn-on-boxed ;; boxed math is slow9
                 }
+
+   :repositories [["matthewfl.com" "https://matthewfl.com/maven-repo"]]
   )

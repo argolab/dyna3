@@ -367,23 +367,26 @@
                                                                      (let [call-name {:name name
                                                                                       :arity arity
                                                                                       :source-file source-file}]
-                                                                       (set-user-term-as-memoized call-name :unk)
-
-                                                                       (debug-repl))
-                                                                     (???))
+                                                                       (set-user-term-as-memoized call-name :unk)))
                                            "memoize_null" (match-term arg1 ("memoize_null" ("/" name arity))
                                                                       (let [call-name {:name name
                                                                                        :arity arity
                                                                                        :source-file source-file}]
-                                                                        (set-user-term-as-memoized call-name :null)
-                                                                        (debug-repl))
-                                                                      (???))
+                                                                        (set-user-term-as-memoized call-name :null)))
+
+                                           "memoize_none" (match-term arg1 ("memoize_none" ("/" name arity))
+                                                                      (let [call-name {:name name
+                                                                                       :arity arity
+                                                                                       :source-file source-file}]
+                                                                        (set-user-term-as-memoized call-name :none)))
 
                                            "import_csv" (let [[term-name term-arity file-name] (.arguments ^DynaTerm (get arg1 0))]
                                                           ;; import some CSV file as a term
                                                           ;; this could get represented as a R-expr?  In which case it would not be represented
                                                           (???))
                                            "export_csv" (???) ;; export a CSV file for a term after the program is done running
+
+                                           "run_agenda" (system/run-agenda)
 
                                            (???) ;; there should be some invalid parse expression or something in the case that this fails at this point
                                            )
@@ -621,6 +624,7 @@
                                 variable-name-mapping (into {} (for [n all-variable-names] [n (make-variable n)]))
                                 rexpr (make-proj-many (vals variable-name-mapping)
                                                       (convert-from-ast expression (make-constant true) variable-name-mapping source-file))
+                                run-agenda-zzz (system/maybe-run-agenda)
                                 result (simplify-top rexpr)]
                             (when-not (= wants-to-succeed (= result (make-multiplicity 1)))
                               (if dyna.system/debug-on-assert-fail
@@ -633,6 +637,7 @@
                                result-variable (make-variable 'Result)
                                variable-map (into {} (for [v all-variable-names] [v (make-variable v)]))
                                rexpr (convert-from-ast expression result-variable variable-map source-file)
+                               agenda-run-zzz (system/maybe-run-agenda)
                                ctx (context/make-empty-context rexpr)
                                result (context/bind-context-raw ctx (simplify-fully rexpr))
                                rel-path (if (instance? URL source-file)

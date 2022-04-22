@@ -281,3 +281,41 @@
       (println "=============================================")
       (println "WARNING" msg)
       (println "============================================="))))
+
+
+;; the clojure protocols are a bit more heavy weight than Java interfaces, as
+;; there is additional logic which allows them to be extended outside of the the
+;; Java class mechnism.
+;;
+;; We don't really need that, so it should be possible to have something which
+;; supports the clojure naming and variable scoping, but is simpler in that it
+;; will just directly cast the type of the arguments to the correct intrerface
+(defn mangle-name [name]
+  (clojure.lang.Compiler/munge ^String (str name)))
+
+(defmacro defsimpleinterface [name & methods]
+  (let [this-var (gensym)]
+    `(do (definterface ~name
+           ~@(for [m methods]
+               `(~(symbol (mangle-name (first m))) ~(cdar m))))
+         ~@(for [m methods]
+             `(defn ~(first m)
+                ;; this does not seem to generate the type annotation correctly..... so this does not become a direct call properly
+                {:inline (fn [~this-var & args#]
+                           (println "running inline func")
+                           (println (meta ~this-var))
+                           (concat (list '. (with-meta ~this-var {:tag ~name})
+                                         (quote ~(symbol (mangle-name (first m)))))
+                                   args#))}
+                ~(into [this-var] (second m))
+                (. ~(with-meta this-var {:tag name})
+                   ~(symbol (mangle-name (first m)))
+                   ~@(second m))))
+         ~name)))
+
+;; this would have to make some interface for the methods or this could just
+;; define methods which cast the type to the class, and then invoke
+
+(comment
+  (defmacro deflcass [name & methods+parent]
+    nil))

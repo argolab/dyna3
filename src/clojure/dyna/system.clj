@@ -22,6 +22,9 @@
   (Integer/valueOf (System/getProperty "dyna.recursion_limit" "20")))
 
 
+(def ^:dynamic *auto-run-agenda-before-query*
+  (= "true" (System/getProperty "dyna.auto_run_agenda" "true")))
+
 ;; terms which are included by the system.  These will get automattically
 ;; replaced once the objects are created in the first place these should not be
 ;; recursive statements or anything
@@ -100,3 +103,10 @@
                   ;; when it wants, but the internal stuff should probably be
                   ;; let to run first?
                   (priority [this] 1e16)))))
+
+(defn run-agenda []
+  (.process_agenda ^DynaAgenda work-agenda))
+
+(defn maybe-run-agenda []
+  (when *auto-run-agenda-before-query*
+    (run-agenda)))

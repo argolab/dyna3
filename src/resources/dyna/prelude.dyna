@@ -56,7 +56,7 @@ $null = &$null.
 
 
 % this is the ?(foo(X)) operator right now.  But there is no support for that in the parser atm
-% not sure if `?` should be given such a privalaged value
+% not sure if `?` should be given such a privileged position.  Also using `?` as the end of a query
 :- macro is_defined/1.
 is_defined(X) = `((|= false ; true for _ is `X)).
 
