@@ -5,7 +5,9 @@
   (:require [dyna.base-protocols :refer :all])
   (:require [dyna.user-defined-terms :refer [update-user-term user-rexpr-combined-no-memo]])
   (:require [dyna.assumptions :refer :all])
-  (:import  [dyna.base_protocols MemoizationContainer]))
+  (:require [dyna.context :as context])
+  ;(:import  [dyna.base_protocols MemoizationContainer])
+  )
 
 ;; this is going to have to have some way in which the expression can be updated
 ;; in the case that the assumption is updated, then it would have that there are
@@ -28,7 +30,9 @@
 ;; the conditional and memo will need to be updateable together.  I suppose that means that
 (deftype MemoContainer [Rconditional+Rmemo
                         Rorig
-                        assumption]
+                        assumption
+                        memo-config ;; there needs to be some way to know what variables are "required" for the unk memo kind
+                        ]
 
   Watcher
   (notify-invalidated! [this watching]
@@ -45,14 +49,18 @@
 ;;                                 ])
 
 (defn make-memoized-container [rexpr assumptions]
-  (MemoContainer.
-   (atom [(make-multiplicity 0) (make-multiplicity 0)])
-   rexpr
-   (make-assumption))
+  ;; (MemoContainer.
+  ;;  (atom [(make-multiplicity 0) (make-multiplicity 0)])
+  ;;  rexpr
+  ;;  (make-assumption))
   ;; this is going to have make the memo table dependent on the assumptions which are listed
   ;; for the assumptions which
   )
 
+;; there are no R-expr "children" of this expression as it has to direct through
+;; the other expression
+;; maybe there should be some cache which would be for the conditional if-statement part of this?
+;; but this is going to have to determine if there is something which
 (def-base-rexpr memoized-rexpr [:unchecked memoization-container
                                 :unchecked variable-name-mapping]
   (get-variables [this] (into #{} (filter is-variable? (vals variable-name-mapping))))
@@ -64,9 +72,21 @@
                                  (remap-variables this variable-map)))
 
 (def-rewrite
-  :match (memoized-rexpr (:unchecked memoization-container) (:unchecked variable-name-mapping))
-  (do
-    (debug-repl "matching against a memoized expression")))
+  :match (memoized-rexpr (:unchecked ^dyna.memoization.MemoContainer memoization-container) (:unchecked variable-name-mapping))
+  (let [memo-config (.memo-config memoization-container)]
+    ;; this should check if the mode is unk or if this is the value which is represented
+    (when (or (= :null (:memo-mode memo-config))
+              (every? is-ground? (map variable-name-mapping (:required-ground-variables memo-config))))
+      (let [cond-memo (.Rconditional+Rmemo memoization-container)
+            [cond memo] @cond-memo
+            check-ctx (context/make-nested-context-memo-conditional cond)
+            check-conditional (context/bind-context check-ctx
+                                                    (simplify cond))]
+        (debug-repl "matching against a memoized expression")
+        ;; this is going to have to check if the conditional matches against the
+        ;; expression in the case that the conditional does not match, then it would
+        ;; have to fall through to the origional expression
+        nil))))
 
 (defn refresh-memo-table [^MemoContainer memo-table]
   (assert (is-valid? (.assumption memo-table))) ;; otherwise this is already invalidated.  in which case we should stop I suppose??
@@ -74,6 +94,7 @@
         [conditional memo] memo-value
         orig (.Rorig memo-table)
         orig-result (simplify-top (make-conjunct [conditional orig]))]
+    ;(debug-repl "refresh")
     (when (not= memo orig-result)
       ;; then this needs to set the memo-table to the new value
       (if (compare-and-set! (.Rconditional+Rmemo memo-table) memo-value [conditional orig-result])
@@ -100,12 +121,19 @@
                                     (fn [dat]
                                       (assert (contains? #{:null :unk} (:memoization-mode dat)))
                                       (let [orig-rexpr (user-rexpr-combined-no-memo dat)
+                                            orig-vars (exposed-variables orig-rexpr)
+                                            unk-required-vars (into #{} (filter #(not= (make-variable (str "$" (:arity term-name))) %) orig-vars))
                                             mem-container (MemoContainer. (atom [(case (:memoization-mode dat)
                                                                                    :unk (make-multiplicity 0)
                                                                                    :null (make-multiplicity 1))
                                                                                  (make-multiplicity 0)]) ;; the container should always start empty, and then we have to recheck this memo
                                                                           orig-rexpr
-                                                                          (make-assumption))]
+                                                                          (make-assumption)
+                                                                          {:memo-mode (:memoization-mode dat)
+                                                                           ;; in the case of unk memos, some of the variables _must_ be ground before we attempt the lookup, otherwise we dont know if we should store something or wait for more of the
+                                                                           :required-ground-variables (if (= :unk (:memoization-mode dat))
+                                                                                                        unk-required-vars
+                                                                                                        nil)})]
                                         (add-watcher! (:def-assumption dat) (.assumption mem-container))
                                         (assoc dat
                                                :memoized-rexpr (make-memoized-rexpr mem-container
@@ -117,7 +145,8 @@
       (system/push-agenda-work #(refresh-memo-table (:memoization-container new-memos))))
     (when (is-memoized-rexpr? old-memos)  ;; signal to the old container that it is junked
       (invalidate! (.assumption (:memoization-container old-memos))))
-    (debug-repl "rebuild")))
+    ;(debug-repl "rebuild")
+    ))
 
 ;; there should be something that is more "flexible" for setting something as memoized
 ;; but this is going

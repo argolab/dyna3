@@ -84,7 +84,7 @@
   (iter-has-next [this]))
 
 
-(defrecord MemoizationContainer [RConditional
-                                 Rmemo
-                                 Rorig
-                                 assumption])
+;; (defrecord MemoizationContainer [RConditional
+;;                                  Rmemo
+;;                                  Rorig
+;;                                  assumption])

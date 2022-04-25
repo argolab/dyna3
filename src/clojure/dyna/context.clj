@@ -120,8 +120,9 @@
                                                        (when-not (contains? (get-variables rx) incoming-var)
                                                          (ctx-add-rexpr! parent rx)))))
                                                  resulting-rexpr)
+      (= context-kind :memo-expr-conditional) resulting-rexpr  ;; I suppose this will just reset after it runs
       :else (do
-              (debug-repl)
+              (dyna-debug (debug-repl "context unknown kind"))
               (???))  ;; todo: other kinds of contexts which are going
       ))
   (ctx-scan-through-conjuncts [this scan-fn]
@@ -173,6 +174,10 @@
                     ;; happenin the case that the incoming
                 {incoming-var nil})
               )))
+
+(defn make-nested-context-memo-conditional [rexpr]
+  (assert (bound? #'*context*))
+  (context. *context* *use-full-context* :memo-expr-conditional rexpr #{rexpr} {}))
 
 (defmethod print-method context [this ^java.io.Writer w]
   (.write w (.toString ^Object this)))

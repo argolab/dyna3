@@ -188,7 +188,7 @@
     (:rexpr term-rep)
     (case (:memoization-mode term-rep)
       :none (do
-              (depend-on-assumption (:is-not-memoized-null term-rep))
+              (depend-on-assumption (:is-not-memoized-null term-rep)) ;; memization of unk is fine, but null requires that we redo all of the computation
               (user-rexpr-combined-no-memo term-rep))
       :unk (do
              (depend-on-assumption (:is-memoized-unk term-rep))
@@ -205,8 +205,9 @@
       (dyna-warning (str "Did not find method " (:name name) "/" (:arity name) " from file " (:source-file name))))
 
     (when ut  ;; this should really be a warning or something in the case that it can't be found. Though we might also need to create some assumption that nothing is defined...
-      (let [rexprs (:rexprs ut)
-            rexpr (combine-user-rexprs-bodies rexprs)
+      (let [;;rexprs (:rexprs ut)
+            ;;rexpr (combine-user-rexprs-bodies rexprs)
+            rexpr (user-rexpr-combined ut)
             rewrite-user-call-depth (fn rucd [rexpr]
                                       (dyna-assert (rexpr? rexpr))
                                       (if (is-user-call? rexpr)
