@@ -78,15 +78,32 @@
     (when (or (= :null (:memo-mode memo-config))
               (every? is-ground? (map variable-name-mapping (:required-ground-variables memo-config))))
       (let [cond-memo (.Rconditional+Rmemo memoization-container)
-            [cond memo] @cond-memo
+            cond-memo-val @cond-memo
+            [cond memo] cond-memo-val
             check-ctx (context/make-nested-context-memo-conditional cond)
             check-conditional (context/bind-context check-ctx
                                                     (simplify cond))]
-        (debug-repl "matching against a memoized expression")
+        (if (is-non-empty-rexpr? check-conditional)
+          ;; this is contained in the memo table, so we can just return the table which will get the relevant entries
+          (simplify (remap-variables memo variable-name-mapping))
+          (do
+            (assert (= :unk (:memo-mode memo-config)))
+            (let [memo-keys (make-conjunct (doall (map #(make-no-simp-unify % (get variable-name-mapping %))
+                                                       (:required-ground-variables memo-config))))
+                  memo-addition (simplify-top (make-conjunct [memo-keys (.Rorig memoization-container)]))
+                  cas-result (compare-and-set! cond-memo
+                                               cond-memo-val
+                                               [(make-disjunct [cond memo-keys])
+                                                (make-disjunct [memo memo-addition])])]
+              ;(debug-repl "matching against a memoized expression")
+              (assert cas-result)
+              (simplify (remap-variables memo-addition variable-name-mapping))
+              ;; if the result is not contained in the table, then we need to compute if there is something
+              )))
         ;; this is going to have to check if the conditional matches against the
         ;; expression in the case that the conditional does not match, then it would
         ;; have to fall through to the origional expression
-        nil))))
+        ))))
 
 (defn refresh-memo-table [^MemoContainer memo-table]
   (assert (is-valid? (.assumption memo-table))) ;; otherwise this is already invalidated.  in which case we should stop I suppose??
