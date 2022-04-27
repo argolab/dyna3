@@ -5,8 +5,8 @@
   (:require [dyna.rexpr-dynabase :refer :all])
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
-  (:require [dyna.user-defined-terms :refer [add-to-user-term update-user-term def-user-term get-user-term]])
-  (:require [dyna.memoization :refer [set-user-term-as-memoized]])
+  (:require [dyna.user-defined-terms :refer [add-to-user-term update-user-term! def-user-term get-user-term]])
+  (:require [dyna.memoization :refer [set-user-term-as-memoized print-memo-table]])
   (:require [clojure.set :refer [union intersection difference rename-keys]])
   (:require [clojure.string :refer [join]])
   (:require [clojure.java.io :refer [resource]])
@@ -285,7 +285,7 @@
                                                                              (get @system/user-exported-terms file))]
                                                         (doseq [imported-term imported-names]
                                                           (match-term imported-term ("/" name arity)
-                                                                      (update-user-term {:name name
+                                                                      (update-user-term! {:name name
                                                                                          :arity (int arity)
                                                                                          :source-file source-file}
                                                                                         (fn [o]
@@ -323,7 +323,7 @@
                                                                                      (DynaTerm. "quote" []) "$constant"
                                                                                      (DynaTerm. "eval" []) "$eval"} % "$eval")
                                                                                   (.arguments disp-term)))]
-                                                       (update-user-term {:name (.name disp-term)
+                                                       (update-user-term! {:name (.name disp-term)
                                                                           :arity (.arity disp-term)
                                                                           :source-file source-file}
                                                                          (fn [o]
@@ -334,7 +334,7 @@
                                                        ;; used like `:- macro foo/3.`
 
                                            "macro" (match-term arg1 ("macro" ("/" name arity))
-                                                               (update-user-term {:name name
+                                                               (update-user-term! {:name name
                                                                                   :arity arity
                                                                                   :source-file source-file}
                                                                                  (fn [o]
@@ -380,6 +380,12 @@
                                                                                        :source-file source-file}]
                                                                         (set-user-term-as-memoized call-name :none)))
 
+                                           "print_memo_table" (match-term arg1 ("print_memo_table" ("/" name arity))
+                                                                          (let [call-name {:name name
+                                                                                           :arity arity
+                                                                                           :source-file source-file}]
+                                                                            (print-memo-table call-name)))
+
                                            "import_csv" (let [[term-name term-arity file-name] (.arguments ^DynaTerm (get arg1 0))]
                                                           ;; import some CSV file as a term
                                                           ;; this could get represented as a R-expr?  In which case it would not be represented
@@ -388,7 +394,11 @@
 
                                            "run_agenda" (system/run-agenda)
 
-                                           (???) ;; there should be some invalid parse expression or something in the case that this fails at this point
+
+                                           (do
+                                             ;; in the case that this is invalid, we can raise an exception that should report the error to the user
+                                             (throw (DynaUserError. (str "operator " (.name arg1) " not found"))))
+                                           ;(???) ;; there should be some invalid parse expression or something in the case that this fails at this point
                                            )
                                          (make-unify out-variable (make-constant true)) ;; just return that we processed this correctly?  I suppose that in
                                          )

@@ -160,10 +160,43 @@
   (v2 (min v0 v1)))
 (def-user-term "min" 2 (make-min v0 v1 v2))
 
+;; if the output of the min is already known, then at least one of the arguments must
+(def-rewrite
+  :match (min (:ground A) (:any B) (:ground C))
+  (let [av (get-value A)
+        cv (get-value C)]
+    (cond (> av cv) (make-unify B C)  ;; then the B variable must take on the value which is the min
+          (< av cv) (make-multiplicity 0) ;; then the min result already has something smaller than the output so this is not possible
+          :else nil)))
+
+(def-rewrite
+  :match (min (:any B) (:ground A) (:ground C))
+  (let [av (get-value A)
+        cv (get-value C)]
+    (cond (> av cv) (make-unify B C)  ;; then the B variable must take on the value which is the min
+          (< av cv) (make-multiplicity 0) ;; then the min result already has something smaller than the output so this is not possible
+          :else nil)))
+
 (def-builtin-rexpr max 3
   (:allground (= v2 (max v0 v1)))
   (v2 (max v0 v1)))
 (def-user-term "max" 2 (make-max v0 v1 v2))
+
+(def-rewrite
+  :match (max (:ground A) (:any B) (:ground C))
+  (let [av (get-value A)
+        cv (get-value C)]
+    (cond (< av cv) (make-unify B C)
+          (> av cv) (make-multiplicity 0)
+          :else nil)))
+
+(def-rewrite
+  :match (max (:any B) (:ground A) (:ground C))
+  (let [av (get-value A)
+        cv (get-value C)]
+    (cond (< av cv) (make-unify B C)
+          (> av cv) (make-multiplicity 0)
+          :else nil)))
 
 (def-builtin-rexpr pow 3
   (:allground (= v2 (java.lang.Math/pow v0 v1)))

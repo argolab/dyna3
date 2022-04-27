@@ -45,7 +45,8 @@
 
   Watcher
   (notify-invalidated! [this from-watcher] (invalidate! this))
-  (notify-message! [this from-watcher message] (???))
+  (notify-message! [this from-watcher message] (send-message! this (assoc message
+                                                                          :from-upstream from-watcher)))
 
   Object
   (toString [this] (str "[Assumption isvalid=" (is-valid? this) " watchers=" (let [w watchers]
@@ -123,3 +124,16 @@
       ;; there should be some exception to restart the computation or something
       ;; it would allow for the runtime to check which of the expressions
       (throw (RuntimeException. "attempting to use invalid assumption")))))
+
+(defmacro bind-assumption [assumpt & body]
+  `(binding [*current-watcher* ~assumpt]
+     ~@body))
+
+(defmacro compute-with-assumption [& body]
+  `(loop [assumpt# (make-assumption)]
+     (binding [*current-watcher* ~assumpt#
+               *fast-fail-on-invalid-assumption* true]
+       (try
+         [assumpt# (do ~@body)]
+         (catch InvalidAssumption err#
+           (recur (make-assumption)))))))

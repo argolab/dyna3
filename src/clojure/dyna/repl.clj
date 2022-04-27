@@ -6,6 +6,7 @@
   (:require [dyna.ast-to-rexpr :refer [eval-string print-parser-errors parse-string]])
   (:require [dyna.system :as system])
   (:require [dyna.rexpr-constructors :refer [make-multiplicity]])
+  (:require [dyna.utils :refer [debug-repl]])
   (:require [clojure.string :refer [trim]])
   (:import [dyna DynaUserAssert]))
 
@@ -17,7 +18,7 @@
 ;; if this is a command and not something that we want to run through the parser, then it should still accept the input
 ;; I suppose there could be things like a help command or some list table command.
 (defn is-command? [line]
-  (contains? #{"exit" "quit" "run-agenda" "run_agenda"} (trim line)))
+  (contains? #{"exit" "quit" "run-agenda" "run_agenda" "clojure-debug-repl"} (trim line)))
 
 
 ;; https://github.com/jline/jline3/blob/master/console/src/test/java/org/jline/example/Console.java
@@ -70,7 +71,8 @@
               (if (is-command? input)
                 (case (trim input)
                   "run-agenda" (system/run-agenda)
-                  "run_agenda" (system/run-agenda))
+                  "run_agenda" (system/run-agenda)
+                  "clojure-debug-repl" (debug-repl))
 
                 (try
                   (let [rexpr-result (eval-string input :fragment-allowed false)]

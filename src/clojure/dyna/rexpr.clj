@@ -107,7 +107,7 @@
           (filter is-variable?
                   (union (set (list ~@(map cdar (filter #(contains?  #{:var :value} (car %1)) vargroup))))
                          ~@(map (fn [x] `(set ~(cdar x))) (filter #(= :var-list (car %1)) vargroup))
-                         ~@(map (fn [x] `(set (values ~(cdar x)))) (filter #(= :var-map (car %1)) vargroup))
+                         ~@(map (fn [x] `(set (vals ~(cdar x)))) (filter #(= :var-map (car %1)) vargroup))
                          ;; TODO: this needs to handle the case where there is the var-set-map which will have nested variable inside of the arguments
                          ;;~@(map (fn [x] `(set (values ))))
                          )))
@@ -607,7 +607,8 @@
                            :unchecked call-depth
                            :var-set-map args-parent-map ;; this needs to track which
                            ]
-  (get-variables [this] (into #{} (vals args-map))))
+  ;(get-variables [this] (into #{} (vals args-map)))
+  )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

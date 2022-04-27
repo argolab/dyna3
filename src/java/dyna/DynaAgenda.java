@@ -15,6 +15,8 @@ public class DynaAgenda {
     }
 
     public void process_agenda() {
+        if(queue.isEmpty())
+            return;
         System.err.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Running agenda~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
         long local_processed = 0;
         long agenda_start_processing = System.currentTimeMillis();

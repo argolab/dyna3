@@ -5,4 +5,4 @@ fib(1) := 1.
 fib(X) := fib(X-1) + fib(X-2) for X > 1.
 
 
-%assert fib(10) = 55.
+assert fib(10) = 55.

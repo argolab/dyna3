@@ -3,73 +3,60 @@
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.system :as system])
   (:require [dyna.base-protocols :refer :all])
-  (:require [dyna.user-defined-terms :refer [update-user-term user-rexpr-combined-no-memo]])
+  (:require [dyna.user-defined-terms :refer [update-user-term! user-rexpr-combined-no-memo]])
   (:require [dyna.assumptions :refer :all])
   (:require [dyna.context :as context])
   ;(:import  [dyna.base_protocols MemoizationContainer])
   )
 
-;; this is going to have to have some way in which the expression can be updated
-;; in the case that the assumption is updated, then it would have that there are
-;; some expressions which are represented with
-;; (comment
-;;   (def-base-rexpr memoized-rexpr [:rexpr Rmemo ;; the R-expr which contains the memoized
-;;                                   :rexpr Rorig
-;;                                   :unchecked assumption])
+;; (defsimpleinterface IMemoContainer
+;;   (get-value-for-key [key])
+;;   (compute-value-for-key [key]))
 
-
-;;   (def-rewrite
-;;     :match memoized-rexpr (:rexpr Rmemo) (:rexpr Rorig))
-
-;;   )
-
-(definterface IMemoContainer
-  (get_memo [this]))
-
-;; the values in the container should have that this
-;; the conditional and memo will need to be updateable together.  I suppose that means that
-(deftype MemoContainer [Rconditional+Rmemo
-                        Rorig
-                        assumption
+;; this container can be modified
+(deftype MemoContainer [Rconditional+Rmemo  ;; is an atom that will get updated
+                        Rorig+assumption-upstream ;; an atom which gets updated when this
+                        ;; Rorig
+                        ;; ^:unsynchronized-mutable assumption-upstream ;; the upstream is the same.  This should be modifable, such that we can reset it later
+                        assumption-self ;; the for when this changes.  This should not become "invalid" rather it just sends notifications of changes
                         memo-config ;; there needs to be some way to know what variables are "required" for the unk memo kind
                         ]
-
   Watcher
   (notify-invalidated! [this watching]
+
     (debug-repl "got invalidated notified")
     (???))
   (notify-message! [this watching message]
     (debug-repl "got message notified")
-    (???)))
+    (???))
 
-;; (defmethod print-method MemoContainer [^MemoContainer this ^java.io.Writer w]
-;;   (.write w ))
-
-;; (def-base-rexpr memoized-rexpr [
-;;                                 ])
-
-(defn make-memoized-container [rexpr assumptions]
-  ;; (MemoContainer.
-  ;;  (atom [(make-multiplicity 0) (make-multiplicity 0)])
-  ;;  rexpr
-  ;;  (make-assumption))
-  ;; this is going to have make the memo table dependent on the assumptions which are listed
-  ;; for the assumptions which
+  ;; IMemoContainer
+  ;; (get-value-for-key [^MemoContainer memo key]
+  ;;   (let [cond-memo (.Rconditional+Rmemo memo)
+  ;;         cond-memo-val @cond-memo
+  ;;         [cond memo] cond-memo-val
+  ;;         check-ctx (context/make-nested-context-memo-conditional cond)
+  ;;         check-conditional (context/bind-context check-ctx
+  ;;                                                 (simplify (remap-variables cond variable-name-mapping)))]
+  ;;     (if (is-non-empty-rexpr? check-conditional)
+  ;;       memo ;; then the memo table contains this value, so it needs to just apply the values of the key to get the right output
+  ;;       (compute-value-for-key memo key))))
+  ;; (compute-value-for-key [^MemoContainer memo key]
+  ;;   (???))
   )
 
-;; there are no R-expr "children" of this expression as it has to direct through
-;; the other expression
-;; maybe there should be some cache which would be for the conditional if-statement part of this?
-;; but this is going to have to determine if there is something which
+(defmethod print-method MemoContainer [^MemoContainer this ^java.io.Writer w]
+  (.write w (str @(.Rconditional+Rmemo this) "\n" (.Rorig this))))
+
 (def-base-rexpr memoized-rexpr [:unchecked memoization-container
-                                :unchecked variable-name-mapping]
-  (get-variables [this] (into #{} (filter is-variable? (vals variable-name-mapping))))
-  (remap-variables [this variable-map]
-                   (make-memoized-rexpr memoization-container
-                                        (into {} (for [[k v] variable-name-mapping]
-                                                   [k (get variable-map v v)]))))
-  (remap-variables-handle-hidden [this variable-map]
-                                 (remap-variables this variable-map)))
+                                :var-map variable-name-mapping])
+
+;; (defn- compute-value-for-key [^MemoContainer memo key]
+;;   (let [cond-memo (.Rconditional+Rmemo )])
+;;   )
+
+;; (defn- get-value-for-key [^MemoContainer memo key]
+;;   )
 
 (def-rewrite
   :match (memoized-rexpr (:unchecked ^dyna.memoization.MemoContainer memoization-container) (:unchecked variable-name-mapping))
@@ -80,33 +67,48 @@
       (let [cond-memo (.Rconditional+Rmemo memoization-container)
             cond-memo-val @cond-memo
             [cond memo] cond-memo-val
-            check-ctx (context/make-nested-context-memo-conditional cond)
+            check-ctx (context/make-nested-context-memo-conditional cond) ;; this can read from the current context for the variable names
             check-conditional (context/bind-context check-ctx
-                                                    (simplify cond))]
+                                                    (simplify (remap-variables cond variable-name-mapping)))]
         (if (is-non-empty-rexpr? check-conditional)
           ;; this is contained in the memo table, so we can just return the table which will get the relevant entries
           (simplify (remap-variables memo variable-name-mapping))
-          (do
+          (when (is-empty-rexpr? check-conditional) ;; if it is nither empty or non-empty, then we can't determine if it should return or not, need
             (assert (= :unk (:memo-mode memo-config)))
             (let [memo-keys (make-conjunct (doall (map #(make-no-simp-unify % (get variable-name-mapping %))
                                                        (:required-ground-variables memo-config))))
                   memo-addition (simplify-top (make-conjunct [memo-keys (.Rorig memoization-container)]))
-                  cas-result (compare-and-set! cond-memo
+                  new-cond-memo-val @cond-memo]
+              (if (identical? new-cond-memo-val cond-memo-val)
+                (let [cas-result (compare-and-set! cond-memo
                                                cond-memo-val
                                                [(make-disjunct [cond memo-keys])
                                                 (make-disjunct [memo memo-addition])])]
-              ;(debug-repl "matching against a memoized expression")
-              (assert cas-result)
-              (simplify (remap-variables memo-addition variable-name-mapping))
-              ;; if the result is not contained in the table, then we need to compute if there is something
-              )))
-        ;; this is going to have to check if the conditional matches against the
-        ;; expression in the case that the conditional does not match, then it would
-        ;; have to fall through to the origional expression
-        ))))
+                  (assert cas-result)
+                  (simplify (remap-variables memo-addition variable-name-mapping)))
+                ;; if it is different, then that means that there might be a new expression which was added
+                (let [[cond2 memo2] new-cond-memo-val
+                      check-ctx2 (context/make-nested-context-memo-conditional cond2)
+                      check-conditional2 (context/bind-context check-ctx2 (simplify (remap-variables cond2 variable-name-mapping)))]
+                  (if (is-empty-rexpr? check-conditional2)
+                    ;; then the expression is still not memoized, so we can still add it to the expression
+                    (let [cas-result (compare-and-set! cond-memo
+                                                       new-cond-memo-val
+                                                       [(make-disjunct [cond2 memo-keys])
+                                                        (make-disjunct [memo2 memo-addition])])
+                          ret (simplify (remap-variables memo-addition variable-name-mapping))]
+                      (assert cas-result)
+                      ;(debug-repl "d2")
+                      ret)
+                    ;; then there is a new expression which is contained in the memo table that represents this
+                    ;; so we should instead return what is in the memo table instead of our previously computed value
+                    ;; so that that it will stay consistent
+                    (let [ret (simplify (remap-variables memo2 variable-name-mapping))]
+                      ;(debug-repl "d1")
+                      ret)))))))))))
 
 (defn refresh-memo-table [^MemoContainer memo-table]
-  (assert (is-valid? (.assumption memo-table))) ;; otherwise this is already invalidated.  in which case we should stop I suppose??
+  (assert (is-valid? (.assumption-self memo-table))) ;; otherwise this is already invalidated.  in which case we should stop I suppose??
   (let [memo-value @(.Rconditional+Rmemo memo-table)
         [conditional memo] memo-value
         orig (.Rorig memo-table)
@@ -116,7 +118,7 @@
       ;; then this needs to set the memo-table to the new value
       (if (compare-and-set! (.Rconditional+Rmemo memo-table) memo-value [conditional orig-result])
         (do ;; meaning that this updated the memo table successfully
-          (send-message! (.assumption memo-table)
+          (send-message! (.assumption-self memo-table)
                          {:kind :refresh-table
                           :table memo-table
                           :old-memo memo
@@ -125,6 +127,7 @@
             ;; could refresh this.  If this is something that only partially
             ;; refreshed the values, then that might needs that it trys again.  Though thi smight find itself with
           (system/push-agenda-work #(refresh-memo-table memo-table))
+          (debug-repl)
           (???))))
     ;(debug-repl "refresh result")
     ;; this needs to upate the R-expr and refresh the assumption
@@ -134,24 +137,27 @@
 
 
 (defn rebuild-memo-table-for-term [term-name]
-  (let [[old new] (update-user-term term-name
+  (let [[old new] (update-user-term! term-name
                                     (fn [dat]
                                       (assert (contains? #{:null :unk} (:memoization-mode dat)))
-                                      (let [orig-rexpr (user-rexpr-combined-no-memo dat)
+                                      (let [[orig-rexpr-assumpt orig-rexpr] (compute-with-assumption
+                                                                             ;; this could call simplify on this term
+                                                                             (user-rexpr-combined-no-memo dat))
                                             orig-vars (exposed-variables orig-rexpr)
                                             unk-required-vars (into #{} (filter #(not= (make-variable (str "$" (:arity term-name))) %) orig-vars))
                                             mem-container (MemoContainer. (atom [(case (:memoization-mode dat)
                                                                                    :unk (make-multiplicity 0)
                                                                                    :null (make-multiplicity 1))
                                                                                  (make-multiplicity 0)]) ;; the container should always start empty, and then we have to recheck this memo
-                                                                          orig-rexpr
+                                                                          (atom [orig-rexpr orig-rexpr-assumpt])
+                                                                          ;(make-invalid-assumption) ;; this is _not_ consistent with the upstream
                                                                           (make-assumption)
                                                                           {:memo-mode (:memoization-mode dat)
                                                                            ;; in the case of unk memos, some of the variables _must_ be ground before we attempt the lookup, otherwise we dont know if we should store something or wait for more of the
                                                                            :required-ground-variables (if (= :unk (:memoization-mode dat))
                                                                                                         unk-required-vars
                                                                                                         nil)})]
-                                        (add-watcher! (:def-assumption dat) (.assumption mem-container))
+                                        ;(add-watcher! orig-rexpr-assumpt mem-container)
                                         (assoc dat
                                                :memoized-rexpr (make-memoized-rexpr mem-container
                                                                                     (into {} (for [k (exposed-variables orig-rexpr)]
@@ -169,7 +175,7 @@
 ;; but this is going
 (defn set-user-term-as-memoized [term-name mode]
   (assert (contains? #{:unk :null :none} mode))
-  (let [[old new] (update-user-term term-name
+  (let [[old new] (update-user-term! term-name
                                     (fn [dat]
                                       ;; this is going to need create the memo table and set up the assumptions that this is the result
                                       ;; if there is something that is memoized, then this should
@@ -200,3 +206,15 @@
           (invalidate! ov))))
     (when (contains? #{:null :unk} mode)
       (system/push-agenda-work #(rebuild-memo-table-for-term term-name)))))
+
+
+(defn print-memo-table [term-name]
+  (let [term (get @system/user-defined-terms term-name)]
+    (if (nil? term)
+      (println "term " term-name " not found")
+      (do
+        (println "~~~~~~~~~~~~~~Memo table~~~~~~~~~~~~~~~~")
+        (println term-name)
+        (println "mode: " (:memoization-mode term))
+        (println "table: " (:memoized-rexpr term))
+        (println "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")))))
