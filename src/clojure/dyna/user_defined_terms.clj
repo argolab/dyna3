@@ -118,7 +118,6 @@
           assumpt-db (get-in old-defs [object-name :dynabases-assumptions])]
       ;; invalidate after the swap so that if something goes to the object, it will find the new value already in place
       (when assumpt
-        ;(when (= name "f") (debug-repl))
         (invalidate! assumpt))
       (if (and (not (nil? assumpt-db)) (not (identical? assumpt-db (get-in new-defs [object-name :dynabases-assumptions]))))
         (invalidate! assumpt-db)))))
@@ -183,6 +182,7 @@
 (defn user-rexpr-combined-no-memo [term-rep]
   ;; this should check if there is some optimized
   (assert (nil? (:optimized-rexpr term-rep)))
+  (depend-on-assumption (:def-assumption term-rep))
   (combine-user-rexprs-bodies (:rexprs term-rep)))
 
 (defn user-rexpr-combined [term-rep]

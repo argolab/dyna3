@@ -51,7 +51,7 @@
           (throw (UnificationFailure. "Value does not match")))
         ;; then depending on the kind of context this is, we might have different behavior of
         ;; setting the value of the variable.
-        (if (or (contains? #{:root :disjunct :aggregator :if-expr-coditional} context-kind)
+        (if (or (contains? #{:root :disjunct :aggregator :if-expr-coditional :memo-expr-conditional} context-kind)
                 (and (contains? #{:aggregator-conjunctive :proj} context-kind)
                      (contains? value-map variable)))
           ;; then we set the value locally
@@ -186,7 +186,8 @@
   ;; this should remap any call to get-context to whatever is the new variable
 
   `(let [new-ctx# ~val]
-     (assert (satisfies? RContext new-ctx#))
+     (dyna-assert (and (satisfies? RContext new-ctx#)
+                       (not (nil? new-ctx#))))
      (let [resulting-rexpr# (binding [*context* new-ctx#]
                               ~@args)]
        ;; there should be some exit operation which can check if there is anything which should happen with the grounding
@@ -194,7 +195,8 @@
 
 (defmacro bind-context-raw [val & args]
   `(let [new-ctx# ~val]
-     (assert (satisfies? RContext new-ctx#))
+     (dyna-assert (and (satisfies? RContext new-ctx#)
+                       (not (nil? new-ctx#))))
      (binding [*context* new-ctx#]
        ~@args)))
 

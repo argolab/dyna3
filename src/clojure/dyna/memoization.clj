@@ -3,15 +3,16 @@
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.system :as system])
   (:require [dyna.base-protocols :refer :all])
-  (:require [dyna.user-defined-terms :refer [update-user-term! user-rexpr-combined-no-memo]])
+  (:require [dyna.user-defined-terms :refer [update-user-term! user-rexpr-combined-no-memo get-user-term]])
   (:require [dyna.assumptions :refer :all])
   (:require [dyna.context :as context])
   ;(:import  [dyna.base_protocols MemoizationContainer])
   )
 
-;; (defsimpleinterface IMemoContainer
-;;   (get-value-for-key [key])
-;;   (compute-value-for-key [key]))
+(defsimpleinterface IMemoContainer
+  (get-value-for-key [key])
+  (compute-value-for-key [key])
+  (refresh-memo-table []))
 
 ;; this container can be modified
 (deftype MemoContainer [Rconditional+Rmemo  ;; is an atom that will get updated
@@ -23,42 +24,115 @@
                         ]
   Watcher
   (notify-invalidated! [this watching]
-
-    (debug-repl "got invalidated notified")
-    (???))
+    (let [Rorig+assumpt-val @Rorig+assumption-upstream
+          [Rorig upstream] Rorig+assumpt-val]
+      (if (identical? upstream watching)
+        ;; then this needs to do a refresh of the memo table
+        ;; and this needs to reconstruct the origional values
+        (let [term-name (:memo-for-term memo-config)]
+          (if (nil? term-name)
+            (invalidate! assumption-self) ;; unsure how to update this memo table, so we are just going to mark it as invalid, and let that propagate
+            (let [[orig-rexpr-assumpt orig-rexpr] (compute-with-assumption
+                                                   (user-rexpr-combined-no-memo (get-user-term term-name)))
+                  cas-result (compare-and-set! Rorig+assumption-upstream
+                                               Rorig+assumpt-val
+                                               [orig-rexpr orig-rexpr-assumpt])]
+              (assert cas-result)
+              (add-watcher! orig-rexpr-assumpt this)
+              (system/push-agenda-work #(refresh-memo-table this))
+              ;(debug-repl "got invalidated notified")
+              )))
+        (do
+          (debug-repl "unknown assumption invalidated")
+          (???)))))
   (notify-message! [this watching message]
     (debug-repl "got message notified")
     (???))
 
-  ;; IMemoContainer
-  ;; (get-value-for-key [^MemoContainer memo key]
-  ;;   (let [cond-memo (.Rconditional+Rmemo memo)
-  ;;         cond-memo-val @cond-memo
-  ;;         [cond memo] cond-memo-val
-  ;;         check-ctx (context/make-nested-context-memo-conditional cond)
-  ;;         check-conditional (context/bind-context check-ctx
-  ;;                                                 (simplify (remap-variables cond variable-name-mapping)))]
-  ;;     (if (is-non-empty-rexpr? check-conditional)
-  ;;       memo ;; then the memo table contains this value, so it needs to just apply the values of the key to get the right output
-  ;;       (compute-value-for-key memo key))))
-  ;; (compute-value-for-key [^MemoContainer memo key]
-  ;;   (???))
-  )
+  IMemoContainer
+  (get-value-for-key [^MemoContainer this key]
+    (context/bind-no-context
+     (let [cond-memo Rconditional+Rmemo
+           cond-memo-val @cond-memo
+           [cond memo] cond-memo-val
+           check-ctx (context/make-nested-context-memo-conditional cond)
+           check-conditional (context/bind-context check-ctx
+                                                   (simplify (make-conjunct [key cond])))]
+       (if (is-non-empty-rexpr? check-conditional)
+         (do
+           (depend-on-assumption assumption-self)
+           memo) ;; then the memo table contains this value, so it needs to just apply the values of the key to get the right output
+         (if (is-empty-rexpr? check-conditional)
+           (compute-value-for-key this key)
+           ;; nil indicating that the memo could not be computed, so this is going to have to delay
+           nil)))))
+  (compute-value-for-key [^MemoContainer this key]
+    (assert (= :unk (:memo-mode memo-config)))
+    (let [[Rorig upstream-assumpt] @Rorig+assumption-upstream
+          memo-addition (simplify-top (make-conjunct [key Rorig]))
+          cond-memo Rconditional+Rmemo
+          new-cond-memo-val @cond-memo
+          [new-cond new-memo] new-cond-memo-val
+          recheck-condition (context/bind-context (context/make-nested-context-memo-conditional new-cond)
+                                                  (simplify (make-conjunct [key new-cond])))]
+      (if (is-empty-rexpr? recheck-condition)
+        ;; then we can add the new memo back into the memo table
+        (let [cas-result (compare-and-set! cond-memo
+                                           new-cond-memo-val
+                                           [(make-disjunct [new-cond key])
+                                            (make-disjunct [new-memo memo-addition])])]
+          (assert cas-result) ;; this is going to have to recompute or something, as the memoized expression has changed
+          ;(debug-repl "nm")
+          memo-addition)
+        (do
+          (debug-repl "failed to save result into the memo table")
+          ;; then this must mean that hte result is already contained in the memo table
+          ;; in which case
+          (???)))))
+  (refresh-memo-table [this]
+    (assert (is-valid? assumption-self))
+    (let [memo-value @Rconditional+Rmemo
+          [cond memo] memo-value
+          [Rorig assumption-upstream] @Rorig+assumption-upstream]
+      (assert (is-valid? assumption-upstream)) ;; if this is not valid, then we  should rebuild the origional expression
+      (let [orig-result (context/bind-no-context
+                         (simplify-top (make-conjunct [cond Rorig])))]
+        (when (not= orig-result memo)
+          ;; then we need to save the memo in to the table, and signal that an event happened
+          (if (compare-and-set! Rconditional+Rmemo memo-value [cond orig-result])
+            (do ;; the update was successful
+              (send-message! assumption-self
+                             {:kind :refresh-table
+                              :table this
+                              :old-memo memo
+                              :new-memo orig-result})
+              )
+            (do ;; the update was not successful
+              (system/push-agenda-work #(refresh-memo-table this))
+              (debug-repl "failed to save refresh of memo table")
+              (???))))))))
 
 (defmethod print-method MemoContainer [^MemoContainer this ^java.io.Writer w]
-  (.write w (str @(.Rconditional+Rmemo this) "\n" (.Rorig this))))
+  (.write w (str @(.Rconditional+Rmemo this) "\n" @(.Rorig+assumption-upstream this))))
 
 (def-base-rexpr memoized-rexpr [:unchecked memoization-container
                                 :var-map variable-name-mapping])
 
-;; (defn- compute-value-for-key [^MemoContainer memo key]
-;;   (let [cond-memo (.Rconditional+Rmemo )])
-;;   )
-
-;; (defn- get-value-for-key [^MemoContainer memo key]
-;;   )
-
 (def-rewrite
+  :match (memoized-rexpr (:unchecked ^dyna.memoization.MemoContainer memoization-container) (:unchecked variable-name-mapping))
+  (let [memo-config (.memo-config memoization-container)]
+    (when (or (= :null (:memo-mode memo-config))
+              (every? is-ground? (map variable-name-mapping (:required-ground-variables memo-config))))
+      (let [key (case (:memo-mode memo-config)
+                  :unk (make-conjunct (doall (map #(make-no-simp-unify % (get variable-name-mapping %))
+                                             (:required-ground-variables memo-config))))
+                  :null (make-multiplicity 1))
+            memo-rexpr (get-value-for-key memoization-container key)
+            res (simplify (remap-variables memo-rexpr variable-name-mapping))]
+        res))))
+
+
+#_(def-rewrite
   :match (memoized-rexpr (:unchecked ^dyna.memoization.MemoContainer memoization-container) (:unchecked variable-name-mapping))
   (let [memo-config (.memo-config memoization-container)]
     ;; this should check if the mode is unk or if this is the value which is represented
@@ -107,33 +181,34 @@
                       ;(debug-repl "d1")
                       ret)))))))))))
 
-(defn refresh-memo-table [^MemoContainer memo-table]
-  (assert (is-valid? (.assumption-self memo-table))) ;; otherwise this is already invalidated.  in which case we should stop I suppose??
-  (let [memo-value @(.Rconditional+Rmemo memo-table)
-        [conditional memo] memo-value
-        orig (.Rorig memo-table)
-        orig-result (simplify-top (make-conjunct [conditional orig]))]
-    ;(debug-repl "refresh")
-    (when (not= memo orig-result)
-      ;; then this needs to set the memo-table to the new value
-      (if (compare-and-set! (.Rconditional+Rmemo memo-table) memo-value [conditional orig-result])
-        (do ;; meaning that this updated the memo table successfully
-          (send-message! (.assumption-self memo-table)
-                         {:kind :refresh-table
-                          :table memo-table
-                          :old-memo memo
-                          :new-memo orig-result}))
-        (do ;; meaning that somehting else changed the memo table before we
-            ;; could refresh this.  If this is something that only partially
-            ;; refreshed the values, then that might needs that it trys again.  Though thi smight find itself with
-          (system/push-agenda-work #(refresh-memo-table memo-table))
-          (debug-repl)
-          (???))))
-    ;(debug-repl "refresh result")
-    ;; this needs to upate the R-expr and refresh the assumption
-    ;; in the case
-    ;(???)
-    ))
+#_(comment
+ (defn refresh-memo-table [^MemoContainer memo-table]
+   (assert (is-valid? (.assumption-self memo-table))) ;; otherwise this is already invalidated.  in which case we should stop I suppose??
+   (let [memo-value @(.Rconditional+Rmemo memo-table)
+         [conditional memo] memo-value
+         orig (.Rorig memo-table)
+         orig-result (simplify-top (make-conjunct [conditional orig]))]
+                                        ;(debug-repl "refresh")
+     (when (not= memo orig-result)
+       ;; then this needs to set the memo-table to the new value
+       (if (compare-and-set! (.Rconditional+Rmemo memo-table) memo-value [conditional orig-result])
+         (do ;; meaning that this updated the memo table successfully
+           (send-message! (.assumption-self memo-table)
+                          {:kind :refresh-table
+                           :table memo-table
+                           :old-memo memo
+                           :new-memo orig-result}))
+         (do ;; meaning that somehting else changed the memo table before we
+           ;; could refresh this.  If this is something that only partially
+           ;; refreshed the values, then that might needs that it trys again.  Though thi smight find itself with
+           (system/push-agenda-work #(refresh-memo-table memo-table))
+           (debug-repl)
+           (???))))
+                                        ;(debug-repl "refresh result")
+     ;; this needs to upate the R-expr and refresh the assumption
+     ;; in the case
+                                        ;(???)
+     )))
 
 
 (defn rebuild-memo-table-for-term [term-name]
@@ -156,8 +231,9 @@
                                                                            ;; in the case of unk memos, some of the variables _must_ be ground before we attempt the lookup, otherwise we dont know if we should store something or wait for more of the
                                                                            :required-ground-variables (if (= :unk (:memoization-mode dat))
                                                                                                         unk-required-vars
-                                                                                                        nil)})]
-                                        ;(add-watcher! orig-rexpr-assumpt mem-container)
+                                                                                                        nil)
+                                                                           :memo-for-term term-name})]
+                                        (add-watcher! orig-rexpr-assumpt mem-container)
                                         (assoc dat
                                                :memoized-rexpr (make-memoized-rexpr mem-container
                                                                                     (into {} (for [k (exposed-variables orig-rexpr)]
@@ -209,7 +285,7 @@
 
 
 (defn print-memo-table [term-name]
-  (let [term (get @system/user-defined-terms term-name)]
+  (let [term (get-user-term term-name)]
     (if (nil? term)
       (println "term " term-name " not found")
       (do

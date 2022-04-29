@@ -47,5 +47,6 @@
                                         ;*unchecked-math* :warn-on-boxed ;; boxed math is slow9
                 }
 
-   :repositories [["matthewfl.com" "https://matthewfl.com/maven-repo"]]
+  ;; this will check the repo every time it runs...
+  ;:repositories [["matthewfl.com" "https://matthewfl.com/maven-repo"]]
   )

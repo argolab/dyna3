@@ -46,12 +46,15 @@
   Watcher
   (notify-invalidated! [this from-watcher] (invalidate! this))
   (notify-message! [this from-watcher message] (send-message! this (assoc message
-                                                                          :from-upstream from-watcher)))
+                                                                          :from-upstream (conj (:from-upstream message ())
+                                                                                               from-watcher))))
 
   Object
   (toString [this] (str "[Assumption isvalid=" (is-valid? this) " watchers=" (let [w watchers]
                                                                                (if-not (nil? w)
-                                                                                 (locking w (str (.keySet w))))) "]")))
+                                                                                 (locking w (str (.keySet w))))) "]"))
+  (hashCode [this] (System/identityHashCode this))
+  (equals [this other] (identical? this other)))
 
 (defn add-watcher-function! [assumption func]
   (add-watch assumption (reify Watcher
@@ -60,7 +63,7 @@
 
 ;; this can be done via atoms or agents and then there can be a watcher which is
 ;; added in the case that the value changes
-(comment
+#_(comment
   (defprotocol Modifable-value
     (set-value! [this value])
     (set-recompute-function! [this func]))
@@ -131,9 +134,14 @@
 
 (defmacro compute-with-assumption [& body]
   `(loop [assumpt# (make-assumption)]
-     (binding [*current-watcher* ~assumpt#
-               *fast-fail-on-invalid-assumption* true]
-       (try
-         [assumpt# (do ~@body)]
-         (catch InvalidAssumption err#
-           (recur (make-assumption)))))))
+     (let [[ok# res#]
+           (binding [*current-watcher* assumpt#
+                     *fast-fail-on-invalid-assumption* true]
+             (try
+               [true (do ~@body)]
+               (catch InvalidAssumption err#
+                 [false false]))
+             )]
+       (if ok#
+         [assumpt# res#]
+         (recur (make-assumption))))))

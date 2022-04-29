@@ -27,6 +27,9 @@ f(1) = 1.
 assert f(1) = 1.
 f(2) = 2.
 
+%:- run_agenda.
+%:- print_memo_table f/1.
+
 assert f(2) = 2.
 ")
 
