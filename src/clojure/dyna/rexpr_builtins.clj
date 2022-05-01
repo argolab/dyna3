@@ -98,19 +98,31 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(if (= "true" (System/getProperty "dyna.allow_bigint_type" "true"))
+  (defmacro upcast-big-int [a b] a) ;; the first argument will upcast to a big int using +'
+  (defmacro upcast-big-int [a b] b))
+
+;; don't print the big int with the 1N suffix
+(defmethod print-method clojure.lang.BigInt [^clojure.lang.BigInt o ^java.io.Writer w]
+  (.write w (.toString o)))
+
+(if (= "true" (System/getProperty "dyna.allow_ratio_type" "true"))
+  (defmacro maybe-cast-to-float [a] a)
+  (defmacro maybe-cast-to-float [a] `(double ~a)))
+
 ; there should be some pattern which matches if there is something
 
 (def-builtin-rexpr add 3
   ;; :allground should just be the special case
-  (:allground (= v2 (+ v0 v1))) ;; return true that for this to identify that this is mul 1, false otherwise
+  (:allground (= v2 ((upcast-big-int +' +) v0 v1))) ;; return true that for this to identify that this is mul 1, false otherwise
 
   ;; there should only ever be 1 variable which is free, this means that this expression is rewritten for an expression
   ;; this would have some of the expression
 
 
-  (v2 (+ v0 v1))  ;; assign some value to a variable using the existing variables
-  (v1 (- v2 v0))
-  (v0 (- v2 v1))
+  (v2 ((upcast-big-int +' +) v0 v1))  ;; assign some value to a variable using the existing variables
+  (v1 ((upcast-big-int -' -) v2 v0))
+  (v0 ((upcast-big-int -' -) v2 v1))
   )
 
 (def-user-term "+" 2 (make-add v0 v1 v2))
@@ -131,10 +143,10 @@
           :else nil)))
 
 (def-builtin-rexpr times 3
-  (:allground (= v2 (* v0 v1)))
-  (v2 (* v0 v1)) ;; this could just identify that these variables must be ground unless they are annotated with other expressions
-  (v1 (/ v2 v0))
-  (v0 (/ v2 v1)))
+  (:allground (= v2 ((upcast-big-int *' *) v0 v1)))
+  (v2 ((upcast-big-int *' *) v0 v1)) ;; this could just identify that these variables must be ground unless they are annotated with other expressions
+  (v1 (/ v2 (maybe-cast-to-float v0)))
+  (v0 (/ v2 (maybe-cast-to-float v1))))
 
 (def-user-term "*" 2 (make-times v0 v1 v2))
 (def-user-term "/" 2 (make-times v2 v1 v0))

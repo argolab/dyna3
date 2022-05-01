@@ -50,9 +50,12 @@
                                                                                                from-watcher))))
 
   Object
-  (toString [this] (str "[Assumption isvalid=" (is-valid? this) " watchers=" (let [w watchers]
-                                                                               (if-not (nil? w)
-                                                                                 (locking w (str (.keySet w))))) "]"))
+  (toString [this] (str "[Assumption isvalid=" (is-valid? this)
+                        " watchers=" (let [w watchers]
+                                       (if-not (nil? w)
+                                         (locking w (str (.keySet w)))))
+                        " id=" (.hashCode this)
+                        "]"))
   (hashCode [this] (System/identityHashCode this))
   (equals [this other] (identical? this other)))
 
@@ -139,9 +142,8 @@
                      *fast-fail-on-invalid-assumption* true]
              (try
                [true (do ~@body)]
-               (catch InvalidAssumption err#
-                 [false false]))
-             )]
+               (catch ~InvalidAssumption err#
+                 [false false])))]
        (if ok#
          [assumpt# res#]
          (recur (make-assumption))))))

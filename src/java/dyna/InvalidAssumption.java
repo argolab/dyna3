@@ -1,6 +1,6 @@
 package dyna;
 
-class InvalidAssumption extends RuntimeException {
+public class InvalidAssumption extends RuntimeException {
 
     public InvalidAssumption(String msg) {
         super(msg);

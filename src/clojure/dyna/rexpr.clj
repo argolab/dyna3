@@ -964,7 +964,8 @@
 ;; this is going to have to have some context in which an expression
 
 (defn is-ground? [var-name]
-  (or (and (is-variable? var-name) (is-variable-set? var-name))
+  (or (and (is-variable? var-name)
+           (is-variable-set? var-name))
       (is-constant? var-name)))
 
 (def-rewrite-matcher :str [string] (string? string))

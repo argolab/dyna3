@@ -13,6 +13,7 @@ package dyna;
 import java.math.BigInteger;
 import clojure.java.api.Clojure;
 import static dyna.ParserUtils.*;
+import clojure.lang.BigInt;
 
 }
 
@@ -162,18 +163,19 @@ primitive returns[Object v]
     // this should parse as a bigint, and then check if it size is with in the range of a 64 bit int.
     : neg='-'? a=NumberInt {
       BigInteger b = new BigInteger($a.getText());
-      if(b.bitCount() <= 63) {
-          $v = ($neg != null ? -1 : 1) * b.longValue();
-      } else {
-          $v = $neg != null ? b.negate() : b;
+      if($neg != null) b = b.negate();
+      try {
+          $v = b.longValueExact();
+      } catch (ArithmeticException err) {
+          $v = BigInt.fromBigInteger(b);
       }
     }
     | a=NumberInt16 {
       BigInteger b = new BigInteger($a.getText().substring(2), 16);
-      if(b.bitCount() <= 63) {
-          $v = b.longValue();
-      } else {
-          $v = b;
+      try {
+          $v = b.longValueExact();
+      } catch (ArithmeticException err) {
+          $v = BigInt.fromBigInteger(b);
       }
     }
     // question if that should just always use double when inputed, or try and cast down in the case that it can represent

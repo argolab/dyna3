@@ -50,5 +50,23 @@ fib(N) := fib(N-1) + fib(N-2) for N > 1.
 
 assert fib(10) = 55.
 
-print fib(100).
+%print fib(100).
+%debug_repl X=fib(100), Z = 354224848179261915075.
+
+% if this is not memoized, then this will take too long to run
+assert fib(100) = 354224848179261915075.
+")
+
+(str-test factorial-null "
+:- memoize_null fact/1.
+fact(0) := 1.
+fact(N) := fact(N-1)*N for N < 10.
+
+:- run_agenda.
+
+debug_repl fact(2).
+
+assert fact(2) = 2.
+
+:- print_memo_table fact/1.
 ")

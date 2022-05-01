@@ -46,8 +46,11 @@
           (debug-repl "unknown assumption invalidated")
           (???)))))
   (notify-message! [this watching message]
-    (debug-repl "got message notified")
-    (???))
+    ;; just refresh the memo table here
+    (system/push-agenda-work #(refresh-memo-table this))
+    ;(debug-repl "got message notified")
+    ;(???)
+    )
 
   IMemoContainer
   (get-value-for-key [^MemoContainer this key]
@@ -95,18 +98,19 @@
           [cond memo] memo-value
           [Rorig assumption-upstream] @Rorig+assumption-upstream]
       (assert (is-valid? assumption-upstream)) ;; if this is not valid, then we  should rebuild the origional expression
-      (let [orig-result (context/bind-no-context
-                         (simplify-top (make-conjunct [cond Rorig])))]
+      (let [[orig-result-assumpt orig-result] (context/bind-no-context
+                                              (compute-with-assumption
+                                               (simplify-top (make-conjunct [cond Rorig]))))]
         (when (not= orig-result memo)
           ;; then we need to save the memo in to the table, and signal that an event happened
+          (add-watcher! orig-result-assumpt this)
           (if (compare-and-set! Rconditional+Rmemo memo-value [cond orig-result])
             (do ;; the update was successful
               (send-message! assumption-self
                              {:kind :refresh-table
                               :table this
                               :old-memo memo
-                              :new-memo orig-result})
-              )
+                              :new-memo orig-result}))
             (do ;; the update was not successful
               (system/push-agenda-work #(refresh-memo-table this))
               (debug-repl "failed to save refresh of memo table")
