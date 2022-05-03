@@ -99,12 +99,12 @@
                                                             ;; then we have to save the value of these variables into the R-expr
                                                             (make-conjunct [(make-variable-assignment-conjunct value-map)
                                                                             resulting-rexpr])
-                                                            resulting-rexpr  ;; there is nothing to add to this expression
-                                                            )
+                                                            resulting-rexpr)  ;; there is nothing to add to this expression
+
       (= context-kind :proj) (let [proj-var (:var root-rexpr)]
                                (assert (empty? (dissoc value-map proj-var))) ;; all of the other variable assignments should have already been propagated out
-                               resulting-rexpr ;;
-                               )
+                               resulting-rexpr) ;;
+
       ;; (do (debug-repl)
                              ;;   (let [proj-var (:var root-rexpr)]
                              ;;       (if (contains? value-map proj-var)
@@ -125,12 +125,10 @@
       (= context-kind :memo-expr-conditional) resulting-rexpr  ;; I suppose this will just reset after it runs
       :else (do
               (dyna-debug (debug-repl "context unknown kind"))
-              (???))  ;; todo: other kinds of contexts which are going
-      ))
+              (???))))  ;; todo: other kinds of contexts which are going
+
   (ctx-scan-through-conjuncts [this scan-fn]
-    (let [r (reduce
-             (fn [_ x] (let [r (scan-fn x)] (if-not (nil? r) (reduced r))))
-             rexprs)]
+    (let [r (first (remove nil? (map scan-fn rexprs)))]
       (if (and (nil? r) (not (nil? parent)))
         (ctx-scan-through-conjuncts parent scan-fn)
         r)))
@@ -174,8 +172,8 @@
                     ;; to read the value out of the parent context instead of
                     ;; creating a local slot for this variable.  This can
                     ;; happenin the case that the incoming
-                {incoming-var nil})
-              )))
+                {incoming-var nil}))))
+
 
 (defn make-nested-context-memo-conditional [rexpr]
   (assert (bound? #'*context*))

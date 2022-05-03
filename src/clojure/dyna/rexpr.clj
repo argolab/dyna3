@@ -1332,6 +1332,7 @@
         replaced-R)
       (do
         (dyna-debug (when-not (or (is-empty-rexpr? nR) (contains? (exposed-variables nR) A))
+                      (print "failed find projected var")
                       (debug-repl "gg9")))
         (make-proj A nR)))))
 
@@ -1384,6 +1385,7 @@
 
         (let [nR (make-disjunct (doall (for [val (persistent! proj-vals)]
                                          (remap-variables R {A (make-constant val)}))))]
+          ;(debug-repl "ff")
           nR)))))
 
 
