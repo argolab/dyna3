@@ -39,8 +39,10 @@
       (if (not (nil? parent))
         (ctx-get-value parent variable))))
   (ctx-is-bound? [this variable]
-    (or (not (nil? (get value-map variable)))
-        (and (not (nil? parent)) (ctx-is-bound? parent variable))))
+    (let [v (get value-map variable :not-found-in-map)]
+      (if (= v :not-found-in-map)
+        (and (not (nil? parent)) (ctx-is-bound? parent variable))
+        (not (nil? v)))))
   ;; TODO: there should be a recursive version of the set-value! function which avoids rechecking what the current
   ;; value of the variable is
   (ctx-set-value! [this variable value]

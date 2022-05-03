@@ -39,6 +39,8 @@
                                                [orig-rexpr orig-rexpr-assumpt])]
               (assert cas-result)
               (add-watcher! orig-rexpr-assumpt this)
+              ;; there probably needs to be some version on the table so old updates can get discard
+              ;; might also include the assumption on the update so that it could track if the update is still valid
               (system/push-agenda-work #(refresh-memo-table this))
               ;(debug-repl "got invalidated notified")
               )))
@@ -110,7 +112,8 @@
                              {:kind :refresh-table
                               :table this
                               :old-memo memo
-                              :new-memo orig-result}))
+                              :new-memo orig-result
+                              :assumption orig-result-assumpt}))
             (do ;; the update was not successful
               (system/push-agenda-work #(refresh-memo-table this))
               (debug-repl "failed to save refresh of memo table")

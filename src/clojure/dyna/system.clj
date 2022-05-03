@@ -74,8 +74,8 @@
    :work-agenda (DynaAgenda.)
    :user-recursion-limit (atom default-recursion-limit)
    :query-output println
-   :system-is-inited (atom false)
-   })
+   :system-is-inited (atom false)})
+
 
 
 (defmacro run-under-system [system & args]

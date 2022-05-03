@@ -520,11 +520,7 @@
 (def-base-rexpr conjunct [:rexpr-list args]
   (is-constraint? [this] (every? is-constraint? args)))
 
-(def make-* make-conjunct)
-
 (def-base-rexpr disjunct [:rexpr-list args])
-
-(def make-+ make-disjunct)
 
 
 ;; there should be a more complex expression for handling this in the case of a if statement or something
