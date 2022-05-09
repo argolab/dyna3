@@ -42,6 +42,7 @@
 (make-file-test "quicksort")
 (make-file-test "simple_matrix")
 (make-file-test "import_file")
+(make-file-test "parser_generator_test")
 
 
 ;; for some reason, attempting to do file io in the macro causes the loading of other unrelated stuff to not work

@@ -1,0 +1,18 @@
+:- import "parser_generator".
+
+grammar = '{
+S = AB*
+AB = A B
+A = 'a'+
+B = 'b'+
+}.
+
+in = "aaaaabbbaaaabb".
+
+goal = &s(&ab(&a("a", "a", "a", "a", "a"), &b("b", "b", "b")), &ab(&a("a", "a", "a", "a"), &b("b", "b"))).
+
+out = parse(grammar, in).
+
+print out.
+
+assert out = goal.

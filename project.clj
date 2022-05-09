@@ -14,6 +14,7 @@
                  ;[jise "0.1.0-SNAPSHOT"] ;; can get more control over the generated java classes
                  ;[datalevin "0.6.6"]
                  [org.clojure/tools.analyzer.jvm "0.7.3"]
+                 [instaparse "1.4.12"]
                  ]
   :repl-options {:init-ns dyna.core}
   ;; :aot [dyna.interface

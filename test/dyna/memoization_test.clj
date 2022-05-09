@@ -64,7 +64,7 @@ fact(N) := fact(N-1)*N for N < 10.
 
 :- run_agenda.
 
-%ebug_repl fact(2).
+%debug_repl fact(2).
 
 assert fact(2) = 2.
 

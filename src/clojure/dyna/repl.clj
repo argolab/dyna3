@@ -52,6 +52,8 @@
                         (.parser parser)
                         (.option LineReader$Option/INSERT_BRACKET true)
                         (.variable LineReader/INDENTATION 2)
+                        (.variable LineReader/HISTORY_FILE (System/getProperty "dyna.history_file"
+                                                                               (str (System/getProperty "user.home") "/.dyna3_history")))
                         (.build))]
     (println "To exit press ctrl-d")
     (try

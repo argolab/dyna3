@@ -15,7 +15,8 @@
   (:import [org.antlr.v4.runtime.misc Interval])
   (:import [dyna DynaTerm DynaUserAssert ParserUnbufferedInputStream DynaUserError])
   (:import [java.net URL])
-  (:import [java.nio.file Paths]))
+  (:import [java.nio.file Paths])
+  (:import [java.io FileNotFoundException]))
 
 
 
@@ -275,10 +276,22 @@
                                            "import" (let [imported-filename (if (= (.arity arg1) 2)
                                                                               (get arg1 1)
                                                                               (get arg1 0))
-                                                          file (URL. source-file (if-not (.endsWith ^String imported-filename ".dyna")
+                                                          lfilename (if-not (.endsWith ^String imported-filename ".dyna")
                                                                                    (str imported-filename ".dyna")
-                                                                                   imported-filename))]
-                                                      (import-file-url file)
+                                                                                   imported-filename)
+                                                          file (URL. source-file lfilename)
+                                                          file (try
+                                                                 (do (import-file-url file)
+                                                                     file)
+                                                                 (catch FileNotFoundException e
+                                                                   ;; attempt to import a file from the resources which are built in
+                                                                   (let [rf (resource (str "dyna/builtin_libraries/" lfilename))]
+                                                                     (try
+                                                                       (do (import-file-url rf)
+                                                                           rf)
+                                                                       (catch FileNotFoundException e2
+                                                                         (throw e))))))]
+                                                      ;(import-file-url file)
                                                       (let [imported-names (if (= (.arity arg1) 2)
                                                                              (.list_to_vec ^DynaTerm (get arg1 0))
                                                                              ;; then this should lookup the exported terms
@@ -394,9 +407,13 @@
 
                                            "run_agenda" (system/run-agenda)
 
+                                           "load_clojure" (match-term arg1 ("load_clojure" cfile)
+                                                                      (load cfile))
+
 
                                            (do
                                              ;; in the case that this is invalid, we can raise an exception that should report the error to the user
+                                             (println (str "Compiler operation " (.name arg1) "not found"))
                                              (throw (DynaUserError. (str "operator " (.name arg1) " not found"))))
                                            ;(???) ;; there should be some invalid parse expression or something in the case that this fails at this point
                                            )

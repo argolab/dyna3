@@ -795,35 +795,37 @@
         runs-at (:run-at kw-args :standard)
         rewriter-function (make-rewriter-function matcher rewrite &form)
         rewrite-func-var (gensym 'rewrite-func)]
-    (let [ret `(let [~rewrite-func-var ~rewriter-function]
-                 (locking dyna.rexpr-constructors/modification-lock
-                   ~@(for [run-at (if (seqable? runs-at) runs-at [runs-at])]
-                       `(let [[rewrite-collection# rewrite-collection-func#]
-                              ~(case run-at
-                                 :standard `[(var-get #'rexpr-rewrites) (var-get #'rexpr-rewrites-func)]
-                                 :construction `[(var-get #'rexpr-rewrites-construct) (var-get #'rexpr-rewrites-construct-func)]
-                                 :inference `[(var-get #'rexpr-rewrites-inference) (var-get #'rexpr-rewrites-inference-func)])
-                              functor-name# ~(symbol (str functor-name "-rexpr"))]
-                          ;; this is now also protected by the modification lock above???, so we don't need the atomic I guess....
-                          (swap-vals! rewrite-collection# (fn [old#] (assoc old# functor-name# (conj (get old# functor-name# #{}) ~rewrite-func-var))))
-                          ;; TODO: the first function is going to be the identity, which does not make since
-                          (let [combined-func# (~combine-rewrite-function
-                                   ~(symbol "dyna.rexpr-constructors" (str (case run-at
-                                                                             :standard "simplify-"
-                                                                             :construction "simplify-construct-"
-                                                                             :inference "simplify-inference-")
-                                                                           functor-name))
-                                                ~rewrite-func-var)]
-                            (intern 'dyna.rexpr-constructors '~(symbol (str (case run-at
-                                                                              :standard "simplify-"
-                                                                              :construction "simplify-construct-"
-                                                                              :inference "simplify-inference-"
-                                                                              )
-                                                                            functor-name))
-                                    combined-func#)
-                            ;(swap-vals! rewrite-collection-func# assoc functor-name# combined-func#)
-                            )))))]
-      ret)))
+    (when (and (not (and (:is-check-rewrite kw-args) (not system/check-rexpr-arguments)))
+               (not (and (:is-debug-rewrite kw-args) (not system/debug-statements))))
+      (let [ret `(let [~rewrite-func-var ~rewriter-function]
+                   (locking dyna.rexpr-constructors/modification-lock
+                     ~@(for [run-at (if (seqable? runs-at) runs-at [runs-at])]
+                         `(let [[rewrite-collection# rewrite-collection-func#]
+                                ~(case run-at
+                                   :standard `[(var-get #'rexpr-rewrites) (var-get #'rexpr-rewrites-func)]
+                                   :construction `[(var-get #'rexpr-rewrites-construct) (var-get #'rexpr-rewrites-construct-func)]
+                                   :inference `[(var-get #'rexpr-rewrites-inference) (var-get #'rexpr-rewrites-inference-func)])
+                                functor-name# ~(symbol (str functor-name "-rexpr"))]
+                            ;; this is now also protected by the modification lock above???, so we don't need the atomic I guess....
+                            (swap-vals! rewrite-collection# (fn [old#] (assoc old# functor-name# (conj (get old# functor-name# #{}) ~rewrite-func-var))))
+                            ;; TODO: the first function is going to be the identity, which does not make since
+                            (let [combined-func# (~combine-rewrite-function
+                                                  ~(symbol "dyna.rexpr-constructors" (str (case run-at
+                                                                                            :standard "simplify-"
+                                                                                            :construction "simplify-construct-"
+                                                                                            :inference "simplify-inference-")
+                                                                                          functor-name))
+                                                  ~rewrite-func-var)]
+                              (intern 'dyna.rexpr-constructors '~(symbol (str (case run-at
+                                                                                :standard "simplify-"
+                                                                                :construction "simplify-construct-"
+                                                                                :inference "simplify-inference-"
+                                                                                )
+                                                                              functor-name))
+                                      combined-func#)
+                                        ;(swap-vals! rewrite-collection-func# assoc functor-name# combined-func#)
+                              )))))]
+        ret))))
 
 (defmacro def-iterator [& args]
   (let [kw-args (apply hash-map (drop-last args))
@@ -1296,6 +1298,7 @@
   ;; proj(A, 1) -> inf
   :match (proj (:free A) (is-multiplicity? M))
   :run-at :construction
+  ;:is-check-rewrite true
   (when (not= (get-argument M 0) 0)
     (debug-repl "should not happen")
     (make-multiplicity ##Inf)))
@@ -1303,6 +1306,7 @@
 (def-rewrite
   :match (proj (:free A) (:rexpr R))
   :run-at :construction
+  :is-check-rewrite true
   (do
     (when-not (contains? (exposed-variables R) A)
       (debug-repl "proj var not in body")
