@@ -268,15 +268,15 @@
                   result#)))))
 
          Object
-         (equals ~'[this other]
+         (~'equals ~'[this other]
            (or (identical? ~'this ~'other)
                (and (instance? ~(symbol rname) ~'other)
                     (= (hash ~'this) (hash ~'other))
                     ~@(for [[var idx] (zipmap vargroup (range))]
                         `(= ~(cdar var) (get-argument ~'other ~idx))))))
 
-         (hashCode [this] ~'cached-hash-code) ;; is this something that should only be computed on demand instead of when it is constructed?
-         (toString ~'[this] (trim (str (as-list ~'this)))))
+         (~'hashCode [this] ~'cached-hash-code) ;; is this something that should only be computed on demand instead of when it is constructed?
+         (~'toString ~'[this] (trim (str (as-list ~'this)))))
 
        (defn ~(symbol (str "make-no-simp-" name))
          {:rexpr-constructor (quote ~name)
@@ -750,6 +750,7 @@
         do-rewrite-body `(let [~res (do ~body)]
                            ~(when system/print-rewrites-performed
                               `(when (and (not (nil? ~res)) (not= ~res ~'rexpr))
+                                 (debug-delay-ntimes 1000 (debug-repl))
                                  (print ~(str "Performed rewrite:"  (meta from-file) "\nOLD: ") ~'rexpr "NEW: " ~res "CONTEXT:" (context/get-context))))
                            ~(when system/status-counters
                               `(when (and (not (nil? ~res)) (not= ~res ~'rexpr))
@@ -844,7 +845,7 @@
     ret))
 
 
-(defn make-iterator [variable iterator]
+#_(defn make-iterator [variable iterator]
   ;; these are going to need to be hashable, otherwise this would mean that we can't use the set to identify which expressions are iterable
   ;; there are some values which
   #{[variable iterator]})
@@ -1300,7 +1301,7 @@
   :run-at :construction
   ;:is-check-rewrite true
   (when (not= (get-argument M 0) 0)
-    (debug-repl "should not happen")
+    (debug-repl "should not happen, proj to inf multiplicity")
     (make-multiplicity ##Inf)))
 
 (def-rewrite

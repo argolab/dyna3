@@ -25,6 +25,8 @@
 (def ^:dynamic *auto-run-agenda-before-query*
   (= "true" (System/getProperty "dyna.auto_run_agenda" "true")))
 
+(def ^:dynamic *use-optimized-rexprs* true)
+
 ;; terms which are included by the system.  These will get automattically
 ;; replaced once the objects are created in the first place these should not be
 ;; recursive statements or anything

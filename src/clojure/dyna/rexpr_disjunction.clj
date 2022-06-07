@@ -1,118 +1,215 @@
-(ns dyna.rexpr-disjunction
+(ns dyna.rexpr-disjunction  ;; should change this to disjunct optimized or something, as there are now multiple kinds of disjuncts that we can have
+  (:require [dyna.utils :refer :all])
   (:require [dyna.rexpr :refer :all])
+  (:require [dyna.system :as system])
+  (:require [dyna.context :as context])
   (:require [dyna.prefix-trie :refer :all])
-  (:require [clojure.set :refer [subset?]]))
-
-(assert false)  ;; this file is not used yet
+  (:require [dyna.base-protocols :refer :all])
+  ;(:require [dyna.iterators :refer iterators])
+  (:require [clojure.set :refer [subset? union]])
+  (:import [dyna.rexpr disjunct-rexpr])
+  (:import [dyna.prefix_trie PrefixTrie])
+  (:import [dyna UnificationFailure]))
 
 (def ^:dynamic *disjunct-op-remove-if-single* true)
 
 (def ^:dynamic *disjunct-constructed-add-function* nil)
 
-;; the prefix trie will have that
+(declare ^:private remap-variables-disjunct-op)
+
+;(def ^{:dynamic true :private true} *make-optimized-disjuncts* true)
 
 
-;; more efficient implementations of disjunction which can handle special (but
-;; common) cases.  This can include dispatching on the values of variables
-;; directly to a branch, like a trie.  We should be able to construct these
-;; versions of a disjunction from the generic version of a disjunction that is
-;; defined in rexpr.clj
-
-
-
-;; multiple levels of matching variables should also be a thing that was
-;; integrated into the aggregator before, or the disjunction included that it
-;; was matching the expression
-
-;; (defn- recurse-values-depth [m depth]
-;;   (if (= depth 0)
-;;     (vals m)
-;;     (lazy-seq (map #(recurse-values-depth % (- depth 1)) (vals m)))))
-
-
-;; I suppose that in the case that there are non-ground disjunction-variables, then this would still need this structure
-;; once all of the disjunct variables are ground, then this can just rewrite as the wrapped R-expr.  I suppose that this can
-;; also consider which of the variables are forced to take a particular value.  Then those can be created as unification expressions
-;; such that it will take which of the values might corresponds with it having some of the different
 (def-base-rexpr disjunct-op [:var-list disjunction-variables
-                             ;:disjunct-trie rexprs
-                             :prefix-trie rexprs
-                             ]
-  ;; (primitive-rexpr [this] (assert false))
-  ;; (get-children [this] (assert false))
-  ;; (primitive-rexpr [this] ;; this would have to construct many disjuncts for the given expression.
-  ;;                  )
+                             :prefix-trie rexprs]
+  (get-children [this] (map second (trie-get-values rexprs nil)))
 
-  ;; this will need to walk through all of the rexprs trie and find the depth in
-  ;; which an expression corresponds with it.  I suppose that we do not need to
-  ;; have a list of disjuncts, as those can just be other disjunctive R-exprs in
-  ;; the case that there is more than 1 thing
-  (get-children [this] (map second (get-values rexprs)))
+  (remap-variables [this variable-renaming-map]
+                   (remap-variables-disjunct-op this variable-renaming-map remap-variables))
+  (remap-variables-handle-hidden [this variable-renaming-map]
+                                 (remap-variables-disjunct-op this variable-renaming-map remap-variables-handle-hidden))
+  ;; the exposed variables will just be the disjunction-variables.  The
+  ;; prefix-trie will be a subset of those variables, so it does not need to get scanned
 
+  ;; (hashCode [this]
+  ;;           (bit-xor (hash disjunction-variables) (hash rexprs)))
 
-  (remap-variables
-   [this variable-renaming-map]
-   (if (empty? variable-renaming-map) this
-       (let [new-disjuncts (map #(get variable-renaming-map % %) disjunction-variables)]
-         ;; if one of the variables is a constant, then we can avoid keeping the entire structure
-         ;; also we might want to have some of the expressions
+  ;; (equals [this other]
+  ;;         (if (identical? this other)
+  ;;           true
+  ;;           (do (debug-repl "trie equals")
+  ;;               (???))))
 
-         (assert false)
-         )
-       )
-   )
+  ;; if we can determine that the disjunct does not overlap from the trie, and
+  ;; that all of the branches are also only containing constraints
+  (is-constraint? [this]
+                (and (= 0 (.contains-wildcard ^PrefixTrie rexprs))
+                     (every? #(and (= (count (second %)) 1)
+                                   (is-constraint? (cdar %)))
+                             (trie-get-values-collection rexprs nil)))))
 
-  )
+(defn- remap-variables-disjunct-op [this variable-renaming-map remap-fn]
+  (if (empty? variable-renaming-map)
+    this
+    (let [new-vars (vec (map #(get variable-renaming-map % %) (:disjunction-variables this)))
+          new-vars-values (vec (map #(and (is-constant? %) (get-value %)) new-vars))]
+      ;; this is going to have to remap the variables
+      (if (= new-vars (:disjunction-variables this))
+        this  ;; then nothing has changed so don't create a new structure
+        (let [new-trie (trie-map-values (:rexprs this)
+                                           new-vars-values
+                                           (fn [key rr]
+                                             (let [ret (remap-fn rr variable-renaming-map)]
+                                               (when-not (is-empty-rexpr? ret)
+                                                 ret))))]
+          (when (.contains (str new-vars) "proj-hidden15276")
+            (debug-repl "nt"))
+          (make-disjunct-op new-vars new-trie))))))
 
+;; if there already exists tries in the disjunct, then it will construct the more optimized disjunct
 (def-rewrite
-  :match (disjunct-op var-list rexprs)
+  :match {:rexpr (disjunct (:rexpr-list children))
+          :check system/*use-optimized-rexprs*}
   :run-at :construction
-  :is-check-rewrite true
-  (let [query-key (map get-value var-list)]
-    (when-not (every? (fn [x] (and (rexpr? x)
-                                   ;; the variables which are exposed should be a subset of what is not ground
-                                   ;; or are we going to have to represent which of the values are represented with
-                                   (subset? (exposed-variables x) var-list)))
-                      (map second (get-values rexprs query-key)))
-      (debug-repl "failed to have rexpr in trie")
-      (???))))
+  (let [dj-vars (vec (exposed-variables rexpr))
+        rexpr-map (loop [n (count dj-vars)
+                         s children]
+                    (if (= n 0)
+                      s
+                      (recur (- n 1) {nil s})))
+        ret (make-disjunct-op dj-vars
+                              (PrefixTrie. (count dj-vars)
+                                           (reduce bit-or (map #(bit-shift-left 1 %) (range (count dj-vars))))  ;; all of the disjuncts are unknown variables
+                                           rexpr-map))]
+    (when (some is-disjunct-op? children)
+      (debug-repl "need to combine tries"))
+    ;(debug-repl "made dd")
+    ret))
+
 
 (def ^:private not-seen-in-trie (Object.))
 
-;; there can be a function which is called whenever a new disjunct is constructed
+(defn- merge-rexpr-disjunct-list [lst radd]
+  (if (is-empty-rexpr? radd)
+    [false lst] ;; [(if it added something to the list) (the list)]
+    (if (is-multiplicity? radd)
+      (let [cnt (volatile! 0)
+            others (doall (filter (fn [x] (if (is-multiplicity? x)
+                                            (do (vswap! cnt + (:mult x))
+                                                nil)
+                                            x))
+                                  lst))]
+        [(= @cnt 0) (conj others (make-multiplicity (+ @cnt (:mult radd))))])
+      [true (conj lst radd)])))
 
 (def-rewrite
-  :match (disjunct-op var-list rexprs)
+  :match (disjunct-op (:any-list dj-vars) (:unchecked rexprs))
   :run-at [:standard :inference]
-  ;; if there is only a single value then it should just return that entry
-  (let [values-seen (transient (vec (repeat (count var-list) not-seen-in-trie)))
-        query-key (map get-value var-list)
-        new-trie (volatile! (make-prefixtrie (count var-list)))
+  (let [outer-context (context/get-context)
+        ret-children (volatile! (PrefixTrie. (count dj-vars) 0 nil))
+        num-children (volatile! 0)
+        var-map (map get-value dj-vars)
+        child-var-values (transient (vec (repeat (count dj-vars) not-seen-in-trie)))]
+    (doseq [[var-binding child] (trie-get-values rexprs var-map)]
+      ;; this should loop through the children
+      (let [child-context (context/make-nested-context-disjunct child)]
+        (doseq [i (range (count dj-vars))]
+          ;; this should create bindings for the variables in the context when they are already known
+          (let [djv (nth var-binding i)
+                dv (nth dj-vars i)]
+            (when (and (not (nil? djv)) (is-variable? dv))
+              (ctx-set-value! child-context dv djv))))
+        (let [new-child-rexpr (context/bind-context-raw child-context
+                                                        (try (simplify child)
+                                                             (catch UnificationFailure e (make-multiplicity 0))))]
+          ;; if this is a disjunct, then it should just take the values into this
+          (assert (and (not (is-disjunct? new-child-rexpr))
+                       (not (is-disjunct-op? new-child-rexpr))))
+          (when-not (is-empty-rexpr? new-child-rexpr)
+            (let [dj-key (map #(get-value-in-context % child-context) dj-vars)]
+              ;; identify the different values seen for variables when running
+              (doseq [i (range (count dj-vars))]
+                (let [vv (get-value-in-context (nth dj-vars i) child-context)
+                      cv (nth child-var-values i)]
+                  (if (not= cv vv)
+                    (assoc! child-var-values i (if (= cv not-seen-in-trie) vv nil)))))
+              ;; save the resulting R-expr in the resulting trie
+              (when (is-disjunct-op? new-child-rexpr)
+                (debug-repl "should combine tries into the current trie"))
+              (let [added-new (volatile! false)]
+                (vswap! ret-children trie-update-collection dj-key
+                        (fn [col]
+                          (let [[made-new ret] (merge-rexpr-disjunct-list col new-child-rexpr)]
+                            (vreset! added-new made-new)
+                            ret)))
+                (if @added-new
+                  (vswap! num-children inc))))))))
+    ;; set the values of variables which are the same across all branches
+    (doseq [i (range (count dj-vars))]
+      (let [dv (nth child-var-values i)]
+        (when (and (not= dv not-seen-in-trie) (not (nil? dv)) (is-variable? (nth dj-vars i)))
+          (ctx-set-value! outer-context (nth dj-vars i) dv))))
+    (if (= @num-children 1)
+      ;; then there is only a single child, so we can return that
+      (let [[[child-bindings child]] (trie-get-values @ret-children nil)]
+        child)
+      ;; then there are multiple children, so we have to return the entire trie
+      (let [ret (make-disjunct-op dj-vars @ret-children)]
+        ;(debug-repl "qqq")
+        ret))))
 
-        new-trie (map-trie rexprs query-key (fn [key val]
-                                              ;; this might result in new variables getting bound
-                                              ;; but if there is some value which does not have
 
-                                              ))
-        ]
-    (doseq [[key val] (get-values trie query-key)]
-      ;; this is going to identify which of the values are in the keys, and then
-      (let [disj-ctx (context/make-nested-context-disjunct val)
-            new-rexpr (context/bind-context-raw)]
-        )
+(defn- make-disjunct-op-iterator [dj-vars idx binding-var rexprs]
+  (reify DIterable
+    (iter-what-variables-bound [this] #{binding-var}) ;; this can bind more than just this variable...
+    (iter-variable-binding-order [this] [[binding-var]])
+    (iter-create-iterator [this which-binding]
+      ;(debug-repl)
+      (assert (or (nil? which-binding) (= which-binding [binding-var])))
+      (reify DIterator
+        (iter-run-cb [this cb-fun]
+          (let [values-seen (transient #{})
+                current-bindings (map get-value dj-vars)]
+            (doseq [vals (trie-get-values-collection rexprs current-bindings)]
+              (let [val (nth (first vals) idx)]
+                (when-not (contains? values-seen val)
+                  (conj! values-seen val)
+                  (cb-fun {binding-var val}))))))
+        (iter-has-next [this]
+          (???) ;; this is not being used atm
+          false)
+        ))))
 
-      )
-    )
-  )
+(def-iterator
+  :match (disjunct-op (:any-list dj-vars) (:unchecked rexprs))
+  ;; if any of the variables are fully ground, then it
+  (let [contains-wildcard (.contains-wildcard ^PrefixTrie rexprs)
+        ret (reduce union (for [idx (range (count dj-vars))]
+                            (when (and (not (is-bound? (nth dj-vars idx)))
+                                       (= 0 (bit-and contains-wildcard (bit-shift-left 1 idx))))
+                              (let [binding-var (nth dj-vars idx)]
+                                #{(make-disjunct-op-iterator dj-vars idx binding-var rexprs)}))))]
+                                        ;(debug-repl "diter")
+    ret))
 
 
 (def-rewrite
-  :match {:rexpr (disjunct (:rexpr-list children))
-          :check (not (nil? *disjunct-constructed-add-function*))}
+  :match (disjunct-op (:any-list var-list) rexprs)
   :run-at :construction
-  ;; this would identify that there is some disjunct which is constructed, and
-  ;; then it can added it to the top level though if there is an aggregator
-  ;; which is also getting rewritten, then it would have to unbind the variable
-  ;; the context should really be the thing which is tracking the operation
-  ;; (rather than a dynamic variable)
-  )
+  :is-check-rewrite true
+  (let [var-set (into #{} var-list)
+
+        ;var-values (vec (map get-value var-list))
+        ]
+    (when-not (every? (fn [[var-bindings x]] (if (and (rexpr? x)
+                                                      ;; the variables which are exposed should be a subset of what is not ground
+                                                      ;; or are we going to have to represent which of the values are represented with
+                                                      (subset? (exposed-variables x) var-set))
+                                               true
+                                               (do
+                                                 (debug-repl "gg1")
+                                                 false)))
+                      (trie-get-values rexprs nil))
+      (let [rx (into [] (map second (trie-get-values rexprs nil)))]
+        (debug-repl "R-expr in trie has extra exposed variables"))
+      (???))))

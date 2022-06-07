@@ -341,7 +341,8 @@
                   is-empty-aggregation (volatile! true)
                   ground-values-set (transient #{})]
               (println "aggregator found iterator to run")
-              (let [iter-run (iter-create-iterator (first rel-iterators) incoming-variable)]
+              (let [iter-run (iter-create-iterator (first rel-iterators) nil;incoming-variable ;; what variable is going to be bound is not handled yet
+                                                   )]
                 (iter-run-cb iter-run (fn [itv]
                                         (assert (not (contains? ground-values-set itv)))
                                         (conj! ground-values-set itv))))

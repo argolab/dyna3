@@ -31,9 +31,11 @@
   #{(reify DIterable
       (iter-what-variables-bound [this] #{variable})
       (iter-variable-binding-order [this] [[variable]]) ;; could do something like {#{} #{variable}}
-      (iter-create-iterator [this which-binding] (reify DIterator
-                                                   (iter-run-cb [this cb-fun] (cb-fun {variable value}))
-                                                   (iter-has-next [this] false)))
+      (iter-create-iterator [this which-binding]
+        (assert (or (nil? which-binding) (= which-binding [variable])))
+        (reify DIterator
+          (iter-run-cb [this cb-fun] (cb-fun {variable value}))
+          (iter-has-next [this] false)))
       Object
       (toString [this] (str "(unit-iterator " variable " " value ")")))})
 
@@ -46,19 +48,21 @@
                         (reify DIterable
                           (iter-what-variables-bound [this] #{var})
                           (iter-variable-binding-order [this] [[var]])
-                          (iter-create-iterator [this which-binding] (reify DIterator
-                                                                       (iter-run-cb [this cb-fun]
-                                                                         ;; this has to run the first iterator and record what values are contained
-                                                                         ;; and then run the second iterator without duplicating the result
-                                                                         (let [values-seen (transient #{})]
-                                                                           (doseq [b branches]
-                                                                             (let [itr (filter #(contains? (iter-what-variables-bound %) var) b)]
-                                                                               (iter-run-cb (iter-create-iterator (first itr) nil)
-                                                                                            (fn [var-bindings]
-                                                                                              (when-not (contains? values-seen var-bindings)
-                                                                                                (conj! values-seen var-bindings)
-                                                                                                (cb-fun var-bindings))))))))
-                                                                       (iter-has-next [this] false))))
+                          (iter-create-iterator [this which-binding]
+                            (assert (or (nil? which-binding) (= which-binding [var])))
+                            (reify DIterator
+                              (iter-run-cb [this cb-fun]
+                                ;; this has to run the first iterator and record what values are contained
+                                ;; and then run the second iterator without duplicating the result
+                                (let [values-seen (transient #{})]
+                                  (doseq [b branches]
+                                    (let [itr (filter #(contains? (iter-what-variables-bound %) var) b)]
+                                      (iter-run-cb (iter-create-iterator (first itr) nil)
+                                                   (fn [var-bindings]
+                                                     (when-not (contains? values-seen var-bindings)
+                                                       (conj! values-seen var-bindings)
+                                                       (cb-fun var-bindings))))))))
+                              (iter-has-next [this] false))))
                         ))
         ]
     ;; I suppose that this can just do this a single variable at a time for the

@@ -15,6 +15,7 @@
   (:require [dyna.rexpr-dynabase])
   (:require [dyna.rexpr-meta-programming])
   (:require [dyna.memoization])
+  (:require [dyna.rexpr-disjunction])
   (:require [dyna.ast-to-rexpr :refer [parse-string
                                        import-file-url
                                        eval-string

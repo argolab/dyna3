@@ -17,7 +17,7 @@ clean:
 	rm -rf target/ $(TARGET)
 
 test:
-	_JAVA_OPTIONS='-Ddyna.debug=false -Ddyna.trace_rexpr_construction=false' $(LEIN) test
+	_JAVA_OPTIONS='-Ddyna.debug=false -Ddyna.trace_rexpr_construction=false -Xss8m' $(LEIN) test
 
 test-debug:
 	$(LEIN) test

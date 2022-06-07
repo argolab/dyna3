@@ -76,7 +76,8 @@
                                         [k (var-get v)]))
                              local-bindings)]
     (.printStackTrace traceback System/out)
-    (aprint local-bindings)
+    (try (aprint local-bindings)
+         (catch Exception err nil))
     (clojure.main/repl
      :read (fn [fresh-request exit-request]
              (let [res (clojure.main/repl-read fresh-request exit-request)]
@@ -89,7 +90,7 @@
                      (contains? #{'locals} res) (do (aprint local-bindings)
                                                     fresh-request)
                      (contains? #{'locals-names 'local-names} res) (do (print (keys local-bindings) "\n")
-                                                          fresh-request)
+                                                                       fresh-request)
                      ;; TODO: this should attempt to lookup names in some context
                      :else res)))
      :prompt #(print prompt "=> ")
@@ -101,37 +102,13 @@
   ([] `(debug-repl "dr"))
   ([prompt] `(~debug-repl-fn ~prompt (debugger-get-local-bindings) (Throwable. "Entering Debugger"))))
 
-;; (defmacro debug-repl
-;;   "Starts a REPL with the local bindings available."
-;;   ([] `(debug-repl "dr"))
-;;   ([prompt]
-;;    `(let [local-bindings# (debugger-get-local-bindings)
-;;           all-bindings#  (merge (into {} (for [[k# v#] @~'dyna.utils/debug-useful-variables]
-;;                                            [k# (v#)]))
-;;                                 (into {} (for [[k# v#] (ns-publics 'dyna.rexpr-constructors)]
-;;                                            [k# (var-get v#)]))
-;;                                 (into {} (for [[k# v#] (ns-publics 'dyna.base-protocols)]
-;;                                            [k# (var-get v#)]))
-;;                                  local-bindings#)]
-;;       (.printStackTrace (Throwable. "Entering Debugger") System/out)
-;;       (aprint local-bindings#)
-;;       (clojure.main/repl
-;;        :read (fn [fresh-request# exit-request#]
-;;                (let [res# (clojure.main/repl-read fresh-request# exit-request#)]
-;;                  ;(println "===========\n" res# "\n" (type res#) "\n==========")
-;;                  (cond (contains? ~'#{'quit 'exit} res#) (do (System/exit 0)
-;;                                                              fresh-request#)
-;;                        (contains? ~'#{'c 'continue} res#) exit-request#  ;; exit the eval loop
-;;                        (contains? ~'#{'bt 'backtrace} res#) (do (.printStackTrace (Throwable. "Entering Debugger") System/out)
-;;                                                                 fresh-request#)
-;;                        (contains? ~'#{'locals} res#) (do (aprint local-bindings#)
-;;                                                          fresh-request#)
-;;                        (contains? ~'#{'locals-names} res#) (do (print (keys local-bindings#) "\n")
-;;                                                                fresh-request#)
-;;                        ;; TODO: this should attempt to lookup names in some context
-;;                        :else res#)))
-;;        :prompt #(print ~prompt "=> ")
-;;        :eval (partial ~eval-with-locals all-bindings#)))))
+(defmacro debug-delay-ntimes [ntimes & body]
+  (let [sym (gensym 'debug-delay)
+        isym (intern *ns* sym 0)]
+    `(do
+       (alter-var-root ~isym inc)
+       (when (>= @~isym ~ntimes)
+         ~@body))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -189,12 +166,20 @@
 (defmacro deftype-with-overrides
   [name args overrides & bodies]
   (let [override-map (into {} (for [o  overrides]
-                                [(car o) o]))]
-    `(deftype ~name ~args
-       ~@(for [b bodies]
-           (if (and (seqable? b) (contains? override-map (car b)))
-             (get override-map (car b))
-             b)))))
+                                ;; using (name) as otherwise we might get a name which is already resolved in the namespace
+                                [(symbol (clojure.core/name (car o))) o]))
+        override-used (transient #{})
+        ret (doall `(deftype ~name ~args
+                      ~@(for [b bodies]
+                          (if (and (seqable? b) (contains? override-map (car b)))
+                            (do
+                              (conj! override-used (car b))
+                              (get override-map (car b)))
+                            b))))]
+    (let [override-used (persistent! override-used)]
+      (when (not= (into #{} (keys override-map)) override-used)
+        (debug-repl "failed override")))
+    ret))
 
 
 ;; (defmacro deftype-with-overrides
