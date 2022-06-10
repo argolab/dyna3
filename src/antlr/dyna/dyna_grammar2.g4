@@ -67,6 +67,13 @@ Comma
     : ','
     ;
 
+// we can be like a database where there are some values which can be passed by an external method
+// these values can just be opaque in the case that we are uanble to figure out their primitive type, otherwise
+// this could be used in the case that we don't want to escape something
+DollaredExternalValue
+    : '$' [0-9]+
+    ;
+
 
 // there is some bug in the antlr4 parser where the first grammar rule after the lexer rules will error
 // when using the returns statement
@@ -559,6 +566,7 @@ expressionRoot returns [DynaTerm rterm]
     | '`' '(' e=expression ')' { $rterm = DynaTerm.create("\$escaped", $e.rterm); }
     | '`' v=Variable { $rterm = DynaTerm.create("\$escaped", DynaTerm.create("\$variable", $v.getText())); }
     | '*' { $rterm = DynaTerm.create("\$self_term_uid"); }
+    | dd=DollaredExternalValue { $rterm = DynaTerm.create("\$external_value", Long.parseLong($dd.getText().substring(1))); }
     ;
 
 

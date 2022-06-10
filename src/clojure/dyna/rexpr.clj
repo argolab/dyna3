@@ -103,6 +103,7 @@
          Rexpr
          ~'(primitive-rexpr [this] this) ;; this is a primitive expression so we are going to just always return ourselves
          ~'(is-constraint? [this] false) ;; if this is going to return a multiplicity of at most 1
+         (~'rexpr-name ~'[this] ~(str name)) ;; the name for this type of R-expr
          (~'get-variables ~'[this]
           (filter is-variable?
                   (union (set (list ~@(map cdar (filter #(contains?  #{:var :value} (car %1)) vargroup))))
@@ -1385,7 +1386,10 @@
         iter-self (filter #(contains? (iter-what-variables-bound %) A) iter)]
     (when-not (empty? iter-self)
       (let [proj-vals (transient #{})
-            iter-run (iter-create-iterator (first iter-self) A)] ;; the binding would need to be which variable is getting bound or something...
+            iter-selected (first iter-self)
+            iter-which-binding-order (first (iter-variable-binding-order iter-selected)) ;; this should choose somehow which
+            zzz (assert (.contains iter-which-binding-order A)) ;; this should be a vector
+            iter-run (iter-create-iterator (first iter-self) iter-which-binding-order)] ;; the binding would need to be which variable is getting bound or something...
         (iter-run-cb iter-run #(conj! proj-vals (get % A)))
 
         (let [nR (make-disjunct (doall (for [val (persistent! proj-vals)]

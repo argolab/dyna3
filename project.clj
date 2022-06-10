@@ -12,7 +12,9 @@
                  [org.jline/jline "3.20.0"]  ;; for the front end repl
                  [robert/hooke "1.3.0"]
                  ;[jise "0.1.0-SNAPSHOT"] ;; can get more control over the generated java classes
-                 ;[datalevin "0.6.6"]
+                                        ;[datalevin "0.6.6"]
+                                        ;[io.replikativ/datahike "0.5.1504"]
+
                  [org.clojure/tools.analyzer.jvm "0.7.3"]
                  [instaparse "1.4.12"]
                  ]

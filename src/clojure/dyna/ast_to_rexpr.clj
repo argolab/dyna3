@@ -697,6 +697,11 @@
                            (simplify-rexpr-query [text-rep line-number] rexpr)
                            (make-unify out-variable (make-constant true)))
 
+            ["$external_value" 1] (let [[value-index] (.arguments ast)]
+                                    (make-unify
+                                     out-variable
+                                     (make-constant (system/parser-external-value value-index))))
+
             ["$arg" 1] (let [[expression] (.arguments ast)]
                          (debug-repl "TODO: getting value from with_key")
                          (???))

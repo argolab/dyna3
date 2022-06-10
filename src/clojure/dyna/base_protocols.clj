@@ -28,7 +28,14 @@
   ;; in the case of hidden variables, those re something which need to get added to the map when it recurses through
   (remap-variables-handle-hidden [this variable-renaming-map])
 
-  (is-constraint? [this]))
+  ;; meaning that the multiplicity of this expression will be at most 1.  allows
+  ;; for other additional rewrites to be applied to this expression
+  (is-constraint? [this])
+
+  ;; return the name of this type of R-expr as a string, can be used by external
+  ;; code.  internally it is more efficient to use match or is-X? for matching
+  ;; against the type of R-expr
+  (rexpr-name [this]))
 
   ;; (visit-rexpr-children [this remap-function]) ;; this will visit any nested R-exprs on the expression, and return a new expression of the same type with
   ;(visit-all-children [this remap-function]) ;; this will visit
@@ -83,6 +90,36 @@
   (iter-run-cb [this cb-fun])
   (iter-has-next [this]))
 
+
+(comment
+  (defsimpleinterface DIterable
+    (iter-what-variables-bound []) ;; return a set of which variables can be bound
+    (iter-variable-binding-order []) ;; return a list of lists, where the second list represents which order the variables will get bound in
+
+    ;; maybe this should instead select which option it will be going for
+
+    (iter-create-iterator [which-binding]) ;; create an iterator which can do the binding of different variables
+    )
+
+  (defsimpleinterface DIterator
+    (iter-run-cb [^clojure.lang.IFn cb-fun]) ;; the function will get passed the value
+
+    (iter-bind-value [value])
+    )
+
+  ;; this can just be a seq in clojure
+  (defsimpleinterface DIteratorVariable
+    (^boolean iter-has-next [])
+    (iter-next []))
+
+
+  ;; this could just be returned as a pair.  It does not have to be its own class?
+  (defsimpleinterface DIteratorInstance
+    (iter-variable-value []) ;; return the value for which an expression has been bound
+    (iter-continuation []) ;; return the next iterator in the sequence of binding multiple values
+
+    )
+  )
 
 ;; (defrecord MemoizationContainer [RConditional
 ;;                                  Rmemo

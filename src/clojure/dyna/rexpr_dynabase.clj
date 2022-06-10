@@ -212,3 +212,26 @@
 ;; dynabases are equal to each other, or the instance is a superset of the first
 ;; map
 ;(def-user-term "instance" 2 (make-multiplicity 1))
+
+
+
+
+;; NOTE: might have something like the set of keys which are known about on a
+;; given dynabase.  then it could pass those through explicitly.  this would
+;; allow for memoization of the parent dynabases while still having overrides
+;; for the expressions that would get blocked.  this would require that there is
+;; something like the "top level" dynabase which could get used.  though this
+;; would have to ensure that there is no self inherit, otherwise that would be
+;; come too complex for it to figure out which expression might have been the
+;; previous parent expression
+;;
+;; though I suppose that becauise we are going allow memos to go anywhere, it
+;; could happen after the dynabsae has already been dispatched, in which case
+;; the child dynabase could also allow for it to use the same memo without
+;; having to get combined together.
+;;
+;; I suppose we could also split aggregators up more such that different
+;; dynabases are groupped together.  then the dynabase access operator could
+;; appear before the aggregation.  This would require some more complex rewrites
+;; which are going to know about dynabases inside of aggregators such that it
+;; can figure out the best way to arrange the R-expr.

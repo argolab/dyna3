@@ -61,6 +61,11 @@
 ;; if a query is made, where it should get printed to
 (def ^:dynamic query-output println)
 
+;; in the parser expressions like `$0$`, `$1`, .... can be replaced with an R-expr.  This is done via this handler
+;; this is used in the case of using the system like a database
+(def ^:dynamic parser-external-value (fn [index]
+                                       (throw (RuntimeException. "External value handler not set"))))
+
 (def ^:dynamic debug-on-assert-fail true)
 
 ;; metadata associated with all of the different types of dynabases

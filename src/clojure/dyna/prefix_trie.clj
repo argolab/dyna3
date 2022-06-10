@@ -58,7 +58,11 @@
   (trie-update-collection [key ^clojure.lang.IFn update-fn])
   (trie-merge [^dyna.prefix_trie.IPrefixTrie other])
 
-  (trie-delete-matched [key]))
+  (trie-delete-matched [key])
+
+  ;; this is going to have to return an iterator of the subset of values which map to something
+  ;; if there is something about wehich expression might have this
+  (trie-progressive-iterator [key]))
 
 ;; (intern 'dyna.rexpr 'check-argument-prefix-trie (fn [x] (instance? IPrefixTrie x)))
 
@@ -183,8 +187,39 @@
                                ))))
       ))
 
+  (trie-progressive-iterator [this key0]
+    (let [key (if (nil? key0) (repeat arity nil) key0)]
+      (assert (= arity (count key)))
+      ((fn rec [key-so-far key-query node]
+         ;; this should still run against the values which find this expression.
+         ;; in the case that something would have that the values
+         ;; there should be some continuation which is passed along
+         (if (empty? key-query)
+           node
+           (let [cur-key (first key-query)
+                 rest-key (rest key-query)
+                 key-so-far2 (cons cur-key key-so-far)]
+             (if (nil? cur-key)
+               ;;  then this is going to return all of the possible values, but that should be done as an iterator
+               ;; what is going to happen in the case that there is something that represents the empty set
+               (for [[key val] node]
+                 ;; this can return a function for the possible values.
+                 ;; if there is something which would hold what is going
+                 [key #(rec key-so-far2 rest-key val)])
+               ;; this only needs to return the key and nil
+               ;; in the case that there
+
+               (???)
+               )
+             ))
+         (???)
+         )
+       () key root)))
+
   Object
-  (toString [this] (str "Prefix trie " arity))
+  (toString [this]
+    (println "===================== prefix trie to string called")
+    (str "Prefix trie " arity))
   (equals [this other]
     ;; if this is an immutable structure, then it is really jst if this is going to have some of the
     (or (identical? this other)
@@ -220,6 +255,19 @@
   (assoc [this key val]
     (trie-insert-val this key val)))
 
+(defmethod print-dup PrefixTrie [^PrefixTrie this ^java.io.Writer w]
+  (.write w (str "(dyna.prefix-trie/PrefixTrie. "
+                 (.arity this) " "
+                 (.contains-wildcard this) " "))
+  (print-dup (.root this) w)
+  (.write w ")"))
+
+(defmethod print-method PrefixTrie [^PrefixTrie this ^java.io.Writer w]
+  (.write w (str "(PrefixTrie "
+                 (.arity this) " "
+                 (.contains-wildcard this) " "))
+  (print-method (.root this) w)
+  (.write w ")"))
 
 ;; (defn make-prefixtrie [arity]
 ;;   (???))

@@ -31,15 +31,6 @@
   ;; the exposed variables will just be the disjunction-variables.  The
   ;; prefix-trie will be a subset of those variables, so it does not need to get scanned
 
-  ;; (hashCode [this]
-  ;;           (bit-xor (hash disjunction-variables) (hash rexprs)))
-
-  ;; (equals [this other]
-  ;;         (if (identical? this other)
-  ;;           true
-  ;;           (do (debug-repl "trie equals")
-  ;;               (???))))
-
   ;; if we can determine that the disjunct does not overlap from the trie, and
   ;; that all of the branches are also only containing constraints
   (is-constraint? [this]
@@ -62,8 +53,6 @@
                                              (let [ret (remap-fn rr variable-renaming-map)]
                                                (when-not (is-empty-rexpr? ret)
                                                  ret))))]
-          (when (.contains (str new-vars) "proj-hidden15276")
-            (debug-repl "nt"))
           (make-disjunct-op new-vars new-trie))))))
 
 ;; if there already exists tries in the disjunct, then it will construct the more optimized disjunct
@@ -155,7 +144,7 @@
         child)
       ;; then there are multiple children, so we have to return the entire trie
       (let [ret (make-disjunct-op dj-vars @ret-children)]
-        ;(debug-repl "qqq")
+                                        ;(debug-repl "qqq")
         ret))))
 
 
@@ -164,8 +153,11 @@
     (iter-what-variables-bound [this] #{binding-var}) ;; this can bind more than just this variable...
     (iter-variable-binding-order [this] [[binding-var]])
     (iter-create-iterator [this which-binding]
-      ;(debug-repl)
-      (assert (or (nil? which-binding) (= which-binding [binding-var])))
+                                        ;(debug-repl)
+      (when-not (or (nil? which-binding) (= which-binding [binding-var]))
+        (debug-repl "g2")
+        (???))
+                                        ;(debug-repl "ci")
       (reify DIterator
         (iter-run-cb [this cb-fun]
           (let [values-seen (transient #{})
@@ -180,6 +172,25 @@
           false)
         ))))
 
+#_(defn- make-disjunct-op-iterator2 [dj-vars idxs binding-vars rexprs]
+    (reify DIterable
+      (iter-what-variables-bound [this] (into #{} binding-vars))
+      (iter-variable-binding-order [this] (let [bound (iter-what-variables-bound this)]
+                                            [(vec (filter #(contains? bound %) dj-vars))]))
+      (iter-create-iterator [this which-binding]
+        (when-not (or (nil? which-binding) (= (first (iter-variable-binding-order this)) which-binding))
+          (debug-repl "g3")
+          (???))
+        (reify DIterator
+          (iter-run-cb [this cb-fun]
+            ;; this is going to have to go through the trie, and then will perform the
+
+            ))
+        )
+      )
+    )
+
+
 (def-iterator
   :match (disjunct-op (:any-list dj-vars) (:unchecked rexprs))
   ;; if any of the variables are fully ground, then it
@@ -189,7 +200,8 @@
                                        (= 0 (bit-and contains-wildcard (bit-shift-left 1 idx))))
                               (let [binding-var (nth dj-vars idx)]
                                 #{(make-disjunct-op-iterator dj-vars idx binding-var rexprs)}))))]
-                                        ;(debug-repl "diter")
+    (when-not (empty? ret)
+      (debug-repl "diter"))
     ret))
 
 
@@ -197,10 +209,7 @@
   :match (disjunct-op (:any-list var-list) rexprs)
   :run-at :construction
   :is-check-rewrite true
-  (let [var-set (into #{} var-list)
-
-        ;var-values (vec (map get-value var-list))
-        ]
+  (let [var-set (into #{} var-list)]
     (when-not (every? (fn [[var-bindings x]] (if (and (rexpr? x)
                                                       ;; the variables which are exposed should be a subset of what is not ground
                                                       ;; or are we going to have to represent which of the values are represented with

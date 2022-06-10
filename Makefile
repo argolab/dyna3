@@ -48,6 +48,9 @@ $(TARGET): $(JAR_TARGET) standalone-header.sh
 	cat standalone-header.sh $(JAR_TARGET) > $(TARGET)
 	chmod +x $(TARGET)
 
+test_python: $(JAR_TARGET)
+	cd python_module && python test_wrapper.py
+
 
 # example to run a single test
 # reset && rlwrap -a lein test :only dyna.core-test/basic-aggregator2
