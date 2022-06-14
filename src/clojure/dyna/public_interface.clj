@@ -31,7 +31,9 @@
   (let [query-result (volatile! [])]
     (maybe-sys sys
                (binding [system/parser-external-value (fn [index]
-                                                        (get external-values index))]
+                                                        (get external-values index))
+                         system/query-output (fn [qr]
+                                               (vreset! query-result qr))]
                  ;; the query needs to get run and the result will then be returned
                  (???)))))
 

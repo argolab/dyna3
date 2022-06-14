@@ -27,8 +27,8 @@
 
 ;;   )
 
-(defn make-unit-iterator2 [variable value]
-  #{(reify )})
+;; (defn make-unit-iterator2 [variable value]
+;;   #{(reify )})
 
 (defn make-unit-iterator [variable value]
   #{(reify DIterable

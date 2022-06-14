@@ -7,29 +7,13 @@ import clojure.lang.IFn;
 import java.net.URL;
 import java.net.MalformedURLException;
 
+/**
+ * The interface for working with the Dyna runtime
+ *
+ * Libraries should build against this interface as it should not change (as
+ * much as possible).  Other internal implementation details might change in the future
+ */
 public final class DynaInterface {
-
-    public static class DynaSystem {
-        final Object system;
-        DynaSystem(Object v) { system = v; }
-        public boolean equals(Object o) {
-            return o instanceof DynaSystem && ((DynaSystem)o).system == system;
-        }
-    }
-
-    public static class DynaRexpr {
-        final Object wrapped;
-        DynaRexpr(Object v) { wrapped = v; }
-        public boolean equals(Object o) {
-            return o instanceof DynaRexpr && ((DynaRexpr)o).wrapped == wrapped;
-        }
-        public int hashCode () {
-            return wrapped.hashCode();
-        }
-        public String toString() { return wrapped.toString(); }
-
-        // not sure if there should
-    }
 
     private static final IFn run_string_f;
     private static final IFn run_file_f;
@@ -39,6 +23,63 @@ public final class DynaInterface {
     private static final IFn make_variable_f;
     private static final IFn make_constant_f;
     private static final IFn make_rexpr_f;
+    private static final IFn get_rexpr_name_f;
+    private static final IFn clojure_get;
+    private static final IFn clojure_keyword;
+
+    /**
+     * Wrap an instance of the DynaSystem.  There can be multiple dyna runtimes
+     * instantiated at the same time.  These are created by the method
+     * `create_dyna_system` below.
+     */
+    public static class DynaSystem {
+        // Wraps a
+        final Object system;
+        DynaSystem(Object v) { system = v; }
+        public boolean equals(Object o) {
+            return o instanceof DynaSystem && ((DynaSystem)o).system == system;
+        }
+        public int hashCode() {
+            return System.identityHashCode(system);
+        }
+    }
+
+    /**
+     * Wrap an R-expr if returned.  An R-expr represents the internal
+     * representation of a dyna program.
+     */
+    public static class DynaRexpr {
+        final Object wrapped;
+        DynaRexpr(Object v) { wrapped = v; }
+        public boolean equals(Object o) {
+            return o instanceof DynaRexpr &&
+                (wrapped == null ?
+                 ((DynaRexpr)o).wrapped == null :
+                 wrapped.equals(((DynaRexpr)o).wrapped));
+        }
+        public int hashCode () {
+            return wrapped == null ? 0 : wrapped.hashCode();
+        }
+        public String toString() {
+            return wrapped == null ? "rexpr_null" : wrapped.toString();
+        }
+        /**
+         * Get a field from an R-expr by name
+         */
+        public Object get(String fieldName) {
+            Object ret = clojure_get.invoke(wrapped, clojure_keyword.invoke(fieldName));
+            if((Boolean)is_rexpr_f.invoke(ret))
+                return new DynaRexpr(ret);
+            return ret;
+        }
+        /**
+         * Return the name of the R-expr type
+         */
+        public String type() {
+            return wrapped == null ? "rexpr_null" : (String)get_rexpr_name_f.invoke(wrapped);
+        }
+    }
+
 
     public void runString(String program) { run_string(program); }
     public void runString(DynaSystem s, String program) { run_string(s, program); }
@@ -145,6 +186,8 @@ public final class DynaInterface {
         return new DynaInterface();
     }
 
+    private DynaInterface() {}
+
     static {
         DynaMain.initRuntime();
         Clojure.var("clojure.core", "load").invoke("/dyna/public_interface");
@@ -156,5 +199,8 @@ public final class DynaInterface {
         make_variable_f = Clojure.var("dyna.rexpr", "make-variable");
         make_constant_f = Clojure.var("dyna.rexpr", "make-constant");
         make_rexpr_f = Clojure.var("dyna.public-interface", "make-rexpr");
+        get_rexpr_name_f = Clojure.var("dyna.base-protocols", "rexpr-name");
+        clojure_get = Clojure.var("clojure.core", "get");
+        clojure_keyword = Clojure.var("clojure.core", "keyword");
     }
 }
