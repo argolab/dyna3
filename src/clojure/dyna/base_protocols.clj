@@ -1,4 +1,6 @@
-(ns dyna.base-protocols)
+(ns dyna.base-protocols
+  (:require [dyna.utils :refer [import-interface-methods]])
+  (:import [dyna DIterable DIterator DIteratorInstance]))
 
 ;; this file defines the base protocols (interfaces) which are referenced
 ;; throughout the rest of the project in different files.  The implementations
@@ -80,15 +82,40 @@
 
 (def undefined-dynabase (Dynabase. nil))
 
-(defprotocol DIterable
+;(import-interface-methods)
+
+
+(import-interface-methods DIterable)
+#_(defprotocol DIterable
   (iter-what-variables-bound [this])
   (iter-variable-binding-order [this])
 
   (iter-create-iterator [this which-binding]))
 
-(defprotocol DIterator
-  (iter-run-cb [this cb-fun])
-  (iter-has-next [this]))
+(import-interface-methods DIterator)
+
+;; should this also
+#_(defprotocol DIterator
+  (iter-run-cb [this ^clojure.lang.IFn cb-fun]) ;; call back the function with the value
+  (iter-run-iterable [this]) ;; return an iterable (possibly a lazy seq) for the different bindings
+  ;;(iter-has-next [this])
+  (iter-bind-value [this value]) ;; return DIteratorInstance
+  (iter-debug-which-variable-bound [this]) ;; which variable is bound by this iterator
+  (iter-estimate-cardinality [this])) ;; estimate the number of values which will get bound by this iterator
+
+
+(import-interface-methods DIteratorInstance)
+#_(defprotocol DIteratorInstance
+  (iter-variable-value [this]) ;; return Object which corresponds with the value from the iterator
+  (iter-continuation [this])) ;; return an DIterator which is the next iterator
+
+
+(def iterator-empty-instance
+  (reify DIterator
+    (iter-run-cb [this cb-fun])
+    (iter-bind-value [this value]
+      (throw (RuntimeException. "nothing to bind a value to")))
+    (iter-debug-which-variable-bound [this] nil)))
 
 
 (comment
@@ -98,14 +125,14 @@
 
     ;; maybe this should instead select which option it will be going for
 
-    (iter-create-iterator [which-binding]) ;; create an iterator which can do the binding of different variables
-    )
+    (iter-create-iterator [which-binding])) ;; create an iterator which can do the binding of different variables
+
 
   (defsimpleinterface DIterator
     (iter-run-cb [^clojure.lang.IFn cb-fun]) ;; the function will get passed the value
 
-    (iter-bind-value [value])
-    )
+    (iter-bind-value [value]))
+
 
   ;; this can just be a seq in clojure
   (defsimpleinterface DIteratorVariable
@@ -116,10 +143,10 @@
   ;; this could just be returned as a pair.  It does not have to be its own class?
   (defsimpleinterface DIteratorInstance
     (iter-variable-value []) ;; return the value for which an expression has been bound
-    (iter-continuation []) ;; return the next iterator in the sequence of binding multiple values
+    (iter-continuation []))) ;; return the next iterator in the sequence of binding multiple values
 
-    )
-  )
+
+
 
 ;; (defrecord MemoizationContainer [RConditional
 ;;                                  Rmemo

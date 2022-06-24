@@ -4,8 +4,10 @@ import java.util.Iterator;
 
 import clojure.java.api.Clojure;
 import clojure.lang.IFn;
+import clojure.lang.RT;
 import java.net.URL;
 import java.net.MalformedURLException;
+
 
 /**
  * The interface for working with the Dyna runtime
@@ -24,7 +26,7 @@ public final class DynaInterface {
     private static final IFn make_constant_f;
     private static final IFn make_rexpr_f;
     private static final IFn get_rexpr_name_f;
-    private static final IFn clojure_get;
+    //private static final IFn clojure_get;
     private static final IFn clojure_keyword;
 
     /**
@@ -67,7 +69,7 @@ public final class DynaInterface {
          * Get a field from an R-expr by name
          */
         public Object get(String fieldName) {
-            Object ret = clojure_get.invoke(wrapped, clojure_keyword.invoke(fieldName));
+            Object ret = RT.get(wrapped, clojure_keyword.invoke(fieldName));
             if((Boolean)is_rexpr_f.invoke(ret))
                 return new DynaRexpr(ret);
             return ret;
@@ -137,6 +139,21 @@ public final class DynaInterface {
         return new DynaRexpr(make_rexpr_f.invoke(name, pargs));
     }
 
+    /**
+     * Define an external function which will be defined globally
+     */
+    public void define_external_function(String function_name, int function_arity, ExternalFunction func) {
+
+    }
+
+    public void define_external_function(String function_name, int function_arity, IFn func) {
+        define_external_function(function_name, function_arity, new ExternalFunction () {
+                public Object call(Object... args) {
+                    return func.applyTo(RT.seq(args));
+                }
+            });
+    }
+
     /*
     // high level interface for working with the dyna runtime
     void run_string(Object system, String program);
@@ -200,7 +217,7 @@ public final class DynaInterface {
         make_constant_f = Clojure.var("dyna.rexpr", "make-constant");
         make_rexpr_f = Clojure.var("dyna.public-interface", "make-rexpr");
         get_rexpr_name_f = Clojure.var("dyna.base-protocols", "rexpr-name");
-        clojure_get = Clojure.var("clojure.core", "get");
+        //clojure_get = Clojure.var("clojure.core", "get");
         clojure_keyword = Clojure.var("clojure.core", "keyword");
     }
 }

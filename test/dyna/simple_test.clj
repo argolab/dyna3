@@ -10,7 +10,7 @@
   (eval-string "assert_fails 1 = 0.")
   (is true)
   (try (do
-         (binding [dyna.system/debug-on-assert-fail false]
+         (binding [dyna.utils/debug-on-assert-fail false]
            (eval-string "assert 1 = 0.")) ;; this should fail, and it will run an assert
          (is false))
        (catch DynaUserAssert e
@@ -402,4 +402,16 @@ assert f(1) = f(1).
 
 (str-test random-gen "
 print random.
+")
+
+
+(str-test aggregator-sum-many "
+f(1) += 1.
+f(1) += 2.
+f(1) += 3.
+f(2) += 4.
+f(2) += 5.
+f(2) += 6.
+
+assert f(1) = 6.
 ")

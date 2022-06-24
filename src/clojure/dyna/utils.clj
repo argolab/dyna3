@@ -1,7 +1,14 @@
 (ns dyna.utils
   (:require [aprint.core :refer [aprint]])
-  (:require [dyna.system :refer [debug-on-assert-fail debug-statements]])
+  (:require [clojure.main :refer [demunge]])
+  (:require [clojure.reflect :refer [reflect]])
+  (:require [clojure.set :refer [union]])
   (:import [dyna DynaTerm]))
+
+(def ^:dynamic debug-on-assert-fail true)
+
+(def debug-statements
+  (= "true" (System/getProperty "dyna.debug" "true")))
 
 ;; make functions like car caar cdr etc
 
@@ -295,9 +302,54 @@
                    ~@(second m))))
          ~name)))
 
+(defn- get-superclass-methods [^Class cls]
+  (let [r (reflect cls)
+        pm (into #{} (filter #(and (instance? clojure.reflect.Method %)
+                                   (:public (:flags %))) (:members r)))]
+    (apply union pm (map #(get-superclass-methods (resolve %)) (:bases r)))))
+
+(defmacro import-interface-methods [interface-name]
+  (let [^Class cls (if (instance? Class interface-name) interface-name (resolve interface-name))
+        class-name (.getName cls)
+        refl (reflect cls)
+        methods (filter #(and (instance? clojure.reflect.Method %)
+                              (:public (:flags %)))
+                        (:members refl))
+        super-members (into #{} (map (fn [x] [(name (:name x)) (count (:parameter-types x))]) (apply union (map #(get-superclass-methods (resolve %)) (:bases refl)))))
+        this-var (gensym)
+        methods-to-create (into #{} (for [mth (.getDeclaredMethods cls)
+                                          :when (not (contains? super-members [(.getName mth) (.getParameterCount mth)]))]
+                                      [(.getName mth) (.getParameterCount mth)]))]
+    `(let []  ;; we can do this as a single compile unit
+       ;(defonce ~interface-name {})
+       ~@(for [[name arity] methods-to-create
+               :let [param-list (vec (repeatedly arity gensym))]]
+             ;; the method name will have to become unmunged.  additionally, this is going to find that there are
+           (when-not (resolve (symbol (demunge name)))
+              ;; because of the different arit of functions, this might not work if it has the same signature with different values
+              ;; maybe we should collect this into a name/arity collection
+             `(defn ~(symbol (demunge name))
+                {:inline (fn [~this-var & args#]
+                           (concat (list '. (with-meta ~this-var ~{:tag class-name})
+                                         (quote ~(symbol name)))
+                                   args#))
+                 :inline-arities #{~(+ arity 1)}}
+                ~(into [(with-meta this-var {:tag class-name})] param-list)
+                (. ~(with-meta this-var {:tag class-name})
+                   ~(symbol name)
+                   ~@param-list))))
+       #_(alter-var-root (var ~interface-name) merge {:on (quote ~interface-name)
+                                                    :on-interface ~interface-name})
+       ~interface-name)))
+
+
 ;; this would have to make some interface for the methods or this could just
 ;; define methods which cast the type to the class, and then invoke
 
 (comment
   (defmacro deflcass [name & methods+parent]
     nil))
+
+
+(defn ensure-simple-symbol [s]
+  (symbol (name s)))

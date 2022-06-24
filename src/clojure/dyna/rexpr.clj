@@ -528,13 +528,15 @@
 ;; this will want for this to somehow handle if there are some ways in which this can handle if there
 (defn is-empty-rexpr? [rexpr]
   (and (rexpr? rexpr) (= (make-multiplicity 0) rexpr)))
-
+(intern 'dyna.rexpr-constructors 'is-empty-rexpr? is-empty-rexpr?)
 
 ;; that we are 100% sure that this R-expr will return a non-zero multiplicity
 (defn is-non-empty-rexpr? [rexpr]
   (and (rexpr? rexpr)
        (or (and (is-multiplicity? rexpr) (> (get-argument rexpr 0) 0))
            (and (is-disjunct? rexpr) (some is-non-empty-rexpr? (get-argument rexpr 0))))))
+(intern 'dyna.rexpr-constructors 'is-non-empty-rexpr? is-non-empty-rexpr?)
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -732,8 +734,8 @@
     `(let [~source ~source-variable] ;; copying the variable is probably not necessary in most cases???
        ~(make-rexpr-matching-function source #{source source-variable} matcher (fn [pv] body)))))
 
-(defn- get-match-base-type [matcher]
-  (car (if (map? matcher) (:rexpr matcher) matcher)))
+;; (defn- get-match-base-type [matcher]
+;;   (car (if (map? matcher) (:rexpr matcher) matcher)))
 
 (defmacro match-rexpr [source-variable matcher & body]
   `(do ~(if system/status-counters `(StatusCounters/match_attempt))

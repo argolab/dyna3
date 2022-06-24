@@ -5,9 +5,11 @@
   (:require [dyna.rexpr-builtins :refer [make-lessthan make-lessthan-eq
                                          make-add make-times make-min make-max make-lor make-land
                                          make-not-equals]])
+  (:require [dyna.context :as context])
+  (:require [dyna.iterators :refer [run-iterator]])
   (:import (dyna UnificationFailure DynaTerm DynaUserError ParserUtils))
   (:import [dyna.rexpr aggregator-rexpr])
-  (:require [dyna.context :as context])
+
   (:require [clojure.set :refer [subset?]]))
 
 (def aggregators (atom {}))
@@ -302,8 +304,9 @@
   :run-at [:standard :inference]
   (let [aop (get @aggregators operator)
         ctx (context/make-nested-context-aggregator rexpr incoming-variable body-is-conjunctive)]
-    (when (nil? aop)
-      (debug-repl "aggregator operator not found"))
+    (dyna-debug
+     (when (nil? aop)
+       (debug-repl "aggregator operator not found")))
     ;(debug-repl)
     (let [nR (context/bind-context ctx (try (simplify R)
                                             (catch UnificationFailure e (make-multiplicity 0))))]
@@ -330,52 +333,87 @@
                              (make-conjunct [(make-no-simp-unify incoming-variable
                                                                  (make-constant incom-val))
                                              nR]))))
-        (let [rel-iterators (filter #(contains? (iter-what-variables-bound %) incoming-variable) (find-iterators nR))]
-          (if (and (every? is-ground? (filter #(not= incoming-variable %) (exposed-variables R)))
-                   (not (empty? rel-iterators))
-                   (not (is-unify? nR)))
-            ;; this code is not really "efficient" yet, it should attempt to be a lot lazier with getting the values from the different sets
-            ;; and check which values can be reasonably determined.
-            (let [current-value (volatile! (:identity aop))
-                  un-finished-rexprs (transient [])
-                  is-empty-aggregation (volatile! true)
-                  ground-values-set (transient #{})]
-              (println "aggregator found iterator to run")
-              (let [iter-run (iter-create-iterator (first rel-iterators) nil;incoming-variable ;; what variable is going to be bound is not handled yet
-                                                   )]
-                (iter-run-cb iter-run (fn [itv]
-                                        (assert (not (contains? ground-values-set itv)))
-                                        (conj! ground-values-set itv))))
+        (let [iterators (find-iterators nR)
+              current-value (volatile! (:identity aop))
+              unfinished-rexprs (transient [])
+              is-empty-aggregation (volatile! true)]
+          (run-iterator
+           :iterators iterators
+           :bind-all true
+           :rexpr-in nR
+           :rexpr-result new-rexpr
+           :simplify simplify-fully ;; we want to perform full simplification
+                                    ;; the expressions as we should already have
+                                    ;; all of the incoming values bound, so if
+                                    ;; there is something which is not able to
+                                    ;; get resolved, then that means that the expression essentially can not get resolved
+           :required [incoming-variable]  ;; we only require that the incoming
+                                          ;; variable to aggregation is bound,
+                                          ;; though it should attempt to bind
+                                          ;; all of the variables
+           (do
+             (debug-repl "in aggregator iterator")
+             (assert (not (is-empty-rexpr? new-rexpr))) ;; I suppose that this should already get checked by the iterator when it is running simplify
+             (if (is-multiplicity? new-rexpr)
+               ;; then this has fully simplified the result, and we can just add this into
+               (???)
+               )
+             )
+           )
+          )
 
-              (doseq [val (persistent! ground-values-set)]
-                (let [child-r (remap-variables R (into {} (for [[k v] val]
-                                                            [k (make-constant v)])))
-                      dctx (context/make-nested-context-disjunct child-r)
-                      ;zzz (debug-repl "zzz")
-                      new-rexpr (context/bind-context-raw dctx (try (simplify-fully child-r)
-                                                                    (catch UnificationFailure e (make-multiplicity 0))))]
+        ))))
 
-                  ;; if not, then that means there is something in the expression that could not be rewritten
-                  ;; this is something that that could happen given the user's program, so this should be some kind of warning
-                  ;; along with returning the R-expr which can not be rewritten further
-                  ;;
-                  ;;  We might also consider returning an error from an
-                  ;;  aggregator in this case?  This is the scenario where there
-                  ;;  does not exist a way to rewrite a user's program into a value
-                  ;(assert (is-multiplicity? new-rexpr)) ;; this needs to get handled for the lessthan case, as it is possible some branch will still get eleminated...., though that should already happen as everything is ground already?  So what could possibly cause this
-                  (if-not (is-multiplicity? new-rexpr)
-                    (do (debug-repl "should have reduced to a multiplicity")
-                        (???)))
-                  (when-not (is-empty-rexpr? new-rexpr)
-                    (vreset! is-empty-aggregation false)
-                    (vswap! current-value #((:combine-mult aop) % (get val incoming-variable) (:mult new-rexpr))))))
-              (println "aggregator done running iterator")
-              (if @is-empty-aggregation
-                (if body-is-conjunctive
-                  (make-multiplicity 0)
-                  (make-unify result-variable (make-constant ((:lower-value aop identity) (:identity aop)))))
-                (make-unify result-variable (make-constant ((:lower-value aop identity) @current-value)))))
-            (make-aggregator operator result-variable incoming-variable body-is-conjunctive nR)))))))
+(comment
+  #_(let [rel-iterators (filter #(contains? (iter-what-variables-bound %) incoming-variable) (find-iterators nR))]
+    (if (and (every? is-ground? (filter #(not= incoming-variable %) (exposed-variables R)))
+             (not (empty? rel-iterators))
+             (not (is-unify? nR)))
+      ;; this code is not really "efficient" yet, it should attempt to be a lot lazier with getting the values from the different sets
+      ;; and check which values can be reasonably determined.
+      (let [current-value (volatile! (:identity aop))
+            un-finished-rexprs (transient [])
+            is-empty-aggregation (volatile! true)
+            ground-values-set (transient #{})]
+        (println "aggregator found iterator to run")
+        (let [iter-run (iter-create-iterator (first rel-iterators) nil;incoming-variable ;; what variable is going to be bound is not handled yet
+                                             )]
+          (iter-run-cb iter-run (fn [itv]
+                                  (assert (not (contains? ground-values-set itv)))
+                                  (conj! ground-values-set itv))))
+
+        (doseq [val (persistent! ground-values-set)]
+          (let [child-r (remap-variables R (into {} (for [[k v] val]
+                                                      [k (make-constant v)])))
+                dctx (context/make-nested-context-disjunct child-r)
+                                        ;zzz (debug-repl "zzz")
+                new-rexpr (context/bind-context-raw dctx (try (simplify-fully child-r)
+                                                              (catch UnificationFailure e (make-multiplicity 0))))]
+
+            ;; if not, then that means there is something in the expression that could not be rewritten
+            ;; this is something that that could happen given the user's program, so this should be some kind of warning
+            ;; along with returning the R-expr which can not be rewritten further
+            ;;
+            ;;  We might also consider returning an error from an
+            ;;  aggregator in this case?  This is the scenario where there
+            ;;  does not exist a way to rewrite a user's program into a value
+                                        ;(assert (is-multiplicity? new-rexpr)) ;; this needs to get handled for the lessthan case, as it is possible some branch will still get eleminated...., though that should already happen as everything is ground already?  So what could possibly cause this
+            (if-not (is-multiplicity? new-rexpr)
+              (do (debug-repl "should have reduced to a multiplicity")
+                  (???)))
+            (when-not (is-empty-rexpr? new-rexpr)
+              (vreset! is-empty-aggregation false)
+              (vswap! current-value #((:combine-mult aop) % (get val incoming-variable) (:mult new-rexpr))))))
+        (println "aggregator done running iterator")
+        (if @is-empty-aggregation
+          (if body-is-conjunctive
+            (make-multiplicity 0)
+            (make-unify result-variable (make-constant ((:lower-value aop identity) (:identity aop)))))
+          (make-unify result-variable (make-constant ((:lower-value aop identity) @current-value)))))
+      (make-aggregator operator result-variable incoming-variable body-is-conjunctive nR))
+
+    ))
+
 
 (def-rewrite
   :match {:rexpr (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (true? _) ;; if the body isn't conjunctive, then there could be some interaction between having different identity elements that needs to be considered

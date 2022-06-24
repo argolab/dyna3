@@ -17,6 +17,7 @@
 
                  [org.clojure/tools.analyzer.jvm "0.7.3"]
                  [instaparse "1.4.12"]
+                 ;[reply "0.5.1"]
                  ]
   :repl-options {:init-ns dyna.core}
   ;; :aot [dyna.interface

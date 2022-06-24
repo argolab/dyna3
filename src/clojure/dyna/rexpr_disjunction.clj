@@ -9,7 +9,7 @@
   (:require [clojure.set :refer [subset? union]])
   (:import [dyna.rexpr disjunct-rexpr])
   (:import [dyna.prefix_trie PrefixTrie])
-  (:import [dyna UnificationFailure]))
+  (:import [dyna UnificationFailure DIterable DIterator DIteratorInstance]))
 
 (def ^:dynamic *disjunct-op-remove-if-single* true)
 
@@ -148,7 +148,7 @@
         ret))))
 
 
-(defn- make-disjunct-op-iterator [dj-vars idx binding-var rexprs]
+#_(defn- make-disjunct-op-iterator [dj-vars idx binding-var rexprs]
   (reify DIterable
     (iter-what-variables-bound [this] #{binding-var}) ;; this can bind more than just this variable...
     (iter-variable-binding-order [this] [[binding-var]])
@@ -160,6 +160,9 @@
                                         ;(debug-repl "ci")
       (reify DIterator
         (iter-run-cb [this cb-fun]
+          (doseq [v (iter-run-iterable this)]
+            (cb-fun v)))
+        #_(iter-run-cb [this cb-fun]
           (let [values-seen (transient #{})
                 current-bindings (map get-value dj-vars)]
             (doseq [vals (trie-get-values-collection rexprs current-bindings)]
@@ -167,9 +170,20 @@
                 (when-not (contains? values-seen val)
                   (conj! values-seen val)
                   (cb-fun {binding-var val}))))))
-        (iter-has-next [this]
-          (???) ;; this is not being used atm
-          false)
+        (iter-run-iterable [this]
+          ;; create a lazy sequence for this
+          (let [values-seen (transient #{})
+                current-bindings (map get-value dj-vars)]
+            (for [vals (trie-get-values-collection rexprs current-bindings)
+                  :let [val (nth (first vals) idx)]
+                  :when (not (contains? values-seen val))]
+              (do (conj! values-seen val)
+                  (reify DIteratorInstance
+                    (iter-variable-value [this] val)
+                    (iter-continuation [this] nil) ;; this is not a multi iterator yet, but this should support
+                    )))
+              )
+          )
         ))))
 
 #_(defn- make-disjunct-op-iterator2 [dj-vars idxs binding-vars rexprs]
@@ -191,18 +205,70 @@
     )
 
 
+(comment
+  (def-iterator
+    :match (disjunct-op (:any-list dj-vars) (:unchecked rexprs))
+    ;; if any of the variables are fully ground, then it
+    (let [contains-wildcard (.contains-wildcard ^PrefixTrie rexprs)
+          ret (reduce union (for [idx (range (count dj-vars))]
+                              (when (and (not (is-bound? (nth dj-vars idx)))
+                                         (= 0 (bit-and contains-wildcard (bit-shift-left 1 idx))))
+                                (let [binding-var (nth dj-vars idx)]
+                                  #{(make-disjunct-op-iterator dj-vars idx binding-var rexprs)}))))]
+                                        ;(when-not (empty? ret)
+                                        ;  (debug-repl "diter"))
+      ret)))
+
+(declare run-trie-iterator-from-node)
+
+(defn- trie-diterator-instance [remains node]
+  (reify DIterator
+    (iter-run-cb [this cb-fn]
+      (doseq [v (iter-run-iterable this)]
+        (cb-fn v)))
+    (iter-run-iterable [this]
+      (run-trie-iterator-from-node remains node))
+    (iter-bind-value [this value]
+      (let [v (get node value)]
+        (when-not (nil? v)
+          (trie-diterator-instance (- remains 1) v))))
+    (iter-debug-which-variable-bound [this] (???))
+    (iter-estimate-cardinality [this]
+      (count node))))
+
+;; return a lazy sequence over bindings
+(defn- run-trie-iterator-from-node [remains trie-node]
+  (assert (not (contains? trie-node nil))) ;; if this happens, this means that it is trying to iterate over something which would
+  (for [[key next-node] trie-node]
+    (reify DIteratorInstance
+      (iter-variable-value [this] key)
+      (iter-continuation [this]
+        (if (= 0 remains)
+          nil  ;; there are going to be more disjuncts here
+          (trie-diterator-instance (- remains 1) next-node))
+        ))
+    ))
+
 (def-iterator
   :match (disjunct-op (:any-list dj-vars) (:unchecked rexprs))
-  ;; if any of the variables are fully ground, then it
   (let [contains-wildcard (.contains-wildcard ^PrefixTrie rexprs)
-        ret (reduce union (for [idx (range (count dj-vars))]
-                            (when (and (not (is-bound? (nth dj-vars idx)))
-                                       (= 0 (bit-and contains-wildcard (bit-shift-left 1 idx))))
-                              (let [binding-var (nth dj-vars idx)]
-                                #{(make-disjunct-op-iterator dj-vars idx binding-var rexprs)}))))]
-    (when-not (empty? ret)
-      (debug-repl "diter"))
-    ret))
+        trie-root (.root ^PrefixTrie rexprs)]
+    (when (not= contains-wildcard (- (bit-shift-left 1 (count dj-vars)) 1))
+      ;; then there exists at least one variable which does not contain a whild card, so it could be iterated
+      #{(reify DIterable
+          (iter-what-variables-bound [this]
+            (into #{} (for [idx (range (count dj-vars))
+                            :when (and (= 0 (bit-and contains-wildcard (bit-shift-left 1 idx)))
+                                       (is-variable? (nth dj-vars idx)))]
+                        (nth dj-vars idx))))
+          (iter-variable-binding-order [this] [dj-vars])
+          (iter-create-iterator [this which-binding]
+            (assert (.contains (iter-variable-binding-order this) which-binding))
+            (let [ret (trie-diterator-instance (count dj-vars) trie-root)
+                                        ;(run-trie-iterator-from-node (count dj-vars) trie-root)
+                  ]
+              (debug-repl "creating iterator from trie")
+              ret)))})))
 
 
 (def-rewrite

@@ -66,7 +66,6 @@
 (def ^:dynamic parser-external-value (fn [index]
                                        (throw (RuntimeException. "External value handler not set"))))
 
-(def ^:dynamic debug-on-assert-fail true)
 
 ;; metadata associated with all of the different types of dynabases
 (def ^:dynamic dynabase-metadata (atom {}))
