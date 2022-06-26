@@ -4,6 +4,7 @@
   (:require [dyna.rexpr-constructors :refer :all])
   (:require [dyna.context :as context])
   (:require [clojure.set :refer [union intersection subset?]])
+  (:require [clojure.tools.macro :refer [macrolet]])
   (:import [dyna DIterable DIterator DIteratorInstance]))
 
 ;; iterators are going to allow for there to efficiently loop over the values which are assigned to variables
@@ -235,6 +236,11 @@
         ctx (gensym 'ctx)
         rexpr (gensym 'rexpr)
         simplify-method (:simplify kw-args 'simplify)
+        callback-body (macroexpand `(macrolet [(~'iterator-encode-state-as-rexpr
+                                               [] `(do
+                                                     (debug-repl "encode state as r-expr not implemented")
+                                                     (???)))]
+                                              ~body))
         ]
     (let [ret `(let [iters# ~iter-collection
                      ~rexpr ~rexpr-to-simplify
@@ -242,7 +248,13 @@
                              `(context/get-context) ;; use the existing "global" context
                              `(context/make-empty-context ~rexpr))
                      callback-fn# (fn [~rexpr-callback-var]
-                                         ~@body)
+                                    ;; could use macrolet here to define the
+                                    ;; encode-state-as-rexpr and then it can
+                                    ;; expand into whatever is required we know
+                                    ;; the variables for the expression and what
+                                    ;; is bound.  I suppose that we can also use
+                                    ;; the origional R-expr when doing the encoding
+                                    ~callback-body)
                      [picked-iterator# picked-binding-order#] (pick-iterator iters# ~required-binding)
                      ;; the variable that is
                      ;iterator# (iter-create-iterator picked-iterator#)
@@ -257,6 +269,13 @@
       ;(debug-repl)
       ret)
     ))
+
+
+;; I suppose that there could be some way of getting the variable context?  Or the binding of some variable
+#_(defmacro iterator-encode-state-as-rexpr []
+  `(do
+     (debug-repl "iterator encode state as rexpr, not implemented")
+     (???)))
 
 ;; (defmacro iterator-continue-running []
 ;;   ;; in the case that the iterator is going to

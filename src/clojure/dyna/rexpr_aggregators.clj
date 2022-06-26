@@ -336,7 +336,8 @@
         (let [iterators (find-iterators nR)
               current-value (volatile! (:identity aop))
               unfinished-rexprs (transient [])
-              is-empty-aggregation (volatile! true)]
+              is-empty-aggregation (volatile! true)
+              is-empty-value (volatile! true)]
           (run-iterator
            :iterators iterators
            :bind-all true
@@ -352,17 +353,40 @@
                                           ;; though it should attempt to bind
                                           ;; all of the variables
            (do
-             (debug-repl "in aggregator iterator")
              (assert (not (is-empty-rexpr? new-rexpr))) ;; I suppose that this should already get checked by the iterator when it is running simplify
              (if (is-multiplicity? new-rexpr)
-               ;; then this has fully simplified the result, and we can just add this into
-               (???)
-               )
-             )
-           )
-          )
+               ;; this is a multiplicity, we can just save this into the result directly
+               (let [ival (get-value incoming-variable)
+                     mult (:mult new-rexpr)]
+                 (vreset! is-empty-aggregation false)
+                 (vreset! is-empty-value false)
+                 (vswap! current-value #((:combine-mult aop) % ival mult)))
+               ;; then there is something in the result that we have not be able
+               ;; to reduce all of the way this should not happen (at least in
+               ;; this code).  through this couldhappen in the case that we are
+               ;; running an aggregator when there are exposed variables which
+               ;; are not ground.
+               (let [nr (make-conjunct [(iterator-encode-state-as-rexpr) new-rexpr])]
+                 (vreset! is-empty-aggregation false)
+                 (vswap! conj unfinished-rexprs nr)))))
 
-        ))))
+          (let [ret (if (= 0 (count unfinished-rexprs))
+                      ;; then we have fully processed everything
+                      (if @is-empty-aggregation
+                        (if body-is-conjunctive
+                          (make-multiplicity 0) ;; there was nothing returned from the different branches of aggregation,
+                          (make-unify result-variable (make-constant (:identity aop))))
+                        (make-unify result-variable (make-constant ((:lower-value aop identity) @current-value))))
+                      ;; there is something that is not processed yet, so we are going to
+                      ;; have to construct an aggregator to wrap the remaining expressions
+                      (let [remain-disjunct (make-disjunct (persistent! unfinished-rexprs))
+                            body (if @is-empty-value
+                                   remain-disjunct
+                                   (make-disjunct [(make-no-simp-unify incoming-variable (make-constant @current-value))
+                                                   remain-disjunct]))]
+                        (make-aggregator operator result-variable incoming-variable body-is-conjunctive body)))]
+            (debug-repl "done iterating domain")
+            ret))))))
 
 (comment
   #_(let [rel-iterators (filter #(contains? (iter-what-variables-bound %) incoming-variable) (find-iterators nR))]
