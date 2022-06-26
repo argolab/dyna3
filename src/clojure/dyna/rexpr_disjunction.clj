@@ -131,6 +131,7 @@
                           (let [[made-new ret] (merge-rexpr-disjunct-list col new-child-rexpr)]
                             (vreset! added-new made-new)
                             ret)))
+                ;(debug-repl "ddj")
                 (if @added-new
                   (vswap! num-children inc))))))))
     ;; set the values of variables which are the same across all branches
@@ -205,7 +206,7 @@
     )
 
 
-(comment
+#_(comment
   (def-iterator
     :match (disjunct-op (:any-list dj-vars) (:unchecked rexprs))
     ;; if any of the variables are fully ground, then it
@@ -253,6 +254,7 @@
   :match (disjunct-op (:any-list dj-vars) (:unchecked rexprs))
   (let [contains-wildcard (.contains-wildcard ^PrefixTrie rexprs)
         trie-root (.root ^PrefixTrie rexprs)]
+    ;(debug-repl "dit")
     (when (not= contains-wildcard (- (bit-shift-left 1 (count dj-vars)) 1))
       ;; then there exists at least one variable which does not contain a whild card, so it could be iterated
       #{(reify DIterable
@@ -267,7 +269,7 @@
             (let [ret (trie-diterator-instance (count dj-vars) trie-root)
                                         ;(run-trie-iterator-from-node (count dj-vars) trie-root)
                   ]
-              (debug-repl "creating iterator from trie")
+              ;(debug-repl "creating iterator from trie")
               ret)))})))
 
 

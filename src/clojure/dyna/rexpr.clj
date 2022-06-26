@@ -1384,6 +1384,24 @@
 (def-rewrite
   :match (proj (:variable A) (:rexpr R))
   :run-at :inference
+  (let [iters (find-iterators R)]
+    (when (some #(contains? (iter-what-variables-bound %) A) iters) ;; if there is some iterator that can bind the value of the variable
+      (let [results (transient [])]
+        (iterators/run-iterator
+         :iterators iters
+         :required [A]
+         :rexpr-in R
+         :rexpr-result nR
+         :simplify simplify  ;; this will be the simplify methods that is being used in context
+         (do
+           ;; the results are just going to become disjuncts, so we will just store them
+           (conj! results nR)))
+        (debug-repl "proj used iterator")
+        (make-disjunct (persistent! results))))))
+
+#_(def-rewrite
+  :match (proj (:variable A) (:rexpr R))
+  :run-at :inference
   (let [iter (find-iterators R)
         iter-self (filter #(contains? (iter-what-variables-bound %) A) iter)]
     (when-not (empty? iter-self)

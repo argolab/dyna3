@@ -189,11 +189,11 @@
            ;; then we are going do bind the variable in the iterator to the current value and keep running the recursion
            ;; we do not resimplify the R-expr as we have not made any changes
            (let [it-bound (iter-bind-value iter (get-value-in-context v ctx))]
-             (debug-repl)
+             ;(debug-repl)
              (when-not (nil? it-bound) ;; if the binding failed, then the iterator should return nil to indicate that there is nothing here
                (rec it-bound r rexpr)))
            (do
-             (debug-repl)
+             ;(debug-repl)
              (doseq [val (iter-run-iterable iter)]
                  (let [dctx (context/make-nested-context-disjunct rexpr)] ;; this should take the context as an argument?
                    (context/bind-context-raw
