@@ -408,6 +408,7 @@
 (defn make-constant [val]
   (dyna-debug (when (nil? val) (debug-repl)))
   (assert (not (nil? val))) ;; otherwise this is a bug
+  (dyna-debug (assert (not (instance? constant-value-rexpr val))))
   (constant-value-rexpr. val))
 (intern 'dyna.rexpr-constructors 'make-constant make-constant)
 
@@ -1395,7 +1396,11 @@
          :simplify simplify  ;; this will be the simplify methods that is being used in context
          (do
            ;; the results are just going to become disjuncts, so we will just store them
-           (conj! results nR)))
+
+           ;; this is going to have to encode the state as an R-expr while removing some of the variables
+           ;; I suppose that this will mean that it
+           (debug-repl "in proj iterator")
+           (conj! results (make-conjunct [(iterator-encode-state-as-rexpr) nR]))))
         (debug-repl "proj used iterator")
         (make-disjunct (persistent! results))))))
 

@@ -51,6 +51,8 @@
                                            new-vars-values
                                            (fn [key rr]
                                              (let [ret (remap-fn rr variable-renaming-map)]
+                                               (when-not (subset?  (exposed-variables ret) (into #{} new-vars))
+                                                 (debug-repl "exposed fail"))
                                                (when-not (is-empty-rexpr? ret)
                                                  ret))))]
           (make-disjunct-op new-vars new-trie))))))

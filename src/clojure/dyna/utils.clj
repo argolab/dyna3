@@ -343,6 +343,25 @@
        ~interface-name)))
 
 
+;; create macros which are local.  this is modeled after
+;; clojure.tools.macro/macrolet but this version is simpler and does not do
+;; recursive expansion of the macros.
+(defn- macrolet-expand [mm form]
+  (cond (and (list? form) (contains? mm (first form))) (apply (mm (first form)) (drop 1 form))
+        (symbol? form) form
+        (list? form) (reverse (into () (map #(macrolet-expand mm %) form)))
+        (vector? form) (into [] (map #(macrolet-expand mm %) form))
+        (map? form) (into {} (map #(macrolet-expand mm %) form))
+        (set? form) (into #{} (map #(macrolet-expand mm %) form))
+        :else form))
+
+(defmacro macrolet [bnds & body]
+  (assert (even? (count bnds)))
+  (let [m (into {} (for [[name f] (apply hash-map bnds)]
+                     [name (eval (cons 'fn f))]))]
+    `(do ~@(map #(macrolet-expand m %) body))))
+
+
 ;; this would have to make some interface for the methods or this could just
 ;; define methods which cast the type to the class, and then invoke
 

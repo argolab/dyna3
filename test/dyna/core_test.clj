@@ -4,6 +4,7 @@
             [dyna.base-protocols :refer :all]
             [dyna.rexpr :refer :all]
             [dyna.context :as context]
+            [dyna.system :as system]
             [dyna.rexpr-builtins :refer :all]
             [dyna.utils :refer [debug-repl make-term match-term defsimpleinterface]]))
 
@@ -52,13 +53,14 @@
 
 (deftest basic-disjunct2
   ;; these can not be combined because the values of the variables are different
-  (let [rexpr (make-disjunct
-               [(make-unify (make-variable 'foo) (make-constant 123))
-                (make-unify (make-variable 'foo) (make-constant 456))])
-        ctx (context/make-empty-context rexpr)
-        r2 (context/bind-context-raw ctx (simplify-fully rexpr))]
-    (is (= rexpr r2))
-    (is (not (is-bound-in-context? (make-variable 'foo) ctx)))))
+  (binding [system/*use-optimized-rexprs* false]  ;; the disjunct will get replaced with the optimized disjunct if this is set to true (the default)
+    (let [rexpr (make-disjunct
+                 [(make-unify (make-variable 'foo) (make-constant 123))
+                  (make-unify (make-variable 'foo) (make-constant 456))])
+          ctx (context/make-empty-context rexpr)
+          r2 (context/bind-context-raw ctx (simplify-fully rexpr))]
+      (is (= rexpr r2))
+      (is (not (is-bound-in-context? (make-variable 'foo) ctx))))))
 
 (deftest basic-aggregator1
   (let [rexpr (make-aggregator "+="

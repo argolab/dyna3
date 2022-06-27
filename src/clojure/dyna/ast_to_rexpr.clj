@@ -259,6 +259,8 @@
                                       (throw (RuntimeException. (str "Did not find variable " name))))
                                     var)
                       "$constant" (let [[val] (.arguments a)]
+                                    (when (is-constant? val)
+                                      (debug-repl))
                                     (make-constant val))
                       ;; this is something else which is getting called.  This means that we have to recurse into the structure and add the arguments
                       (let [ret-var (make-intermediate-var)]
@@ -579,7 +581,7 @@
             ["$dynabase_create" 2] (let [[extended-dynabase-value dynabase-terms] (.arguments ast)
                                          dynabase-captured-variables (into {} (for [[k v] variable-name-mapping]
                                                                                 (let [val (if (is-constant? v)
-                                                                                            (DynaTerm. "$constant" [v])
+                                                                                            (DynaTerm. "$constant" [(dyna.base-protocols/get-value v)])
                                                                                             (DynaTerm. "$variable" [k]))]
                                                                                   (cond (= k "$self") ["$parent" val]
                                                                                         (re-matches #"\$[0-9]+" k) [(str "$construct_arg_" k) val]

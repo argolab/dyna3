@@ -5,7 +5,7 @@
   :dependencies [[org.clojure/clojure "1.11.1" ;"1.12.0-mfl-SNAPSHOT"
                   ]
                  [org.clojure/tools.namespace "1.2.0"]
-                 [org.clojure/tools.macro "0.1.5"]
+                 ;[org.clojure/tools.macro "0.1.5"]
                  [aprint "0.1.3"]  ;; for formatted printing
                  ;[clj-python/libpython-clj "2.00-beta-22"]
                  [com.clojure-goes-fast/clj-java-decompiler "0.3.0"] ;; for debugging what the generated code looks like

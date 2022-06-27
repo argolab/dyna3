@@ -4,7 +4,7 @@
   (:require [dyna.rexpr-constructors :refer :all])
   (:require [dyna.context :as context])
   (:require [clojure.set :refer [union intersection subset?]])
-  (:require [clojure.tools.macro :refer [macrolet]])
+  ;(:require [clojure.tools.macro :refer [macrolet]])
   (:import [dyna DIterable DIterator DIteratorInstance]))
 
 ;; iterators are going to allow for there to efficiently loop over the values which are assigned to variables
@@ -231,22 +231,26 @@
         required-binding (:required kw-args)
         rexpr-to-simplify (:rexpr-in kw-args `(make-multiplicity 1))  ;; if there is no R-expr, then we can just use mult 1 which should just do "nothing"
         rexpr-callback-var (:rexpr-result kw-args (if (simple-symbol? rexpr-to-simplify)
-                                                 rexpr-to-simplify
-                                                 (gensym 'callback-rexpr)))
+                                                    rexpr-to-simplify
+                                                    (gensym 'callback-rexpr)))
         ctx (gensym 'ctx)
         rexpr (gensym 'rexpr)
         simplify-method (:simplify kw-args 'simplify)
-        callback-body (macroexpand `(macrolet [(~'iterator-encode-state-as-rexpr
-                                               [] `(do
-                                                     (debug-repl "encode state as r-expr not implemented")
-                                                     (???)))]
-                                              ~body))
+        ;; the macro let does not work with the debug-repl.  I suppose that
+        ;; there could be something simpler which woul djust keep the same form,
+        ;; but would expand the macro in place?  Or that it would
+        ;; callback-body (macroexpand `(macrolet [~'iterator-encode-state-as-rexpr
+        ;;                                        ([] `(do
+        ;;                                               (debug-repl "encode state as r-expr not implemented")
+        ;;                                               (???)))]
+        ;;                                       ~body))
         ]
     (let [ret `(let [iters# ~iter-collection
                      ~rexpr ~rexpr-to-simplify
                      ~ctx ~(if assign-to-context
                              `(context/get-context) ;; use the existing "global" context
                              `(context/make-empty-context ~rexpr))
+                     [picked-iterator# picked-binding-order#] (pick-iterator iters# ~required-binding)
                      callback-fn# (fn [~rexpr-callback-var]
                                     ;; could use macrolet here to define the
                                     ;; encode-state-as-rexpr and then it can
@@ -254,8 +258,15 @@
                                     ;; the variables for the expression and what
                                     ;; is bound.  I suppose that we can also use
                                     ;; the origional R-expr when doing the encoding
-                                    ~callback-body)
-                     [picked-iterator# picked-binding-order#] (pick-iterator iters# ~required-binding)
+                                    (macrolet [~'iterator-encode-state-as-rexpr
+                                               ([] '(let [encode-vars# (filter is-variable? picked-binding-order#)
+                                                          c# (vec (for [v# encode-vars#]
+                                                                    (make-no-simp-unify v# (make-constant (get-value v#)))))
+                                                          r# (make-conjunct c#)
+                                                          ]
+                                                      (debug-repl "encode state as r-expr not implemented")
+                                                      (???)))]
+                                              ~body))
                      ;; the variable that is
                      ;iterator# (iter-create-iterator picked-iterator#)
                      ]
@@ -266,7 +277,7 @@
                  ;;  )
                  (~run-iterator-fn picked-iterator# picked-binding-order# ~rexpr ~ctx callback-fn# ~simplify-method)
                  )]
-      ;(debug-repl)
+      ;(debug-repl "iter runner")
       ret)
     ))
 
