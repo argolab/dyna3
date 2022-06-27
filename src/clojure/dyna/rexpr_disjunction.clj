@@ -222,7 +222,8 @@
                                         ;  (debug-repl "diter"))
       ret)))
 
-(declare run-trie-iterator-from-node)
+(declare run-trie-iterator-from-node
+         run-trie-iterator-from-node-unconsolidated)
 
 (defn- trie-diterator-instance [remains node]
   (reify DIterator
@@ -231,6 +232,8 @@
         (cb-fn v)))
     (iter-run-iterable [this]
       (run-trie-iterator-from-node remains node))
+    (iter-run-iterable-unconsolidated [this]
+      (run-trie-iterator-from-node-unconsolidated remains node))
     (iter-bind-value [this value]
       (let [v (get node value)]
         (when-not (nil? v)
@@ -251,6 +254,15 @@
           (trie-diterator-instance (- remains 1) next-node))
         ))
     ))
+
+(defn- run-trie-iterator-from-node-unconsolidated [remains trie-node]
+  (for [[key next-node] trie-node]
+    (reify DIteratorInstance
+      (iter-variable-value [this] (???)) ;; the value should not be used in this case, as it could be replicated etc
+      (iter-continuation [this]
+        (if (= 0 remains)
+          nil
+          (trie-diterator-instance (- remains 1) next-node))))))
 
 (def-iterator
   :match (disjunct-op (:any-list dj-vars) (:unchecked rexprs))

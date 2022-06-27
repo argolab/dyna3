@@ -67,6 +67,8 @@
             [(reify DIteratorInstance
                (iter-variable-value [this] value)
                (iter-continuation [this] nil))])
+          (iter-run-iterable-unconsolidated [this]
+            (iter-run-iterable this))
           (iter-debug-which-variable-bound [this]
             variable))))})
 
@@ -99,7 +101,89 @@
                 (let [iterators-run-already (transient [])]
                   ;; this is going to have to pick which iterator is going to be used
                   (???)
-                  [])))))})))
+                  []))
+              (iter-run-iterable-unconsolidated [this]
+                (???))
+              )))})))
+
+
+(defn- build-skip-trie [iterator arity skips]
+  (let [ret (volatile! {})]
+    ((fn f [binding iter idx]
+       (if (= idx arity)
+         (vswap! update-in (reverse binding) nil)
+         (if (= 0 (bit-and skips (bit-shift-left 1 idx)))
+           ;; this variable is something that we are interested in
+           (doseq [i (iter-run-iterable iter)]
+             (f (cons (iter-variable-value i) binding) (iter-continuation i) (+ idx 1)))
+           ;; this is some variable that we would like to skip
+           (doseq [i (iter-run-iterable-unconsolidated iter)]
+             (f binding (iter-continuation i) (+ idx 1))))))
+     () iterator 0)
+    ret))
+
+(defn- iterator-over-trie [trie]
+  (reify DIterator
+    (iter-run-cb [this cb-fn]
+      (doseq [v (iter-run-iterable this)] (cb-fn v)))
+    (iter-run-iterable [this]
+      (for [[k v] trie]
+        (reify DIteratorInstance
+          (iter-variable-value [this] k)
+          (iter-continuation [this]
+            (if (nil? v) nil
+                (iterator-over-trie v))))))
+    (iter-run-iterable-unconsolidated [this] (iter-run-iterable this))
+    (iter-bind-value [this value]
+      (let [v (get trie value)]
+        (if (nil? v) nil
+            (iterator-over-trie v))))
+    (iter-debug-which-variable-bound [this] (???))
+    (iter-estimate-cardinality [this] (count trie))))
+
+(defn- iterator-skip-variables [underlying binding-order skipped-variables]
+  (let [trie (delay (let [skips (apply bit-or (for [i (range (count binding-order))]
+                                    (if (skipped-variables (nth binding-order i))
+                                      (bit-shift-left 1 i)
+                                      0)))]
+                      (build-skip-trie underlying (count binding-order) skips)))]
+    (if (skipped-variables (first binding-order))
+      (iterator-over-trie @trie)
+      (reify DIterator
+        (iter-run-cb [this cb-fn] (doseq [v (iter-run-iterable this)] (cb-fn v)))
+        (iter-run-iterable [this]
+          (let [r (rest binding-order)]
+            (for [v (iter-run-iterable this)]
+              (reify DIteratorInstance
+                (iter-variable-value [this] (iter-variable-value v))
+                (iter-continuation [this] (iterator-skip-variables (iter-continuation v) r skipped-variables))))))
+        (iter-run-iterable-unconsolidated [this]
+          (let [r (rest binding-order)]
+            (for [v (iter-run-iterable-unconsolidated this)]
+              (reify DIteratorInstance
+                (iter-variable-value [this] (iter-variable-value v))
+                (iter-continuation [this] (iterator-skip-variables (iter-continuation v) r skipped-variables))))))
+        (iter-bind-value [this value]
+          (let [v (iter-bind-value underlying value)]
+            (if (nil? v) nil
+                (iterator-skip-variables v (rest binding-order) skipped-variables))))
+        (iter-estimate-cardinality [this] (iter-estimate-cardinality underlying))))))
+
+(defn make-skip-variables-iterator [iterator binding-order skipped-variables]
+  (reify DIterable
+    (iter-what-variables-bound [this] (into #{} (remove skipped-variables binding-order)))
+    (iter-variable-binding-order [this] [(into [] (remove skipped-variables binding-order))])
+    (iter-create-iterator [this which-binding]
+      (let [underlying (iter-create-iterator iterator binding-order)
+            bding (apply list binding-order)]
+        (reify DIterator
+          (iter-run-cb [this cb-fn]
+            (doseq [v (iter-run-iterable this)]
+              (cb-fn v)))
+          (iter-run-iterable [this]
+            ;; if the variable that we are binding
+            (iterator-skip-variables (iter-run-iterable iterator) binding-order skipped-variables))
+          )))))
 
 (defn iterator-variable-can-not-bind [var]
   ;; something like the variable is required by the iterator (to be efficient)
@@ -107,50 +191,6 @@
   {:not-bindinable-var var})
 
 
-#_(defn make-unit-iterator [variable value]
-  #{(reify DIterable
-      (iter-what-variables-bound [this] #{variable})
-      (iter-variable-binding-order [this] [[variable]]) ;; could do something like {#{} #{variable}}
-      (iter-create-iterator [this which-binding]
-        (assert (or (nil? which-binding) (= which-binding [variable])))
-        (reify DIterator
-          (iter-run-cb [this cb-fun] (cb-fun {variable value}))
-          ;(iter-has-next [this] false)
-          ))
-      Object
-      (toString [this] (str "(unit-iterator " variable " " value ")")))})
-
-
-#_(defn make-disjunct-iterator [branches]
-  (let [branch-variables (vec (map (fn [b] (apply union (map iter-what-variables-bound b)))
-                                   branches))
-        all-variable-bindable (apply intersection branch-variables)
-        ret (into #{} (for [var all-variable-bindable]
-                        (reify DIterable
-                          (iter-what-variables-bound [this] #{var})
-                          (iter-variable-binding-order [this] [[var]])
-                          (iter-create-iterator [this which-binding]
-                            (assert (or (nil? which-binding) (= which-binding [var])))
-                            (reify DIterator
-                              (iter-run-cb [this cb-fun]
-                                ;; this has to run the first iterator and record what values are contained
-                                ;; and then run the second iterator without duplicating the result
-                                (let [values-seen (transient #{})]
-                                  (doseq [b branches]
-                                    (let [itr (filter #(contains? (iter-what-variables-bound %) var) b)]
-                                      (iter-run-cb (iter-create-iterator (first itr) nil)
-                                                   (fn [var-bindings]
-                                                     (when-not (contains? values-seen var-bindings)
-                                                       (conj! values-seen var-bindings)
-                                                       (cb-fun var-bindings))))))))
-                              ;(iter-has-next [this] false)
-                              )))
-                        ))
-        ]
-    ;; I suppose that this can just do this a single variable at a time for the
-    ;; start?  Though when there are chains of variables which can
-    ;; become bound, that becomes more complicated.  This
-    ret))
 
 (defn pick-iterator [iterators binding-variables]
   (let [bv (into #{} binding-variables)
@@ -171,29 +211,30 @@
       ;; something with
       ;;
       (debug-repl "did not find iterator to pick"))
-    (let [ret (first iters)
-          binding-order (first (iter-variable-binding-order ret))]
-      ;(debug-repl "pick iterator")
-      [ret binding-order])
+    (let [picked-iter (first iters)
+          binding-order (first (iter-variable-binding-order picked-iter))]
+
+      (debug-repl "pick iterator")
+      [picked-iter binding-order])
     ))
 
 
-(defn- run-iterator-fn [picked-iterator picked-binding-order rexpr ctx callback-fn simplify-fn]
+(defn- run-iterator-fn [picked-iterator picked-binding-order can-bind-variables rexpr ctx callback-fn simplify-fn]
   ((fn rec [iter bind-order rexpr]
      (if (empty? bind-order)
        ;; then we have reached the end of this expression, so we are going to callback
        (callback-fn rexpr)
        (let [v (first bind-order)
-             r (rest bind-order)]
-         (if (is-bound-in-context? v ctx)
+             r (rest bind-order)
+             is-bound (is-bound-in-context? v ctx)]
+         (if is-bound
            ;; then we are going do bind the variable in the iterator to the current value and keep running the recursion
            ;; we do not resimplify the R-expr as we have not made any changes
            (let [it-bound (iter-bind-value iter (get-value-in-context v ctx))]
              ;(debug-repl)
              (when-not (nil? it-bound) ;; if the binding failed, then the iterator should return nil to indicate that there is nothing here
                (rec it-bound r rexpr)))
-           (do
-             ;(debug-repl)
+           (if (contains? can-bind-variables v)
              (doseq [val (iter-run-iterable iter)]
                  (let [dctx (context/make-nested-context-disjunct rexpr)] ;; this should take the context as an argument?
                    (context/bind-context-raw
@@ -202,7 +243,11 @@
                     (let [new-rexpr (simplify-fn rexpr)] ;; would be nice if the simplify could track which branches would depend on the value and ignore the rest. I suppose that would really be something that we should do compilation.  There is no need to increase the complexity of the standard simplify method
                       (when-not (is-empty-rexpr? new-rexpr)
                         (rec (iter-continuation val) r new-rexpr))
-                      ))))))
+                      ))))
+             (do
+               (debug-repl "not able to bind variable")
+               (???))
+             ))
          )))
    (iter-create-iterator picked-iterator picked-binding-order) ;; create the start of the iterator
    (apply list picked-binding-order)  ;; make this a linked list so that it will quickly be able to pull items off the head of the list
@@ -268,61 +313,20 @@
                                     ;; the origional R-expr when doing the encoding
                                     (function-let [iterator-encode-state-as-rexpr (~iter-encode-state-as-rexpr picked-binding-order# #{})
                                                    iterator-encode-state-ignore-vars (~iter-encode-state-as-rexpr picked-binding-order# %)]
-                                                  ~body)
-                                    #_(macrolet [~'iterator-encode-state-as-rexpr
-                                               ([] '(let [encode-vars# (filter is-variable? picked-binding-order#)
-                                                            c# (vec (for [v# encode-vars#]
-                                                                      (make-no-simp-unify v# (make-constant (get-value v#)))))
-                                                            r# (make-conjunct c#)
-                                                            ]
-                                        ;(debug-repl "encode state as r-expr not implemented")
-                                                        r#))
-                                               ~'iterator-encode-state-ignore-vars
-                                               ([ignore-vars#]
-
-                                                (let [ret#
-                                                              '(do
-                                                   (debug-repl "here")
-                                                   (???))
-                                        ;(list ~iter-encode-state-as-rexpr picked-binding-order# ignore-vars#)
-                                                      ]
-                                                  (debug-repl "h2")
-                                                  ret#)
-                                                )
-                                                ]
-                                              ~body))
-                     ;; the variable that is
-                     ;iterator# (iter-create-iterator picked-iterator#)
+                                                  ~body))
                      ]
-                 ;; what this needs to do is bind the
-                 ;; ((fn iter-rec# [var-bindings ])
-                 ;;  picked-binding-order# ;; this is a list where the order of variables can be puled
-
-                 ;;  )
-                 (~run-iterator-fn picked-iterator# picked-binding-order# ~rexpr ~ctx callback-fn# ~simplify-method)
+                 (~run-iterator-fn
+                  picked-iterator#
+                  picked-binding-order#
+                  (iter-what-variables-bound picked-iterator#)
+                  ~rexpr
+                  ~ctx
+                  callback-fn#
+                  ~simplify-method)
                  )]
       ;(debug-repl "iter runner")
       ret)
     ))
-
-
-;; I suppose that there could be some way of getting the variable context?  Or the binding of some variable
-#_(defmacro iterator-encode-state-as-rexpr []
-  `(do
-     (debug-repl "iterator encode state as rexpr, not implemented")
-     (???)))
-
-;; (defmacro iterator-continue-running []
-;;   ;; in the case that the iterator is going to
-;;   `(???))
-
-
-#_(defmacro run-iterator [iterators binding-variables & body]
-  `(let [iterators# ~iterators
-         binding-variables# ~binding-variables ;; should this require that all of the variables here are bound, or is it fine if the values are
-         result (volatile! nil)]
-     (iter-run-cb)
-     ))
 
 
 ;; the iterators which bind variables that are "hidden" might still be useful,
@@ -330,36 +334,3 @@
 ;; deduplicate the values which result from the other variables first.
 (defn filter-variables-from-iterators [variables iterators]
   (filter #(not (contains? (iter-what-variables-bound variables) %)) iterators))
-
-
-
-;; there should be some way in which we can loop over the disjunctive branches
-;; of the R-expr but we should also combine the branches back together.  Should
-;; those branches become combined using a new disjunct at the top level
-
-
-(comment
-  (defmacro loop-over-disjuncts [rexpr & args]
-    (let [flags (into #{} (filter keyword? args))
-          rexpr-var (gensym 'rexpr)
-          argument-var (first (filter symbol? args))
-          create-disjunction (contains? flags :create-disjunct)
-          create-disjunct-var (gensym)
-          full-binding (contains? flags :full-grounding)
-
-          binding-body `(do ~@(drop 1 (filter #(not (keyword? %)) args)))
-          cb-fun (cond create-disjunction `(fn [])
-                       )
-          ]
-      (assert (not (and create-disjunction full-binding)))
-      (cond full-binding `(let [~rexpr-var ~rexpr
-                                needed-vars# (exposed-variables ~rexpr-var)
-                                iterators ]))
-
-      `(let [~rexpr-var ~rexpr]
-         ~(cond full-binding)
-
-
-         (let [~argument-var ~rexpr-var]
-           ))
-      )))
