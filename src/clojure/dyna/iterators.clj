@@ -222,6 +222,14 @@
 ;; this would make it into somewhat of a circular implementation issue?
 ;; I suppose that there could be another macro which wraps this to make it return a disjunct
 
+(defn- iter-encode-state-as-rexpr [picked-binding-order ignore-vars]
+  (let [encode-vars (filter is-variable? picked-binding-order)
+        vs (remove ignore-vars encode-vars)
+        c (vec (for [v vs]
+                 (make-no-simp-unify v (make-constant (get-value v)))))
+        r (make-conjunct c)]
+    r))
+
 (defmacro run-iterator [& args]
   (let [kw-args (apply hash-map (drop-last args))
         body (last args)
@@ -258,14 +266,30 @@
                                     ;; the variables for the expression and what
                                     ;; is bound.  I suppose that we can also use
                                     ;; the origional R-expr when doing the encoding
-                                    (macrolet [~'iterator-encode-state-as-rexpr
+                                    (function-let [iterator-encode-state-as-rexpr (~iter-encode-state-as-rexpr picked-binding-order# #{})
+                                                   iterator-encode-state-ignore-vars (~iter-encode-state-as-rexpr picked-binding-order# %)]
+                                                  ~body)
+                                    #_(macrolet [~'iterator-encode-state-as-rexpr
                                                ([] '(let [encode-vars# (filter is-variable? picked-binding-order#)
-                                                          c# (vec (for [v# encode-vars#]
-                                                                    (make-no-simp-unify v# (make-constant (get-value v#)))))
-                                                          r# (make-conjunct c#)
-                                                          ]
-                                                      (debug-repl "encode state as r-expr not implemented")
-                                                      (???)))]
+                                                            c# (vec (for [v# encode-vars#]
+                                                                      (make-no-simp-unify v# (make-constant (get-value v#)))))
+                                                            r# (make-conjunct c#)
+                                                            ]
+                                        ;(debug-repl "encode state as r-expr not implemented")
+                                                        r#))
+                                               ~'iterator-encode-state-ignore-vars
+                                               ([ignore-vars#]
+
+                                                (let [ret#
+                                                              '(do
+                                                   (debug-repl "here")
+                                                   (???))
+                                        ;(list ~iter-encode-state-as-rexpr picked-binding-order# ignore-vars#)
+                                                      ]
+                                                  (debug-repl "h2")
+                                                  ret#)
+                                                )
+                                                ]
                                               ~body))
                      ;; the variable that is
                      ;iterator# (iter-create-iterator picked-iterator#)

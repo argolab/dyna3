@@ -347,9 +347,9 @@
 ;; clojure.tools.macro/macrolet but this version is simpler and does not do
 ;; recursive expansion of the macros.
 (defn- macrolet-expand [mm form]
-  (cond (and (list? form) (contains? mm (first form))) (apply (mm (first form)) (drop 1 form))
+  (cond (and (seq? form) (contains? mm (first form))) (apply (mm (first form)) (drop 1 form))
         (symbol? form) form
-        (list? form) (reverse (into () (map #(macrolet-expand mm %) form)))
+        (seq? form) (reverse (into () (map #(macrolet-expand mm %) form)))
         (vector? form) (into [] (map #(macrolet-expand mm %) form))
         (map? form) (into {} (map #(macrolet-expand mm %) form))
         (set? form) (into #{} (map #(macrolet-expand mm %) form))
@@ -357,10 +357,27 @@
 
 (defmacro macrolet [bnds & body]
   (assert (even? (count bnds)))
+  (print bnds)
   (let [m (into {} (for [[name f] (apply hash-map bnds)]
                      [name (eval (cons 'fn f))]))]
     `(do ~@(map #(macrolet-expand m %) body))))
 
+
+(defmacro function-let [bnds & body]
+  (assert (even? (count bnds)))
+  (let [m (into {} (for [[n f] (apply hash-map bnds)]
+                     [(symbol (name n)) (fn [& args]
+                                          (let [r (for [a f]
+                                                    (if (symbol? a)
+                                                      (let [n (name a)
+                                                            mat (re-matches #"%([0-9]+)" n)]
+                                                        (if (= n "%")
+                                                          (nth args 0)
+                                                          (if mat (nth args (Integer/valueOf (second mat)))
+                                                              a)))
+                                                      a))]
+                                            r))]))]
+    (macrolet-expand m `(do ~@body))))
 
 ;; this would have to make some interface for the methods or this could just
 ;; define methods which cast the type to the class, and then invoke

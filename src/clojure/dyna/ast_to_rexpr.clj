@@ -100,7 +100,6 @@
              new-rexpr))
   ([rexpr proj-out-vars]
    (let [var-unifies (transient {})
-
          mr (cond
               (is-proj? rexpr) (let [ufv (:var rexpr)
                                      prexpr (:body rexpr)
@@ -167,7 +166,7 @@
 ;; $define_term_dynabase_added --> object after $self and $dynabase have been setup
 ;; $define_term_normalized --> term after normalization is complete, ready to get converted into an R-expr and loaded into the system
 
-(defn recurse-through-escaped [ast fun]
+(defn- recurse-through-escaped [ast fun]
   (if (instance? DynaTerm ast)
     (case [(.name ^DynaTerm ast) (.arity ^DynaTerm ast)]
       ["$escaped" 1] (fun (get ast 0))
@@ -175,7 +174,7 @@
       )
     #{}))
 
-(defn find-all-variables [ast]
+(defn- find-all-variables [ast]
   (if (instance? DynaTerm ast)
     (case [(.name ^DynaTerm ast) (.arity ^DynaTerm ast)]
       ["$variable" 1] #{(get ast 0)}
@@ -188,7 +187,7 @@
     ;; this is something else, like maybe the inside of a constant or something
     #{})))
 
-(defn find-term-variables [ast]
+(defn- find-term-variables [ast]
   (if (instance? DynaTerm ast)
     (case [(.name ^DynaTerm ast) (.arity ^DynaTerm ast)] ;; put the arity into the expression
       ["$variable" 1] #{(get ast 0)}
@@ -215,7 +214,7 @@
 (def current-dir (-> (java.io.File. (System/getProperty "user.dir")) .toURI .toURL))
 (def current-dir-path (Paths/get (.toURI current-dir)))
 
-(defn convert-from-escaped-ast-to-ast [^DynaTerm ast source-file]
+(defn- convert-from-escaped-ast-to-ast [^DynaTerm ast source-file]
   (if-not (instance? DynaTerm ast)
     (DynaTerm. "$constant" DynaTerm/null_term source-file [ast])
     (case [(.name ast) (.arity ast)]
@@ -578,6 +577,9 @@
                                     #{})  ;; the set of arguments which need to get avoid
                                    )
 
+            ;; TODO: we shouldn't have to capure constant values into the
+            ;; dynabase representation.  Each dynabase can only be created at
+            ;; one point in the program.  This means that the constant values would not need to get captured
             ["$dynabase_create" 2] (let [[extended-dynabase-value dynabase-terms] (.arguments ast)
                                          dynabase-captured-variables (into {} (for [[k v] variable-name-mapping]
                                                                                 (let [val (if (is-constant? v)

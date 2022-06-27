@@ -1399,9 +1399,9 @@
 
            ;; this is going to have to encode the state as an R-expr while removing some of the variables
            ;; I suppose that this will mean that it
-           (debug-repl "in proj iterator")
-           (conj! results (make-conjunct [(iterator-encode-state-as-rexpr) nR]))))
-        (debug-repl "proj used iterator")
+           ;(debug-repl "in proj iterator")
+           (conj! results (make-conjunct [(iterator-encode-state-ignore-vars #{A}) nR]))))
+        ;(debug-repl "proj used iterator")
         (make-disjunct (persistent! results))))))
 
 #_(def-rewrite
