@@ -45,7 +45,7 @@
 (defn- hash-tries [arity node]
   (if (= arity 0)
     (reduce bit-xor (map hash node))
-    (reduce unchecked-add-int (map #(bit-xor (hash (first %)) (hash-tries (- arity 1) (second %))) node))))
+    (reduce unchecked-add-int 0 (map #(bit-xor (hash (first %)) (hash-tries (- arity 1) (second %))) node))))
 
 (defsimpleinterface IPrefixTrie
   (trie-get-values-collection [key])  ;; return the values associated with a given key together

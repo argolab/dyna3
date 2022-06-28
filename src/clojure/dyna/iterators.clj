@@ -3,7 +3,7 @@
   (:require [dyna.base-protocols :refer :all])
   (:require [dyna.rexpr-constructors :refer :all])
   (:require [dyna.context :as context])
-  (:require [clojure.set :refer [union intersection subset?]])
+  (:require [clojure.set :refer [union intersection subset? difference]])
   ;(:require [clojure.tools.macro :refer [macrolet]])
   (:import [dyna DIterable DIterator DIteratorInstance]))
 
@@ -107,20 +107,20 @@
               )))})))
 
 
-(defn- build-skip-trie [iterator arity skips]
+(defn- build-skip-trie [^DIterator iterator arity skips]
   (let [ret (volatile! {})]
-    ((fn f [binding iter idx]
+    ((fn rec [binding iter idx]
        (if (= idx arity)
-         (vswap! update-in (reverse binding) nil)
+         (vswap! ret assoc-in (reverse binding) nil)
          (if (= 0 (bit-and skips (bit-shift-left 1 idx)))
            ;; this variable is something that we are interested in
            (doseq [i (iter-run-iterable iter)]
-             (f (cons (iter-variable-value i) binding) (iter-continuation i) (+ idx 1)))
+             (rec (cons (iter-variable-value i) binding) (iter-continuation i) (+ idx 1)))
            ;; this is some variable that we would like to skip
            (doseq [i (iter-run-iterable-unconsolidated iter)]
-             (f binding (iter-continuation i) (+ idx 1))))))
+             (rec binding (iter-continuation i) (+ idx 1))))))
      () iterator 0)
-    ret))
+    @ret))
 
 (defn- iterator-over-trie [trie]
   (reify DIterator
@@ -141,11 +141,11 @@
     (iter-debug-which-variable-bound [this] (???))
     (iter-estimate-cardinality [this] (count trie))))
 
-(defn- iterator-skip-variables [underlying binding-order skipped-variables]
+(defn- iterator-skip-variables [^DIterator underlying binding-order skipped-variables]
   (let [trie (delay (let [skips (apply bit-or (for [i (range (count binding-order))]
-                                    (if (skipped-variables (nth binding-order i))
-                                      (bit-shift-left 1 i)
-                                      0)))]
+                                                (if (skipped-variables (nth binding-order i))
+                                                  (bit-shift-left 1 i)
+                                                  0)))]
                       (build-skip-trie underlying (count binding-order) skips)))]
     (if (skipped-variables (first binding-order))
       (iterator-over-trie @trie)
@@ -153,7 +153,7 @@
         (iter-run-cb [this cb-fn] (doseq [v (iter-run-iterable this)] (cb-fn v)))
         (iter-run-iterable [this]
           (let [r (rest binding-order)]
-            (for [v (iter-run-iterable this)]
+            (for [v (iter-run-iterable underlying)]
               (reify DIteratorInstance
                 (iter-variable-value [this] (iter-variable-value v))
                 (iter-continuation [this] (iterator-skip-variables (iter-continuation v) r skipped-variables))))))
@@ -169,21 +169,23 @@
                 (iterator-skip-variables v (rest binding-order) skipped-variables))))
         (iter-estimate-cardinality [this] (iter-estimate-cardinality underlying))))))
 
-(defn make-skip-variables-iterator [iterator binding-order skipped-variables]
+(defn make-skip-variables-iterator [^DIterable iterator binding-order skipped-variables]
   (reify DIterable
     (iter-what-variables-bound [this] (into #{} (remove skipped-variables binding-order)))
     (iter-variable-binding-order [this] [(into [] (remove skipped-variables binding-order))])
     (iter-create-iterator [this which-binding]
       (let [underlying (iter-create-iterator iterator binding-order)
             bding (apply list binding-order)]
-        (reify DIterator
+        #_(reify DIterator
           (iter-run-cb [this cb-fn]
             (doseq [v (iter-run-iterable this)]
               (cb-fn v)))
           (iter-run-iterable [this]
             ;; if the variable that we are binding
-            (iterator-skip-variables (iter-run-iterable iterator) binding-order skipped-variables))
-          )))))
+            (iterator-skip-variables underlying binding-order skipped-variables))
+            )
+        (iterator-skip-variables underlying binding-order skipped-variables)
+        ))))
 
 (defn iterator-variable-can-not-bind [var]
   ;; something like the variable is required by the iterator (to be efficient)
@@ -210,15 +212,32 @@
       ;; construct a conjunctive iterator using this there might also be
       ;; something with
       ;;
+      ;; I suppose that this could return an empty iterator where there would be
+      ;; no variables to bind and nothing to do the binding.  This would cause
+      ;; the system to directly callback the wrapped function such that it would directly evaluate the result
+
       (debug-repl "did not find iterator to pick"))
     (let [picked-iter (first iters)
-          binding-order (first (iter-variable-binding-order picked-iter))]
-
-      (debug-repl "pick iterator")
-      [picked-iter binding-order])
+          can-bind-variables (iter-what-variables-bound picked-iter)
+          binding-order (first (iter-variable-binding-order picked-iter))
+          ]
+      (dyna-assert (seqable? binding-order)) ;; this should be a sequence of variables in the order that they are bound
+      (if (every? #(or (can-bind-variables %) (is-constant? %)) binding-order)
+        [picked-iter binding-order] ;; then we can just use this iterator directly as all of the variables are bindable
+        (let [dd (difference (into #{} binding-order) can-bind-variables)
+              ;zzz (debug-repl)
+              siter (make-skip-variables-iterator picked-iter binding-order dd)]
+          ;(debug-repl "unbindable variable in iterator")
+          ;; this iterator will only represent the variables that we are allowed to bind using this iterator
+          [siter (first (iter-variable-binding-order siter))])
+        )
+      ;(debug-repl "pick iterator")
+      ;[picked-iter binding-order]
+      )
     ))
 
 
+;; TODO: can-bind-variables can be removed now I think..
 (defn- run-iterator-fn [picked-iterator picked-binding-order can-bind-variables rexpr ctx callback-fn simplify-fn]
   ((fn rec [iter bind-order rexpr]
      (if (empty? bind-order)
@@ -236,14 +255,14 @@
                (rec it-bound r rexpr)))
            (if (contains? can-bind-variables v)
              (doseq [val (iter-run-iterable iter)]
-                 (let [dctx (context/make-nested-context-disjunct rexpr)] ;; this should take the context as an argument?
-                   (context/bind-context-raw
-                    dctx
-                    (ctx-set-value! dctx v (iter-variable-value val))
-                    (let [new-rexpr (simplify-fn rexpr)] ;; would be nice if the simplify could track which branches would depend on the value and ignore the rest. I suppose that would really be something that we should do compilation.  There is no need to increase the complexity of the standard simplify method
-                      (when-not (is-empty-rexpr? new-rexpr)
-                        (rec (iter-continuation val) r new-rexpr))
-                      ))))
+               (let [dctx (context/make-nested-context-disjunct rexpr)] ;; this should take the context as an argument?
+                 (context/bind-context-raw
+                  dctx
+                  (ctx-set-value! dctx v (iter-variable-value val))
+                  (let [new-rexpr (simplify-fn rexpr)] ;; would be nice if the simplify could track which branches would depend on the value and ignore the rest. I suppose that would really be something that we should do compilation.  There is no need to increase the complexity of the standard simplify method
+                    (when-not (is-empty-rexpr? new-rexpr)
+                      (rec (iter-continuation val) r new-rexpr))
+                    ))))
              (do
                (debug-repl "not able to bind variable")
                (???))

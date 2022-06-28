@@ -74,7 +74,8 @@
                                            rexpr-map))]
     (when (some is-disjunct-op? children)
       (debug-repl "need to combine tries"))
-    ;(debug-repl "made dd")
+    (when (.contains (str ret) "range")
+      (debug-repl "made dd"))
     ret))
 
 

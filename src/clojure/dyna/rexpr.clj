@@ -1283,7 +1283,9 @@
                                                      child-rexpr)))]
     ;; the intersected context is what can be passed up to the parent, we are going to have to make new contexts for the children
     (ctx-add-context! outer-context intersected-ctx)
-    ;(debug-repl "disjunct standard")
+                                        ;(debug-repl "disjunct standard")
+    (when (.contains (str children-with-contexts) "range")
+      (debug-repl "made dd1"))
     (make-disjunct children-with-contexts)))
 
 (def-iterator

@@ -62,14 +62,21 @@
 (comment (def-aggregator "prob+="
            :combine +))
 
-(def-aggregator "="
-  ;; in the case that there are two different, then that is an error, though not 100% sure where the unification failure is going to pop up in this case???
-  :combine (fn [a b]
-             (if (not= a b)
-               (throw (UnificationFailure. "The equals aggregator (=) requires only one contribution"))
-               a))
-  :identity DynaTerm/null_term
-  :many-items (fn [val mul] (throw (UnificationFailure. "The equals aggregator (=) requires only one contribution"))))
+(let [ident (Object.)]
+  (def-aggregator "="
+    ;; in the case that there are two different, then that is an error, though not 100% sure where the unification failure is going to pop up in this case???
+    :combine (fn [a b]
+               (if (identical? a ident)
+                 b
+                 (if (not= a b)
+                   (throw (UnificationFailure. (str "The equals aggregator (=) requires only one contribution, got " a " and " b)))
+                   a)))
+    :identity ident ;DynaTerm/null_term
+    :many-items (fn [val mul] (throw (UnificationFailure. "The equals aggregator (=) requires only one contribution")))
+    :lower-value (fn [x]
+                   (when (identical? x ident)
+                     (throw (UnificationFailure. "No contributions on aggregator")))
+                   x)))
 
 ;; used if there are multiple aggregators on a single rule which need to get combined together
 ;; this will throw an exception if we attempt to combine multiple expressions together at once
@@ -78,7 +85,9 @@
   (def-aggregator "only_one_contrib"
     :identity ident
     :combine (fn [a b]
-               (throw (DynaUserError. "multiple aggregators on the same rule")))
+               (if (identical? ident a)
+                 b
+                 (throw (DynaUserError. "multiple aggregators on the same rule"))))
     :lower-value (fn [x]
                    (when (identical? ident x)
                      (throw (UnificationFailure. "no contributionso on aggregator")))
@@ -369,7 +378,7 @@
                    ;; are not ground.
                    (let [nr (make-conjunct [(iterator-encode-state-as-rexpr) new-rexpr])]
                      (vreset! is-empty-aggregation false)
-                     (vswap! conj unfinished-rexprs nr)))))
+                     (conj! unfinished-rexprs nr)))))
 
               (let [ret (if (= 0 (count unfinished-rexprs))
                           ;; then we have fully processed everything

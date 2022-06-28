@@ -8,7 +8,7 @@
   ;(:require [dyna.rewrites :refer [def-rewrite]])
   (:require [clojure.set :refer [union]])
   (:require [dyna.user-defined-terms :refer [def-user-term]])
-  (:import [dyna DynaTerm])
+  (:import [dyna DynaTerm DIterable DIterator DIteratorInstance])
   )
 
 ;(in-ns 'dyna.rexpr)
@@ -455,20 +455,20 @@
   (let [LowV (get-value Low)
         HighV (get-value High)
         StepV (get-value Step)
-        OutV (get-value Out)]
-    (make-unify Contained
-                (make-constant-bool
-                 (and (int? OutV)
-                      (>= LowV OutV)
+        OutV (get-value Out)
+        successful (and (int? OutV)
+                      (>= OutV LowV)
                       (< OutV HighV)
-                      (= (mod (- OutV LowV) StepV) 0))))))
+                      (= (mod (- OutV LowV) StepV) 0))]
+    (make-unify Contained
+                (make-constant-bool successful))))
 
 ;; there should be notation that this is going to introduce a disjunct
 ;; such that it knows that this would have some loop or something
-(def-rewrite
-  :match (range (:ground Low) (:ground High) (:ground Step) (:any Out) (:ground Contained))
-  :run-at :standard ;; there should be some version of run-at where it would be able to indicate that it would introduce a disjunct, so that this could be some "optional" rewrite or something that it might want to defer until later.  This would be trying to find if
-  (do (assert (get-value Contained)) ;; in the case that this is false, there is no way for us to rewrite this expression
+#_(def-rewrite
+  :match (range (:ground Low) (:ground High) (:ground Step) (:free Out) (is-true? Contained))
+  :run-at :inference ;; there should be some version of run-at where it would be able to indicate that it would introduce a disjunct, so that this could be some "optional" rewrite or something that it might want to defer until later.  This would be trying to find if
+  (do ;(assert (get-value Contained)) ;; in the case that this is false, there is no way for us to rewrite this expression
       (let [LowV (get-value Low)
             HighV (get-value High)
             StepV (get-value Step)]
@@ -484,13 +484,35 @@
                               (make-range (make-constant (+ LowV StepV))
                                           High
                                           Step
-                                          Out)]))))))
+                                          Out
+                                          Contained)]))))))
 
-(comment
-  (def-iterator
-    :match (range (:ground Low) (:ground High) (:ground Step) (:iterate Out) (:ground Contained))
-    (make-iterator Out (range (get-value Low) (get-value High) (get-value Step))))
-  )
+
+(def-iterator
+  :match (range (:ground Low) (:ground High) (:ground Step) (:free Out) (is-true? Contained))
+  (let [low-v (get-value Low)
+        high-v (get-value High)
+        step-v (get-value Step)]
+    (when (and (int? low-v) (int? high-v) (int? step-v))
+      (let [r (range low-v high-v step-v)]
+        #{(reify DIterable
+            (iter-what-variables-bound [this] #{Out})
+            (iter-variable-binding-order [this] [[Out]])
+            (iter-create-iterator [this which-binding]
+              (reify DIterator
+                (iter-run-cb [this cb-fn] (doseq [v (iter-run-iterable this)] (cb-fn v)))
+                (iter-run-iterable [this]
+                  (for [v r]
+                    (reify DIteratorInstance
+                      (iter-variable-value [this] v)
+                      (iter-continuation [this] nil))))
+                (iter-run-iterable-unconsolidated [this] (iter-run-iterable this))
+                (iter-bind-value [this value]
+                  (if (and (int? value) (< (mod (- value low-v) step-v) high-v))
+                    iterator-empty-instance
+                    nil))
+                (iter-estimate-cardinality [this]
+                  (count r)))))}))))
 
 ;; there is no way to define a range with 3 arguments, as it would use the same name here
 ;; that would have to be represented with whatever is some named mapped from a symbol to what is being created
