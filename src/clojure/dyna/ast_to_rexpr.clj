@@ -659,7 +659,7 @@
                                 result (simplify-top rexpr)]
                             (when-not (= wants-to-succeed (= result (make-multiplicity 1)))
                               (if dyna.utils/debug-on-assert-fail
-                                (debug-repl "user program assert failed")) ;; when in debug mode, stop here when an assert fails
+                                (debug-repl (str "user program assert failed: " text-rep))) ;; when in debug mode, stop here when an assert fails
                               (throw (DynaUserAssert. source-file line-number text-rep result)))
                             (make-unify out-variable (make-constant true))) ;; if the assert fails, then it will throw some exception
 

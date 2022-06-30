@@ -770,7 +770,7 @@
                                      ~'result ~res
                                      ~'exposed-outgoing (exposed-variables ~res)
                                      ~'exposed-difference (difference ~'exposed-incoming ~'exposed-outgoing)]
-                                 (when (some #(not (is-bound? %)) ~'exposed-difference)
+                                 (when (and (is-non-empty-rexpr? ~'result) (some #(not (is-bound? %)) ~'exposed-difference))
                                    (debug-repl "difference in exposed-variables"))))
                            ~res)]
     `(fn (~'[rexpr simplify]
@@ -1356,8 +1356,7 @@
         (dyna-debug (when-not (or (is-empty-rexpr? nR) (contains? (exposed-variables nR) A))
                       (print "failed find projected var")
                       (debug-repl "gg9")))
-        (when (<= (count (exposed-variables nR)) 1)
-          (debug-repl "proj??"))
+        ;(when (<= (count (exposed-variables nR)) 1)  (debug-repl "proj??"))
         (make-proj A nR)))))
 
 (def-rewrite

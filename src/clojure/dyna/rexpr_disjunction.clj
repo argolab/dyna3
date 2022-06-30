@@ -5,7 +5,7 @@
   (:require [dyna.context :as context])
   (:require [dyna.prefix-trie :refer :all])
   (:require [dyna.base-protocols :refer :all])
-  ;(:require [dyna.iterators :refer iterators])
+  (:require [dyna.iterators :refer [run-iterator]])
   (:require [clojure.set :refer [subset? union]])
   (:import [dyna.rexpr disjunct-rexpr])
   (:import [dyna.prefix_trie PrefixTrie])
@@ -13,7 +13,9 @@
 
 (def ^:dynamic *disjunct-op-remove-if-single* true)
 
-(def ^:dynamic *disjunct-constructed-add-function* nil)
+;(def ^:dynamic *disjunct-constructed-add-function* nil)
+
+(def ^:dynamic *disjunct-run-inner-iterators* true)
 
 (declare ^:private remap-variables-disjunct-op)
 
@@ -101,7 +103,29 @@
         ret-children (volatile! (PrefixTrie. (count dj-vars) 0 nil))
         num-children (volatile! 0)
         var-map (map get-value dj-vars)
-        child-var-values (transient (vec (repeat (count dj-vars) not-seen-in-trie)))]
+        child-var-values (transient (vec (repeat (count dj-vars) not-seen-in-trie)))
+        save-result-in-trie (fn save-result-in-trie [new-child-rexpr child-context]
+                              (when-not (is-empty-rexpr? new-child-rexpr)
+                                (let [dj-key (map #(get-value-in-context % child-context) dj-vars)]
+                                  ;; identify the different values seen for variables when running
+                                  (doseq [i (range (count dj-vars))]
+                                    (let [vv (get-value-in-context (nth dj-vars i) child-context)
+                                          cv (nth child-var-values i)]
+                                      (if (not= cv vv)
+                                        (assoc! child-var-values i (if (= cv not-seen-in-trie) vv nil)))))
+                                  ;; save the resulting R-expr in the resulting trie
+                                  (when (is-disjunct-op? new-child-rexpr)
+                                    (debug-repl "should combine tries into the current trie"))
+                                  (let [added-new (volatile! false)]
+                                    (vswap! ret-children trie-update-collection dj-key
+                                            (fn [col]
+                                              (let [[made-new ret] (merge-rexpr-disjunct-list col new-child-rexpr)]
+                                                (vreset! added-new made-new)
+                                                ret)))
+                                        ;(debug-repl "ddj")
+                                    (if @added-new
+                                      (vswap! num-children inc))))))
+        ]
     (doseq [[var-binding child] (trie-get-values rexprs var-map)]
       ;; this should loop through the children
       (let [child-context (context/make-nested-context-disjunct child)]
@@ -111,32 +135,23 @@
                 dv (nth dj-vars i)]
             (when (and (not (nil? djv)) (is-variable? dv))
               (ctx-set-value! child-context dv djv))))
-        (let [new-child-rexpr (context/bind-context-raw child-context
-                                                        (try (simplify child)
-                                                             (catch UnificationFailure e (make-multiplicity 0))))]
-          ;; if this is a disjunct, then it should just take the values into this
-          (assert (and (not (is-disjunct? new-child-rexpr))
-                       (not (is-disjunct-op? new-child-rexpr))))
-          (when-not (is-empty-rexpr? new-child-rexpr)
-            (let [dj-key (map #(get-value-in-context % child-context) dj-vars)]
-              ;; identify the different values seen for variables when running
-              (doseq [i (range (count dj-vars))]
-                (let [vv (get-value-in-context (nth dj-vars i) child-context)
-                      cv (nth child-var-values i)]
-                  (if (not= cv vv)
-                    (assoc! child-var-values i (if (= cv not-seen-in-trie) vv nil)))))
-              ;; save the resulting R-expr in the resulting trie
-              (when (is-disjunct-op? new-child-rexpr)
-                (debug-repl "should combine tries into the current trie"))
-              (let [added-new (volatile! false)]
-                (vswap! ret-children trie-update-collection dj-key
-                        (fn [col]
-                          (let [[made-new ret] (merge-rexpr-disjunct-list col new-child-rexpr)]
-                            (vreset! added-new made-new)
-                            ret)))
-                ;(debug-repl "ddj")
-                (if @added-new
-                  (vswap! num-children inc))))))))
+        (context/bind-context-raw child-context
+                                  (let [new-child-rexpr (try (simplify child)
+                                                             (catch UnificationFailure e (make-multiplicity 0)))]
+                                    ;; if this is a disjunct, then it should just take the values into this
+                                    (assert (and (not (is-disjunct? new-child-rexpr))
+                                                 (not (is-disjunct-op? new-child-rexpr))))
+                                        ;(when-not (is-empty-rexpr? new-child-rexpr))
+                                    (if (and *disjunct-run-inner-iterators* (not (is-multiplicity? new-child-rexpr)))
+                                      (let [iters (find-iterators new-child-rexpr)]
+                                        (run-iterator
+                                         :iterators iters
+                                         :bind-all true
+                                         :rexpr-in new-child-rexpr
+                                         :rexpr-result child-rexpr-itered
+                                         :simplify simplify
+                                         (save-result-in-trie child-rexpr-itered (context/get-context))))
+                                      (save-result-in-trie new-child-rexpr child-context))))))
     ;; set the values of variables which are the same across all branches
     (doseq [i (range (count dj-vars))]
       (let [dv (nth child-var-values i)]

@@ -408,7 +408,7 @@
                 ret))
             ;; then there are no iterators to bind, we need to return the aggregator wrapped around some expression
             (do
-                                        ;(debug-repl "need to return the aggregator as unable to resolve")
+              ;(debug-repl "need to return the aggregator as unable to resolve")
               (make-aggregator operator
                                (get-representation-in-context result-variable ctx)
                                (get-representation-in-context incoming-variable ctx)

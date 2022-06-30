@@ -210,7 +210,10 @@
   (let [bv (into #{} binding-variables)
         ;; we are going to consider some of the iterators which would be able to bind something
         ;; in the case that there are still values which are still unbound, it should just keep running
-        iters (filter #(intersection (into #{} (iter-what-variables-bound %)) bv) iterators)
+        iters (if (empty? bv)
+                 ;; if there are no requirements on the iterators, then we can just pick anything
+                (filter #(not (empty? (iter-what-variables-bound %))) iterators)
+                (filter #(intersection (into #{} (iter-what-variables-bound %)) bv) iterators))
         ]
     ;; this should somehow identify a preference bteween the different binding
     ;; orders I suppose that if the code is going to get copiled, then it should
@@ -219,7 +222,7 @@
     ;; that is important to identify, such that it doesn't just run all of the
     ;; iterators through
 
-    (when (empty? iters)
+    (if (empty? iters)
       ;; in this case, we might want to attempt to find if there is some way to
       ;; construct a conjunctive iterator using this there might also be
       ;; something with
@@ -227,26 +230,27 @@
       ;; I suppose that this could return an empty iterator where there would be
       ;; no variables to bind and nothing to do the binding.  This would cause
       ;; the system to directly callback the wrapped function such that it would directly evaluate the result
-
-      (debug-repl "did not find iterator to pick"))
-    (let [picked-iter (first iters)
-          can-bind-variables (into #{} (iter-what-variables-bound picked-iter))
-          binding-order (first (iter-variable-binding-order picked-iter))
-          ]
-      (dyna-assert (seqable? binding-order)) ;; this should be a sequence of variables in the order that they are bound
-      (if (every? #(or (can-bind-variables %) (is-constant? %)) binding-order)
-        [picked-iter binding-order] ;; then we can just use this iterator directly as all of the variables are bindable
-        (let [dd (difference (into #{} binding-order) can-bind-variables)
-              ;zzz (debug-repl)
-              siter (make-skip-variables-iterator picked-iter dd)
-              siter-order (first (iter-variable-binding-order siter))]
-          ;(debug-repl "unbindable variable in iterator")
-          ;; this iterator will only represent the variables that we are allowed to bind using this iterator
-          [siter siter-order])
-        )
-      ;(debug-repl "pick iterator")
-      ;[picked-iter binding-order]
-      )
+      (do
+        ;(debug-repl "did not find iterator to pick")
+        [nil nil])
+      (let [picked-iter (first iters)
+            can-bind-variables (into #{} (iter-what-variables-bound picked-iter))
+            binding-order (first (iter-variable-binding-order picked-iter))
+            ]
+        (dyna-assert (seqable? binding-order)) ;; this should be a sequence of variables in the order that they are bound
+        (if (every? #(or (can-bind-variables %) (is-constant? %)) binding-order)
+          [picked-iter binding-order] ;; then we can just use this iterator directly as all of the variables are bindable
+          (let [dd (difference (into #{} binding-order) can-bind-variables)
+                                        ;zzz (debug-repl)
+                siter (make-skip-variables-iterator picked-iter dd)
+                siter-order (first (iter-variable-binding-order siter))]
+                                        ;(debug-repl "unbindable variable in iterator")
+            ;; this iterator will only represent the variables that we are allowed to bind using this iterator
+            [siter siter-order])
+          )
+                                        ;(debug-repl "pick iterator")
+                                        ;[picked-iter binding-order]
+        ))
     ))
 
 
@@ -350,14 +354,16 @@
                                                    iterator-encode-state-ignore-vars (~iter-encode-state-as-rexpr ~ctx picked-binding-order# %)]
                                                   ~body))
                      ]
-                 (~run-iterator-fn
-                  picked-iterator#
-                  picked-binding-order#
-                  (iter-what-variables-bound picked-iterator#)
-                  ~rexpr
-                  ~ctx
-                  callback-fn#
-                  ~simplify-method)
+                 (if (nil? picked-iterator#)
+                   (callback-fn# ~rexpr) ;; there is nothing to iterate, so just run the callback function
+                   (~run-iterator-fn
+                    picked-iterator#
+                    picked-binding-order#
+                    (iter-what-variables-bound picked-iterator#)
+                    ~rexpr
+                    ~ctx
+                    callback-fn#
+                    ~simplify-method))
                  )]
       ;(debug-repl "iter runner")
       ret)
