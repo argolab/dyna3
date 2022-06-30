@@ -364,6 +364,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; things like variables and constants should instead be some other type rather than an R-expr
 
+(declare make-constant)
 
 (defrecord variable-rexpr [varname]
   RexprValue
@@ -374,6 +375,10 @@
   (is-bound? [this]  (context/need-context (ctx-is-bound? (context/get-context) this)))
   (is-bound-in-context? [this context] (ctx-is-bound? context this))
   (all-variables [this] #{this})
+  (get-representation-in-context [this ctx]
+    (if (is-bound-in-context? this ctx)
+      (make-constant (get-value-in-context this ctx))
+      this))
   Object
   (toString [this] (str "(variable " varname ")")))
 
@@ -401,6 +406,7 @@
   (is-bound? [this] true)
   (is-bound-in-context? [this context] true)
   (all-variables [this] #{})
+  (get-representation-in-context [this ctx] this)
   Object
   (toString [this] (str "(constant " value ")")))
 
@@ -745,7 +751,7 @@
                            ~(when system/status-counters `(StatusCounters/match_sucessful))
                            ~@body))))
 
-(defn- make-rewriter-function [matcher body from-file]
+(defn- make-rewriter-function [kw-args matcher body from-file]
   ;; this needs to go through and define something where the different functions
   ;; are invoked on the relvant parts of the expression.  Because the
   ;; expressions have different field values, and are not positional, this means
@@ -754,11 +760,18 @@
         do-rewrite-body `(let [~res (do ~body)]
                            ~(when system/print-rewrites-performed
                               `(when (and (not (nil? ~res)) (not= ~res ~'rexpr))
-                                 (debug-delay-ntimes 1000 (debug-repl))
+                                 ;(debug-delay-ntimes 1000 (debug-repl))
                                  (print ~(str "Performed rewrite:"  (meta from-file) "\nOLD: ") ~'rexpr "NEW: " ~res "CONTEXT:" (context/get-context))))
                            ~(when system/status-counters
                               `(when (and (not (nil? ~res)) (not= ~res ~'rexpr))
                                  (StatusCounters/rewrite_performed)))
+                           ~(when (:check-exposed-variables kw-args)
+                              `(let [~'exposed-incoming (exposed-variables ~'rexpr)
+                                     ~'result ~res
+                                     ~'exposed-outgoing (exposed-variables ~res)
+                                     ~'exposed-difference (difference ~'exposed-incoming ~'exposed-outgoing)]
+                                 (when (some #(not (is-bound? %)) ~'exposed-difference)
+                                   (debug-repl "difference in exposed-variables"))))
                            ~res)]
     `(fn (~'[rexpr simplify]
           (match-rexpr ~'rexpr ~matcher ~do-rewrite-body)))))
@@ -798,7 +811,7 @@
         functor-name (car matcher-rexpr)
         arity (if (= (cdar matcher-rexpr) :any) nil (- (count matcher-rexpr) 1))
         runs-at (:run-at kw-args :standard)
-        rewriter-function (make-rewriter-function matcher rewrite &form)
+        rewriter-function (make-rewriter-function kw-args matcher rewrite &form)
         rewrite-func-var (gensym 'rewrite-func)]
     (when (and (not (and (:is-check-rewrite kw-args) (not system/check-rexpr-arguments)))
                (not (and (:is-debug-rewrite kw-args) (not system/debug-statements))))
@@ -1284,8 +1297,6 @@
     ;; the intersected context is what can be passed up to the parent, we are going to have to make new contexts for the children
     (ctx-add-context! outer-context intersected-ctx)
                                         ;(debug-repl "disjunct standard")
-    (when (.contains (str children-with-contexts) "range")
-      (debug-repl "made dd1"))
     (make-disjunct children-with-contexts)))
 
 (def-iterator
@@ -1345,6 +1356,8 @@
         (dyna-debug (when-not (or (is-empty-rexpr? nR) (contains? (exposed-variables nR) A))
                       (print "failed find projected var")
                       (debug-repl "gg9")))
+        (when (<= (count (exposed-variables nR)) 1)
+          (debug-repl "proj??"))
         (make-proj A nR)))))
 
 (def-rewrite
@@ -1382,13 +1395,21 @@
 (def-iterator
   :match (proj (:variable A) (:rexpr R))
   (let [iters (find-iterators R)]
-    (into #{} (filter #(not (contains? (iter-what-variables-bound %) A)) iters))))
+    ;; if the variable that is projected is contained in the iterator, then we
+    ;; will just project it out of the iterator as well
+    (remove nil? (map (fn [i]
+                        (let [b (iter-what-variables-bound i)]
+                          (if (not (some #{A} b))
+                            i
+                            (if (>= (count b) 2)
+                              (iterators/make-skip-variables-iterator i #{A})))))
+                      iters))))
 
 (def-rewrite
   :match (proj (:variable A) (:rexpr R))
   :run-at :inference
   (let [iters (find-iterators R)]
-    (when (some #(contains? (iter-what-variables-bound %) A) iters) ;; if there is some iterator that can bind the value of the variable
+    (when (some #(some #{A} (iter-what-variables-bound %)) iters) ;; if there is some iterator that can bind the value of the variable
       (let [results (transient [])]
         (iterators/run-iterator
          :iterators iters
@@ -1396,13 +1417,17 @@
          :rexpr-in R
          :rexpr-result nR
          :simplify simplify  ;; this will be the simplify methods that is being used in context
-         (do
+         (let [Aval (get-value A)
+               rr (make-conjunct [(iterator-encode-state-ignore-vars #{A})
+                                  (context/bind-no-context
+                                   (remap-variables-handle-hidden nR {A (make-constant Aval)}))])]
            ;; the results are just going to become disjuncts, so we will just store them
 
            ;; this is going to have to encode the state as an R-expr while removing some of the variables
            ;; I suppose that this will mean that it
            ;(debug-repl "in proj iterator")
-           (conj! results (make-conjunct [(iterator-encode-state-ignore-vars #{A}) nR]))))
+           (dyna-assert (not (contains? (exposed-variables rr) A)))
+           (conj! results rr)))
         ;(debug-repl "proj used iterator")
         (make-disjunct (persistent! results))))))
 

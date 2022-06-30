@@ -37,8 +37,16 @@ f(1,1) = 4.
 
 a(X,Y) += f(X,Z) * f(Z,Y).
 
-b += a(X,1).
+c += f(X,Y).
 
-print b.
+%print c.
+assert c = 10.
 
+assert a(0,0) = 1 + 2*3.
+assert a(1,0) = 3 + 4*3.
+
+b += a(X,0).
+
+assert b = 22. %1 + 2*3 + 3 + 4*3.
+%print b.
 ")))

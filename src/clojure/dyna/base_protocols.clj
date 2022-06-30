@@ -47,6 +47,7 @@
 (defprotocol RexprValue
   (get-value [this])
   (get-value-in-context [this ctx])
+  (get-representation-in-context [this ctx])
   (set-value! [this value])
   (is-bound? [this])
   (is-bound-in-context? [this ctx])
@@ -71,7 +72,10 @@
 
   ;; for debugging
   (ctx-get-inner-values [this])
-  (ctx-get-all-bindings [this]))
+  (ctx-get-all-bindings [this])
+
+  (ctx-get-value-map-upto-context [this parent-context])
+  )
 
 
 

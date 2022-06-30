@@ -26,7 +26,7 @@ public class DynaAgenda {
                 if(work == null) break;
                 work.run();
                 local_processed++;
-                if(print_progress && work_processed % 5173 == 0) {
+                if(print_progress && local_processed % 5173 == 0) {
                     System.err.print("\rAgenda status, work processed: "+local_processed);
                 }
             }

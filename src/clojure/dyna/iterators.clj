@@ -142,10 +142,10 @@
     (iter-estimate-cardinality [this] (count trie))))
 
 (defn- iterator-skip-variables [^DIterator underlying binding-order skipped-variables]
-  (let [trie (delay (let [skips (apply bit-or (for [i (range (count binding-order))]
-                                                (if (skipped-variables (nth binding-order i))
-                                                  (bit-shift-left 1 i)
-                                                  0)))]
+  (let [trie (delay (let [skips (reduce bit-or 0 (for [i (range (count binding-order))]
+                                                   (if (skipped-variables (nth binding-order i))
+                                                     (bit-shift-left 1 i)
+                                                     0)))]
                       (build-skip-trie underlying (count binding-order) skips)))]
     (if (skipped-variables (first binding-order))
       (iterator-over-trie @trie)
@@ -169,7 +169,7 @@
                 (iterator-skip-variables v (rest binding-order) skipped-variables))))
         (iter-estimate-cardinality [this] (iter-estimate-cardinality underlying))))))
 
-(defn make-skip-variables-iterator [^DIterable iterator binding-order skipped-variables]
+#_(defn make-skip-variables-iterator [^DIterable iterator binding-order skipped-variables]
   (reify DIterable
     (iter-what-variables-bound [this] (into #{} (remove skipped-variables binding-order)))
     (iter-variable-binding-order [this] [(into [] (remove skipped-variables binding-order))])
@@ -187,6 +187,18 @@
         (iterator-skip-variables underlying binding-order skipped-variables)
         ))))
 
+
+(defn make-skip-variables-iterator [^DIterable iterator skipped-variables]
+  (reify DIterable
+    (iter-what-variables-bound [this] (remove skipped-variables (iter-what-variables-bound iterator)))
+    (iter-variable-binding-order [this] (into [] (map #(remove skipped-variables %) (iter-variable-binding-order iterator))))
+    (iter-create-iterator [this which-binding]
+      (let [selected-binding (first (filter #(= which-binding (into [] (remove skipped-variables %))) (iter-variable-binding-order iterator)))
+            underlying (iter-create-iterator iterator selected-binding)
+            ;bding (apply list selected-binding)
+            ]
+        (iterator-skip-variables underlying selected-binding skipped-variables)))))
+
 (defn iterator-variable-can-not-bind [var]
   ;; something like the variable is required by the iterator (to be efficient)
   ;; but it is not bindable, this would be something like it would have that
@@ -198,7 +210,7 @@
   (let [bv (into #{} binding-variables)
         ;; we are going to consider some of the iterators which would be able to bind something
         ;; in the case that there are still values which are still unbound, it should just keep running
-        iters (filter #(intersection bv (iter-what-variables-bound %)) iterators)
+        iters (filter #(intersection (into #{} (iter-what-variables-bound %)) bv) iterators)
         ]
     ;; this should somehow identify a preference bteween the different binding
     ;; orders I suppose that if the code is going to get copiled, then it should
@@ -218,7 +230,7 @@
 
       (debug-repl "did not find iterator to pick"))
     (let [picked-iter (first iters)
-          can-bind-variables (iter-what-variables-bound picked-iter)
+          can-bind-variables (into #{} (iter-what-variables-bound picked-iter))
           binding-order (first (iter-variable-binding-order picked-iter))
           ]
       (dyna-assert (seqable? binding-order)) ;; this should be a sequence of variables in the order that they are bound
@@ -226,10 +238,11 @@
         [picked-iter binding-order] ;; then we can just use this iterator directly as all of the variables are bindable
         (let [dd (difference (into #{} binding-order) can-bind-variables)
               ;zzz (debug-repl)
-              siter (make-skip-variables-iterator picked-iter binding-order dd)]
+              siter (make-skip-variables-iterator picked-iter dd)
+              siter-order (first (iter-variable-binding-order siter))]
           ;(debug-repl "unbindable variable in iterator")
           ;; this iterator will only represent the variables that we are allowed to bind using this iterator
-          [siter (first (iter-variable-binding-order siter))])
+          [siter siter-order])
         )
       ;(debug-repl "pick iterator")
       ;[picked-iter binding-order]
@@ -253,7 +266,7 @@
              ;(debug-repl)
              (when-not (nil? it-bound) ;; if the binding failed, then the iterator should return nil to indicate that there is nothing here
                (rec it-bound r rexpr)))
-           (if (contains? can-bind-variables v)
+           (if (some #{v} can-bind-variables) ;(contains? can-bind-variables v)
              (doseq [val (iter-run-iterable iter)]
                (let [dctx (context/make-nested-context-disjunct rexpr)] ;; this should take the context as an argument?
                  (context/bind-context-raw
@@ -286,12 +299,15 @@
 ;; this would make it into somewhat of a circular implementation issue?
 ;; I suppose that there could be another macro which wraps this to make it return a disjunct
 
-(defn- iter-encode-state-as-rexpr [picked-binding-order ignore-vars]
-  (let [encode-vars (filter is-variable? picked-binding-order)
-        vs (remove ignore-vars encode-vars)
-        c (vec (for [v vs]
-                 (make-no-simp-unify v (make-constant (get-value v)))))
+(defn- iter-encode-state-as-rexpr [root-iter-context picked-binding-order ignore-vars]
+  (let [ctx-value-map (ctx-get-value-map-upto-context (context/get-context) root-iter-context)
+        ;encode-vars (filter is-variable? picked-binding-order)
+                                        ;vs (remove ignore-vars encode-vars)
+        vs (apply dissoc ctx-value-map ignore-vars)
+        c (vec (for [[k v] vs]
+                 (make-no-simp-unify k (make-constant v))))
         r (make-conjunct c)]
+    ;(debug-repl "encode state")
     r))
 
 (defmacro run-iterator [& args]
@@ -330,8 +346,8 @@
                                     ;; the variables for the expression and what
                                     ;; is bound.  I suppose that we can also use
                                     ;; the origional R-expr when doing the encoding
-                                    (function-let [iterator-encode-state-as-rexpr (~iter-encode-state-as-rexpr picked-binding-order# #{})
-                                                   iterator-encode-state-ignore-vars (~iter-encode-state-as-rexpr picked-binding-order# %)]
+                                    (function-let [iterator-encode-state-as-rexpr (~iter-encode-state-as-rexpr ~ctx picked-binding-order# #{})
+                                                   iterator-encode-state-ignore-vars (~iter-encode-state-as-rexpr ~ctx picked-binding-order# %)]
                                                   ~body))
                      ]
                  (~run-iterator-fn

@@ -134,7 +134,7 @@ NumberInt16
     ;
 
 NumberFloat
-    : [0-9]* '.' [0-9]+ ('e' [0-9]+)?  // this always requires some number after the '.' otherwise it could be an end of term
+    : [0-9]* '.' [0-9]+ ('e' '-'? [0-9]+)?  // this always requires some number after the '.' otherwise it could be an end of term
     ;
 
 StringConst

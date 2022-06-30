@@ -70,12 +70,12 @@
                       (recur (- n 1) {nil s})))
         ret (make-disjunct-op dj-vars
                               (PrefixTrie. (count dj-vars)
-                                           (reduce bit-or (map #(bit-shift-left 1 %) (range (count dj-vars))))  ;; all of the disjuncts are unknown variables
+                                           (reduce bit-or 0 (map #(bit-shift-left 1 %) (range (count dj-vars))))  ;; all of the disjuncts are unknown variables
                                            rexpr-map))]
     (when (some is-disjunct-op? children)
       (debug-repl "need to combine tries"))
-    (when (.contains (str ret) "range")
-      (debug-repl "made dd"))
+    ;; (when (.contains (str ret) "range")
+    ;;   (debug-repl "made dd"))
     ret))
 
 

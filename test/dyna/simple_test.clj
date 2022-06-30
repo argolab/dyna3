@@ -348,9 +348,8 @@ assert f(4) = 6.
 (str-test reflect1 "
 r(X) = $reflect(X, \"foo\", [Y]), Y.
 
-print r(&foo(77)).
-
-%assert r(&foo(77)) = 77.
+%print r(&foo(77)).
+assert r(&foo(77)) = 77.
 ")
 
 

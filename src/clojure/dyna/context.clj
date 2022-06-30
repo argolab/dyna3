@@ -136,6 +136,12 @@
   (ctx-contains-rexpr? [this rexpr]
     (or (contains? rexprs rexpr) (and (not (nil? parent) (ctx-contains-rexpr? parent rexpr)))))
 
+  (ctx-get-value-map-upto-context [this parent-context]
+    (if (identical? this parent-context)
+      nil
+      (merge (when parent (ctx-get-value-map-upto-context parent parent-context))
+             value-map)))
+
   Object
   (toString ^String [this]
     (if (nil? parent)
