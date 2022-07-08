@@ -580,7 +580,7 @@
                                  (let [new-hidden-name (make-variable (gensym 'proj-hidden))]
                                    (make-proj new-hidden-name (remap-variables-handle-hidden body (assoc variable-map var new-hidden-name)))))
   (remap-variables [this variable-map]
-                   (dyna-debug (when-not (not (some #{var} (vals variable-map)))
+                   #_(dyna-debug (when-not (not (some #{var} (vals variable-map)))
                                  (debug-repl "bad remap")))
 
                    (make-proj var (remap-variables body variable-map))))
@@ -1157,17 +1157,6 @@
       res)))
 
 
-;; (def-rewrite
-;;   :match (unify-structure-get-meta (:ground struct) (:any dynabase) (:any from-file))
-;;   (let [struct-val (get-value struct)]
-;;     (if-not (instance? DynaTerm struct-val)
-;;       (make-multiplicity 0)
-;;       ;; java null should get cast to $nil as the dyna term that represents that value
-;;       (make-conjunct [(make-unify dynabase (make-constant (or (.dynabase ^DynaTerm struct-val)
-;;                                                               null-term)))
-;;                       (make-unify from-file (make-constant (or (.from_file ^DynaTerm struct-val)
-;;                                                                null-term)))]))))
-
 
 (comment
   (def-rewrite
@@ -1428,6 +1417,8 @@
            (dyna-assert (not (contains? (exposed-variables rr) A)))
            (conj! results rr)))
         ;(debug-repl "proj used iterator")
+        (when (= 0 (count results))
+          (debug-repl "pp"))
         (make-disjunct (persistent! results))))))
 
 #_(def-rewrite

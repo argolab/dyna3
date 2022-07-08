@@ -111,7 +111,9 @@
   (let [ret (volatile! {})]
     ((fn rec [binding iter idx]
        (if (= idx arity)
-         (vswap! ret assoc-in (reverse binding) nil)
+         (vswap! ret assoc-in (reverse binding)
+                 :value-exists ;; we don't use this value, but it has to be something (other than nil) otherwise we assume that there is nothing in the trie
+                 )
          (if (= 0 (bit-and skips (bit-shift-left 1 idx)))
            ;; this variable is something that we are interested in
            (doseq [i (iter-run-iterable iter)]
@@ -268,8 +270,9 @@
            ;; we do not resimplify the R-expr as we have not made any changes
            (let [it-bound (iter-bind-value iter (get-value-in-context v ctx))]
              ;(debug-repl)
-             (when-not (nil? it-bound) ;; if the binding failed, then the iterator should return nil to indicate that there is nothing here
-               (rec it-bound r rexpr)))
+             (if-not (nil? it-bound) ;; if the binding failed, then the iterator should return nil to indicate that there is nothing here
+               (rec it-bound r rexpr)
+               (debug-repl "it-bound fail")))
            (if (some #{v} can-bind-variables) ;(contains? can-bind-variables v)
              (doseq [val (iter-run-iterable iter)]
                (let [dctx (context/make-nested-context-disjunct rexpr)] ;; this should take the context as an argument?
@@ -277,8 +280,11 @@
                   dctx
                   (ctx-set-value! dctx v (iter-variable-value val))
                   (let [new-rexpr (simplify-fn rexpr)] ;; would be nice if the simplify could track which branches would depend on the value and ignore the rest. I suppose that would really be something that we should do compilation.  There is no need to increase the complexity of the standard simplify method
-                    (when-not (is-empty-rexpr? new-rexpr)
-                      (rec (iter-continuation val) r new-rexpr))
+                    (if-not (is-empty-rexpr? new-rexpr)
+                      (rec (iter-continuation val) r new-rexpr)
+                      (do
+                        ;(debug-repl "empty after simplify")
+                        ))
                     ))))
              (do
                (debug-repl "not able to bind variable")

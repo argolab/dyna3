@@ -22,6 +22,7 @@ public class DynaAgenda {
         long agenda_start_processing = System.currentTimeMillis();
         try {
             while(true) {
+                //System.out.println("Running work");
                 IDynaAgendaWork work = queue.poll();
                 if(work == null) break;
                 work.run();

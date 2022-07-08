@@ -117,6 +117,19 @@
                                               args ae))))
                        arr)))))))))
 
+
+;; TODO: this depends on the assumption that there are no children dynabases.  As a given rule has to match in multiple places
+#_(def-rewrite
+  :match {:rexpr (dynabase-access (:str name) (:free dynabase) (:variable-list args))
+          :check (empty? args)}
+  :run-at :construction
+  ;; if there are no args in the dynabase, then the dynabase does not require
+  ;; this delayed expression to match against.
+  (let [metadata (get @system/dynabase-metadata name)]
+    (when-not (:has-super metadata)
+      (debug-repl)
+      (make-unify dynabase (make-constant (Dynabase. {name (list ())}))))))
+
 (comment
   (def-rewrite
     :match {:rexpr (dynabase-access (:str name) (:any dynabase) (:variable-list args))
@@ -179,7 +192,16 @@
                                            ;; dynabase not inheriting from itself.  This willx
                              ;; enable us to have more "efficient" code where an
                              ;; expression can again make the same assumptions
-                             ;; as the there not being any parents
+            ;; as the there not being any parents
+
+
+            ;; this should track which dynabases are seen as parent and children
+            ;; dynabases during the construction phase.  This should allow for
+            ;; additional optimizations when it is doing inference with having
+            ;; multiple dynabases access operations.  Also there will need to be
+            ;; assumptions that these values haven't changed
+            ;:seen-super-dynabases #{}
+            ;:seen-child-dynabases #{}
             })
     name))
 
@@ -235,3 +257,11 @@
 ;; appear before the aggregation.  This would require some more complex rewrites
 ;; which are going to know about dynabases inside of aggregators such that it
 ;; can figure out the best way to arrange the R-expr.
+
+
+
+;; There should be a lot more optimizations that can be done with dynabases once
+;; we have assumptions working fully.  The diea being that if something would
+;; inhert from a given dynabase, then it would know which expression would
+;; result in it creating something.  I suppose that we could also track all of
+;; the subclasses which inherit from a given dynabase

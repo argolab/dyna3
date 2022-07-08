@@ -30,6 +30,7 @@
         ;; then this needs to do a refresh of the memo table
         ;; and this needs to reconstruct the origional values
         (let [term-name (:memo-for-term memo-config)]
+          (println "doing refresh of the memo table")
           (if (nil? term-name)
             (invalidate! assumption-self) ;; unsure how to update this memo table, so we are just going to mark it as invalid, and let that propagate
             (let [[orig-rexpr-assumpt orig-rexpr] (compute-with-assumption
@@ -55,22 +56,24 @@
     )
 
   IMemoContainer
-  (get-value-for-key [^MemoContainer this key]
+  (get-value-for-key [this key]
     (context/bind-no-context
      (let [cond-memo Rconditional+Rmemo
            cond-memo-val @cond-memo
            [cond memo] cond-memo-val
            check-ctx (context/make-nested-context-memo-conditional cond)
            check-conditional (context/bind-context check-ctx
-                                                   (simplify (make-conjunct [key cond])))]
-       (if (is-non-empty-rexpr? check-conditional)
-         (do
-           (depend-on-assumption assumption-self)
-           memo) ;; then the memo table contains this value, so it needs to just apply the values of the key to get the right output
-         (if (is-empty-rexpr? check-conditional)
-           (compute-value-for-key this key)
-           ;; nil indicating that the memo could not be computed, so this is going to have to delay
-           nil)))))
+                                                   (simplify (make-conjunct [key cond])))
+           ret (if (is-non-empty-rexpr? check-conditional)
+             (do
+               (depend-on-assumption assumption-self)
+               memo) ;; then the memo table contains this value, so it needs to just apply the values of the key to get the right output
+             (if (is-empty-rexpr? check-conditional)
+               (compute-value-for-key this key)
+               ;; nil indicating that the memo could not be computed, so this is going to have to delay
+               nil))]
+       ret)))
+
   (compute-value-for-key [^MemoContainer this key]
     (assert (= :unk (:memo-mode memo-config)))
     (let [[Rorig upstream-assumpt] @Rorig+assumption-upstream
@@ -95,6 +98,7 @@
           ;; in which case
           (???)))))
   (refresh-memo-table [this]
+    (println "refresh memo table")
     (assert (is-valid? assumption-self))
     (let [memo-value @Rconditional+Rmemo
           [cond memo] memo-value
@@ -104,6 +108,8 @@
                                               (compute-with-assumption
                                                (simplify-top (make-conjunct [cond Rorig]))))]
         (when (not= orig-result memo)
+          #_(let [vv (simplify-top orig-result)]
+            (debug-repl "tables not equal"))
           ;; then we need to save the memo in to the table, and signal that an event happened
           (add-watcher! orig-result-assumpt this)
           (if (compare-and-set! Rconditional+Rmemo memo-value [cond orig-result])
@@ -135,7 +141,8 @@
                                              (:required-ground-variables memo-config))))
                   :null (make-multiplicity 1))
             memo-rexpr (get-value-for-key memoization-container key)
-            res (simplify (remap-variables memo-rexpr variable-name-mapping))]
+            res (simplify (remap-variables-handle-hidden memo-rexpr variable-name-mapping))]
+        ;(debug-repl "return memo")
         res))))
 
 
@@ -230,7 +237,7 @@
                                             mem-container (MemoContainer. (atom [(case (:memoization-mode dat)
                                                                                    :unk (make-multiplicity 0)
                                                                                    :null (make-multiplicity 1))
-                                                                                 (make-multiplicity 0)]) ;; the container should always start empty, and then we have to recheck this memo
+                                                                                  (make-multiplicity 0)]) ;; the container should always start empty, and then we have to recheck this memo
                                                                           (atom [orig-rexpr orig-rexpr-assumpt])
                                                                           ;(make-invalid-assumption) ;; this is _not_ consistent with the upstream
                                                                           (make-assumption)

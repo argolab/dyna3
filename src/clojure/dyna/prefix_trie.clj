@@ -50,8 +50,18 @@
 (defsimpleinterface IPrefixTrie
   (trie-get-values-collection [key])  ;; return the values associated with a given key together
   (trie-get-values [key])  ;; return the values associated with a given key seperatly
+
+  ;; return a trie with only the values which match the key changed.  Values
+  ;; which do not match the key will be left unchanged and still in the trie.
+  ;; unchanged internal structure of the tries will be shared (the internal
+  ;; structure is immutable hash maps)
   (trie-map-values [key ^clojure.lang.IFn map-fn])
   (trie-map-collection [key ^clojure.lang.IFn map-fn])
+
+  ;; return a trie with only the subset of values which match the key as well as run the matching function over the values
+  (trie-map-collection-subset [key ^clojure.lang.IFn map-fn])
+  (trie-map-values-subset [key ^clojure.lang.IFn map-fn])
+
   ;; (filter-key [key])
   ;; (clear-filter [])
   (trie-insert-val [key val])
@@ -62,7 +72,10 @@
 
   ;; this is going to have to return an iterator of the subset of values which map to something
   ;; if there is something about wehich expression might have this
-  (trie-progressive-iterator [key]))
+  (trie-progressive-iterator [key])
+
+  (trie-reorder-keys [new-order])
+  )
 
 ;; (intern 'dyna.rexpr 'check-argument-prefix-trie (fn [x] (instance? IPrefixTrie x)))
 
@@ -108,12 +121,13 @@
                           (vec (map-fn (reverse key-so-far) node))
                           (let [cur-key (first key-query)
                                 rest-key (rest key-query)
-                                key-so-far2 (cons cur-key key-so-far)]
+                                ;key-so-far2 (cons cur-key key-so-far)
+                                ]
                             (into {} (remove empty? (map (fn [[key x]]
                                                            (if (or (nil? cur-key)
                                                                    (nil? key)
                                                                    (= cur-key key))
-                                                             (let [v (rec key-so-far2 rest-key x)]
+                                                             (let [v (rec (cons key key-so-far) rest-key x)]
                                                                (when-not (empty? v)
                                                                  [key v]))
                                                              [key x] ;  this is not mapped, so just keep it the same
@@ -125,6 +139,35 @@
   (trie-map-values [this key map-fn]
     (trie-map-collection this key (fn [rk col]
                                     (remove nil? (map #(map-fn rk %) col)))))
+
+  (trie-map-collection-subset [this key0 map-fn]
+    (let [key (if (nil? key0) (repeat arity nil) key0)]
+      (assert (= (count key) arity))
+      (let [new-root ((fn rec [key-so-far key-query node]
+                        (if (empty? key-query)
+                          (vec (map-fn (reverse key-so-far) node))
+                          (let [cur-key (first key-query)
+                                rest-key (rest key-query)
+                                ;key-so-far2 (cons cur-key key-so-far)
+                                ]
+                            (into {} (remove empty? (if (nil? cur-key)
+                                                      (for [[k v] node]
+                                                        (let [r (rec (cons k key-so-far) rest-key v)]
+                                                          (when-not (empty? r)
+                                                            [k r])))
+                                                      (for [k [nil cur-key]
+                                                            :let [v (get node k)]
+                                                            :when (not (nil? v))]
+                                                        (let [r (rec (cons k key-so-far) rest-key v)]
+                                                          (when-not (empty? r)
+                                                            [k r])))))))))
+                      () key root)]
+        ;; technically the contains wildcard could get remapped here
+        (PrefixTrie. arity contains-wildcard new-root))))
+
+  (trie-map-values-subset [this key map-fn]
+    (trie-map-collection-subset this key (fn [rk col]
+                                            (remove nil? (map #(map-fn rk %) col)))))
 
   ;; Question: should the mapping of a value have that this goes through everything or that it will just map the relevant keys
   #_(trie-map-values [this key map-fn]
@@ -215,6 +258,22 @@
          (???)
          )
        () key root)))
+
+  (trie-reorder-keys [this new-order]
+    ;; the arity between the keys could include adding in new keys.  In which case this is going to have to identify new values for this
+    (assert (>= (count new-order) arity))
+    (if (= new-order (vec (range arity)))
+      this  ;; there is no change so just return this without making any changes
+      (let [new-contains-wildcard (reduce bit-or 0 (map (fn [i] (if (or (nil? (nth new-order i))
+                                                                        (not= 0 (bit-and (bit-shift-left 1 (nth new-order i)) contains-wildcard)))
+                                                                  (bit-shift-left 1 i)
+                                                                  0))
+                                                        (range (count new-order))))
+            new-root (volatile! {})]
+        (doseq [[key col] (trie-get-values-collection this)]
+          (let [new-key (vec (map (fn [i] (if (nil? i) nil (nth key i))) new-order))]
+            (vswap! new-root assoc-in new-key col)))
+        (PrefixTrie. (count new-order) new-contains-wildcard @new-root))))
 
   Object
   (toString [this]

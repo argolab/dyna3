@@ -451,9 +451,11 @@
                                                                     {"$self" (make-variable "$self")})
                                                 ;; anything which matches these patterns should not be the variables which are present
                                                 project-variables (filter
-                                                                   (if (not (dnil? dynabase))
-                                                                     #(not (re-matches #"\$self|\$[0-9]+" %)) ;; if dynabase, then self is also a parameter
-                                                                     #(not (re-matches #"\$[0-9]+" %))) all-variables)
+                                                                   #(not (re-matches #"\$self|\$[0-9]+" %)) ;; if dynabase, then self is also a parameter
+                                                                   #_(if (not (dnil? dynabase))
+
+                                                                     #(not (re-matches #"\$[0-9]+" %)))
+                                                                   all-variables)
                                                 project-variables-map (into {} (for [v project-variables]
                                                                                  [v (make-variable v)]))
                                                 incoming-variable (make-variable (str (gensym "$incoming_variable_")))
@@ -462,7 +464,9 @@
                                                                              (merge {"$functor_name" (make-constant functor-name)
                                                                                      "$functor_arity" (make-constant functor-arity)}
                                                                                     project-variables-map
-                                                                                    argument-variables)
+                                                                                    argument-variables
+                                                                                    (when (dnil? dynabase)
+                                                                                      {"$self" (make-constant DynaTerm/null_term)}))
                                                                              source-file)
                                                 rexpr (make-no-simp-aggregator aggregator
                                                                                aggregator-result-variable
@@ -581,13 +585,13 @@
             ;; dynabase representation.  Each dynabase can only be created at
             ;; one point in the program.  This means that the constant values would not need to get captured
             ["$dynabase_create" 2] (let [[extended-dynabase-value dynabase-terms] (.arguments ast)
+                                         remap-captured-name (fn [n]
+                                                               (cond (= n "$self") "$parent"
+                                                                     (re-matches #"\$[0-9]+" n) (str "$construct_arg_" n)
+                                                                     :else n))
                                          dynabase-captured-variables (into {} (for [[k v] variable-name-mapping]
-                                                                                (let [val (if (is-constant? v)
-                                                                                            (DynaTerm. "$constant" [(dyna.base-protocols/get-value v)])
-                                                                                            (DynaTerm. "$variable" [k]))]
-                                                                                  (cond (= k "$self") ["$parent" val]
-                                                                                        (re-matches #"\$[0-9]+" k) [(str "$construct_arg_" k) val]
-                                                                                        :else [k val]))))
+                                                                                (when-not (is-constant? v)
+                                                                                  [(remap-captured-name k) (DynaTerm. "$variable" [k])])))
                                          has-super (not= DynaTerm/null_term extended-dynabase-value)
                                          referenced-variables (vec (keys dynabase-captured-variables))
                                          dbase-name (make-new-dynabase-identifier has-super referenced-variables)
@@ -611,7 +615,13 @@
                                                                                                                           dynabase-term-access
                                                                                                                           aggregator
                                                                                                                           body])
-                                                                                                              (make-constant true) {} source-file)]
+                                                                                                              (make-constant true)
+                                                                                                              ;; constant values can just be passed through duing the conversion
+                                                                                                              (into {}
+                                                                                                                    (map (fn [[a b]] [(remap-captured-name a) b])
+                                                                                                                         (filter #(is-constant? (second %))
+                                                                                                                                 variable-name-mapping)))
+                                                                                                              source-file)]
                                                                                     (assert (= res (make-multiplicity 1)))))
                                                   :else (do
                                                           (debug-repl "dynabase unsupported body type")

@@ -44,41 +44,23 @@
 (defn- remap-variables-disjunct-op [this variable-renaming-map remap-fn]
   (if (empty? variable-renaming-map)
     this
-    (let [new-vars (vec (map #(get variable-renaming-map % %) (:disjunction-variables this)))
-          new-vars-values (vec (map #(and (is-constant? %) (get-value %)) new-vars))]
-      ;; this is going to have to remap the variables
+    (let [new-vars (vec (map #(get variable-renaming-map % %) (:disjunction-variables this)))]
       (if (= new-vars (:disjunction-variables this))
-        this  ;; then nothing has changed so don't create a new structure
-        (let [new-trie (trie-map-values (:rexprs this)
-                                           new-vars-values
-                                           (fn [key rr]
-                                             (let [ret (remap-fn rr variable-renaming-map)]
-                                               (when-not (subset?  (exposed-variables ret) (into #{} new-vars))
-                                                 (debug-repl "exposed fail"))
-                                               (when-not (is-empty-rexpr? ret)
-                                                 ret))))]
-          (make-disjunct-op new-vars new-trie))))))
-
-;; if there already exists tries in the disjunct, then it will construct the more optimized disjunct
-(def-rewrite
-  :match {:rexpr (disjunct (:rexpr-list children))
-          :check system/*use-optimized-rexprs*}
-  :run-at :construction
-  (let [dj-vars (vec (exposed-variables rexpr))
-        rexpr-map (loop [n (count dj-vars)
-                         s children]
-                    (if (= n 0)
-                      s
-                      (recur (- n 1) {nil s})))
-        ret (make-disjunct-op dj-vars
-                              (PrefixTrie. (count dj-vars)
-                                           (reduce bit-or 0 (map #(bit-shift-left 1 %) (range (count dj-vars))))  ;; all of the disjuncts are unknown variables
-                                           rexpr-map))]
-    (when (some is-disjunct-op? children)
-      (debug-repl "need to combine tries"))
-    ;; (when (.contains (str ret) "range")
-    ;;   (debug-repl "made dd"))
-    ret))
+        this ;; return this unchanged, as the variable names are the same
+        (let [new-vars-values (vec (map #(when (is-constant? %) (get-value %)) new-vars))]
+          ;; this is going to have to remap the variables
+          (if (= new-vars (:disjunction-variables this))
+            this  ;; then nothing has changed so don't create a new structure
+            (let [new-trie (trie-map-values-subset (:rexprs this)
+                                                   new-vars-values
+                                                   (fn [key rr]
+                                                     (let [ret (remap-fn rr variable-renaming-map)]
+                                                       (dyna-debug (when-not (subset?  (exposed-variables ret) (into #{} new-vars))
+                                                                     (debug-repl "exposed fail")))
+                                                       (when-not (is-empty-rexpr? ret)
+                                                         ret))))]
+                                        ;(debug-repl "trie remap")
+              (make-disjunct-op new-vars new-trie))))))))
 
 
 (def ^:private not-seen-in-trie (Object.))
@@ -95,6 +77,43 @@
                                   lst))]
         [(= @cnt 0) (conj others (make-multiplicity (+ @cnt (:mult radd))))])
       [true (conj lst radd)])))
+
+
+;; if there already exists tries in the disjunct, then it will construct the more optimized disjunct
+(def-rewrite
+  :match {:rexpr (disjunct (:rexpr-list children))
+          :check system/*use-optimized-rexprs*}
+  :run-at :construction
+  (let [dj-vars (vec (exposed-variables rexpr))
+        existing-tries (filter is-disjunct-op? children)
+        non-tries (vec (filter #(not (is-disjunct-op? %)) children))
+        non-tries-map (loop [n (count dj-vars)
+                             s non-tries]
+                    (if (= n 0)
+                      s
+                      (recur (- n 1) {nil s})))
+        base-trie (PrefixTrie. (count dj-vars)
+                               (if-not (empty? non-tries)
+                                 (- (bit-shift-left 1 (count dj-vars)) 1)
+                                 0)
+                               non-tries-map)
+        combined-trie (loop [trie base-trie
+                             nt (first existing-tries)
+                             rt (next existing-tries)]
+                        (if (nil? nt) trie
+                            (let [vorder (:disjunction-variables nt)
+                                  t (:rexprs nt)
+                                  vorder-idx (zipmap vorder (range))
+                                  new-order (vec (map vorder-idx dj-vars))  ;; if the var is not present, it will be nil
+                                  t-reordered (trie-reorder-keys t new-order)]
+                              (recur (trie-merge trie t-reordered)
+                                     (first rt)
+                                     (next rt)))))
+        ret (make-disjunct-op dj-vars
+                              combined-trie)
+        ]
+    ret))
+
 
 (def-rewrite
   :match (disjunct-op (:any-list dj-vars) (:unchecked rexprs))
@@ -114,17 +133,21 @@
                                       (if (not= cv vv)
                                         (assoc! child-var-values i (if (= cv not-seen-in-trie) vv nil)))))
                                   ;; save the resulting R-expr in the resulting trie
-                                  (when (is-disjunct-op? new-child-rexpr)
-                                    (debug-repl "should combine tries into the current trie"))
-                                  (let [added-new (volatile! false)]
-                                    (vswap! ret-children trie-update-collection dj-key
-                                            (fn [col]
-                                              (let [[made-new ret] (merge-rexpr-disjunct-list col new-child-rexpr)]
-                                                (vreset! added-new made-new)
-                                                ret)))
+                                  (if (is-disjunct-op? new-child-rexpr)
+                                    (let []
+                                      ;; this might never happen if it has disjunct-run-inner-iterator set to true, it would have already expanded
+                                      ;; the trie using that
+                                      (debug-repl "should combine tries into the current trie")
+                                      (???))
+                                    (let [added-new (volatile! false)]
+                                      (vswap! ret-children trie-update-collection dj-key
+                                              (fn [col]
+                                                (let [[made-new ret] (merge-rexpr-disjunct-list col new-child-rexpr)]
+                                                  (vreset! added-new made-new)
+                                                  ret)))
                                         ;(debug-repl "ddj")
-                                    (if @added-new
-                                      (vswap! num-children inc))))))
+                                      (if @added-new
+                                        (vswap! num-children inc)))))))
         ]
     (doseq [[var-binding child] (trie-get-values rexprs var-map)]
       ;; this should loop through the children
@@ -157,86 +180,18 @@
       (let [dv (nth child-var-values i)]
         (when (and (not= dv not-seen-in-trie) (not (nil? dv)) (is-variable? (nth dj-vars i)))
           (ctx-set-value! outer-context (nth dj-vars i) dv))))
-    (if (= @num-children 1)
-      ;; then there is only a single child, so we can return that
-      (let [[[child-bindings child]] (trie-get-values @ret-children nil)]
-        child)
-      ;; then there are multiple children, so we have to return the entire trie
-      (let [ret (make-disjunct-op dj-vars @ret-children)]
+    (if (= @num-children 0)
+      (make-multiplicity 0) ;; there is nothing in the disjunct
+      (if (= @num-children 1)
+        ;; then there is only a single child, so we can return that
+        (let [[[child-bindings child]] (trie-get-values @ret-children nil)]
+          child)
+        ;; then there are multiple children, so we have to return the entire trie
+        (let [ret (make-disjunct-op dj-vars @ret-children)]
                                         ;(debug-repl "qqq")
-        ret))))
+          ret)))))
 
 
-#_(defn- make-disjunct-op-iterator [dj-vars idx binding-var rexprs]
-  (reify DIterable
-    (iter-what-variables-bound [this] #{binding-var}) ;; this can bind more than just this variable...
-    (iter-variable-binding-order [this] [[binding-var]])
-    (iter-create-iterator [this which-binding]
-                                        ;(debug-repl)
-      (when-not (or (nil? which-binding) (= which-binding [binding-var]))
-        (debug-repl "g2")
-        (???))
-                                        ;(debug-repl "ci")
-      (reify DIterator
-        (iter-run-cb [this cb-fun]
-          (doseq [v (iter-run-iterable this)]
-            (cb-fun v)))
-        #_(iter-run-cb [this cb-fun]
-          (let [values-seen (transient #{})
-                current-bindings (map get-value dj-vars)]
-            (doseq [vals (trie-get-values-collection rexprs current-bindings)]
-              (let [val (nth (first vals) idx)]
-                (when-not (contains? values-seen val)
-                  (conj! values-seen val)
-                  (cb-fun {binding-var val}))))))
-        (iter-run-iterable [this]
-          ;; create a lazy sequence for this
-          (let [values-seen (transient #{})
-                current-bindings (map get-value dj-vars)]
-            (for [vals (trie-get-values-collection rexprs current-bindings)
-                  :let [val (nth (first vals) idx)]
-                  :when (not (contains? values-seen val))]
-              (do (conj! values-seen val)
-                  (reify DIteratorInstance
-                    (iter-variable-value [this] val)
-                    (iter-continuation [this] nil) ;; this is not a multi iterator yet, but this should support
-                    )))
-              )
-          )
-        ))))
-
-#_(defn- make-disjunct-op-iterator2 [dj-vars idxs binding-vars rexprs]
-    (reify DIterable
-      (iter-what-variables-bound [this] (into #{} binding-vars))
-      (iter-variable-binding-order [this] (let [bound (iter-what-variables-bound this)]
-                                            [(vec (filter #(contains? bound %) dj-vars))]))
-      (iter-create-iterator [this which-binding]
-        (when-not (or (nil? which-binding) (= (first (iter-variable-binding-order this)) which-binding))
-          (debug-repl "g3")
-          (???))
-        (reify DIterator
-          (iter-run-cb [this cb-fun]
-            ;; this is going to have to go through the trie, and then will perform the
-
-            ))
-        )
-      )
-    )
-
-
-#_(comment
-  (def-iterator
-    :match (disjunct-op (:any-list dj-vars) (:unchecked rexprs))
-    ;; if any of the variables are fully ground, then it
-    (let [contains-wildcard (.contains-wildcard ^PrefixTrie rexprs)
-          ret (reduce union (for [idx (range (count dj-vars))]
-                              (when (and (not (is-bound? (nth dj-vars idx)))
-                                         (= 0 (bit-and contains-wildcard (bit-shift-left 1 idx))))
-                                (let [binding-var (nth dj-vars idx)]
-                                  #{(make-disjunct-op-iterator dj-vars idx binding-var rexprs)}))))]
-                                        ;(when-not (empty? ret)
-                                        ;  (debug-repl "diter"))
-      ret)))
 
 (declare run-trie-iterator-from-node
          run-trie-iterator-from-node-unconsolidated)

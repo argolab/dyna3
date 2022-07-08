@@ -42,6 +42,8 @@ c += f(X,Y).
 %print c.
 assert c = 10.
 
+%print a(0,0).
+
 assert a(0,0) = 1 + 2*3.
 assert a(1,0) = 3 + 4*3.
 
