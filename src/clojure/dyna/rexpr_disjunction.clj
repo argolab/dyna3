@@ -39,7 +39,15 @@
                 (and (= 0 (.contains-wildcard ^PrefixTrie rexprs))
                      (every? #(and (= (count (second %)) 1)
                                    (is-constraint? (cdar %)))
-                             (trie-get-values-collection rexprs nil)))))
+                             (trie-get-values-collection rexprs nil))))
+  (is-non-empty-rexpr? [this]
+                       (let [vmap (if (context/has-context)
+                                    (vec (map get-value disjunction-variables))
+                                    (repeat (count disjunction-variables) nil))
+                             ;iter (trie-get-values-collection rexprs vmap)
+                             ]
+                         (first (remove nil? (for [[key r] (trie-get-values-collection-no-wildcard rexprs vmap)]
+                                               (when (some is-non-empty-rexpr? r) true)))))))
 
 (defn- remap-variables-disjunct-op [this variable-renaming-map remap-fn]
   (if (empty? variable-renaming-map)
@@ -77,6 +85,13 @@
                                   lst))]
         [(= @cnt 0) (conj others (make-multiplicity (+ @cnt (:mult radd))))])
       [true (conj lst radd)])))
+
+;; want to go through the conjuncts, and find any unify with a constant
+;; expressions, so that we can efficiently store results into the trie when it is constructed
+(defn- conjunct-iterator [x]
+  (if (is-conjunct? x)
+    (sequence cat (map conjunct-iterator (:args x)))
+    [x]))
 
 
 ;; if there already exists tries in the disjunct, then it will construct the more optimized disjunct

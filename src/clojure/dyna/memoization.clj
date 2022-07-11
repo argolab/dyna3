@@ -14,6 +14,8 @@
   (compute-value-for-key [key])
   (refresh-memo-table []))
 
+(def ^:dynamic *memo-container-currently-computing* #{})
+
 ;; this container can be modified
 (deftype MemoContainer [Rconditional+Rmemo  ;; is an atom that will get updated
                         Rorig+assumption-upstream ;; an atom which gets updated when this
@@ -76,11 +78,22 @@
 
   (compute-value-for-key [^MemoContainer this key]
     (assert (= :unk (:memo-mode memo-config)))
+    (when (contains? *memo-container-currently-computing* [this key])
+      ;; this happens when the value that we are already computing in on the
+      ;; stack.  (I suppose a more general version would be to check for overlap
+      ;; with values getting computed)
+
+      ;; in this case, it needs to guess that the value is null for this key,
+      ;; and push to the agenda a refresh for this particular value
+      (debug-repl "memo found computing cycle")
+      (???))
     (let [[Rorig upstream-assumpt] @Rorig+assumption-upstream
-          memo-addition (simplify-top (make-conjunct [key Rorig]))
+          memo-addition (binding [*memo-container-currently-computing* (conj *memo-container-currently-computing* [this key])]
+                          (simplify-top (make-conjunct [key Rorig])))
           cond-memo Rconditional+Rmemo
           new-cond-memo-val @cond-memo
           [new-cond new-memo] new-cond-memo-val
+
           recheck-condition (context/bind-context (context/make-nested-context-memo-conditional new-cond)
                                                   (simplify (make-conjunct [key new-cond])))]
       (if (is-empty-rexpr? recheck-condition)
@@ -140,10 +153,12 @@
                   :unk (make-conjunct (doall (map #(make-no-simp-unify % (get variable-name-mapping %))
                                              (:required-ground-variables memo-config))))
                   :null (make-multiplicity 1))
-            memo-rexpr (get-value-for-key memoization-container key)
-            res (simplify (remap-variables-handle-hidden memo-rexpr variable-name-mapping))]
-        ;(debug-repl "return memo")
-        res))))
+            memo-rexpr (get-value-for-key memoization-container key)]
+        (if (nil? memo-rexpr)
+          nil ;; then the key is not specific enough to return something yet
+          (let [res (simplify (remap-variables-handle-hidden memo-rexpr variable-name-mapping))]
+                                        ;(debug-repl "return memo")
+            res))))))
 
 
 #_(def-rewrite

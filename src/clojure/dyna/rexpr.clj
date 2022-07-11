@@ -268,6 +268,9 @@
                   ~'this
                   result#)))))
 
+         (~'is-empty-rexpr? ~'[this] false)
+         (~'is-non-empty-rexpr? [this] false)
+
          Object
          (~'equals ~'[this other]
            (or (identical? ~'this ~'other)
@@ -503,7 +506,9 @@
 
 
 (def-base-rexpr multiplicity [:mult mult]
-  (is-constraint? [this] (<= mult 1)))
+  (is-constraint? [this] (<= mult 1))
+  (is-empty-rexpr? [this] (= mult 0))
+  (is-non-empty-rexpr? [this] (not= mult 0)))
 
 ;; there is meta information on this which needs to be carried forward
 (when-not system/track-where-rexpr-constructed ;; if we are tracing where it was
@@ -528,21 +533,22 @@
 (def-base-rexpr conjunct [:rexpr-list args]
   (is-constraint? [this] (every? is-constraint? args)))
 
-(def-base-rexpr disjunct [:rexpr-list args])
+(def-base-rexpr disjunct [:rexpr-list args]
+  (is-non-empty-rexpr? [this] (some is-non-empty-rexpr? args)))
 
 
 ;; there should be a more complex expression for handling this in the case of a if statement or something
 ;; this will want for this to somehow handle if there are some ways in which this can handle if there
-(defn is-empty-rexpr? [rexpr]
-  (and (rexpr? rexpr) (= (make-multiplicity 0) rexpr)))
-(intern 'dyna.rexpr-constructors 'is-empty-rexpr? is-empty-rexpr?)
+;; (defn is-empty-rexpr? [rexpr]
+;;   (and (rexpr? rexpr) (= (make-multiplicity 0) rexpr)))
+;; (intern 'dyna.rexpr-constructors 'is-empty-rexpr? is-empty-rexpr?)
 
-;; that we are 100% sure that this R-expr will return a non-zero multiplicity
-(defn is-non-empty-rexpr? [rexpr]
-  (and (rexpr? rexpr)
-       (or (and (is-multiplicity? rexpr) (> (get-argument rexpr 0) 0))
-           (and (is-disjunct? rexpr) (some is-non-empty-rexpr? (get-argument rexpr 0))))))
-(intern 'dyna.rexpr-constructors 'is-non-empty-rexpr? is-non-empty-rexpr?)
+;; ;; that we are 100% sure that this R-expr will return a non-zero multiplicity
+;; (defn ^{:redef true} is-non-empty-rexpr? [rexpr]
+;;   (and (rexpr? rexpr)
+;;        (or (and (is-multiplicity? rexpr) (> (get-argument rexpr 0) 0))
+;;            (and (is-disjunct? rexpr) (some is-non-empty-rexpr? (get-argument rexpr 0))))))
+;; (intern 'dyna.rexpr-constructors 'is-non-empty-rexpr? is-non-empty-rexpr?)
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

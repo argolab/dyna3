@@ -48,6 +48,10 @@ fib(0) := 0.
 fib(1) := 1.
 fib(N) := fib(N-1) + fib(N-2) for N > 1.
 
+print fib(3).
+
+print fib(10).
+
 assert fib(10) = 55.
 
 %print fib(100).

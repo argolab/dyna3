@@ -51,6 +51,8 @@
   (trie-get-values-collection [key])  ;; return the values associated with a given key together
   (trie-get-values [key])  ;; return the values associated with a given key seperatly
 
+  (trie-get-values-collection-no-wildcard [key])
+
   ;; return a trie with only the values which match the key changed.  Values
   ;; which do not match the key will be left unchanged and still in the trie.
   ;; unchanged internal structure of the tries will be shared (the internal
@@ -99,7 +101,7 @@
                              [key nil]
                              (keys node))
                  next-key (rest key-query)]
-             (apply concat (for [k look-keys]
+             (apply concat (for [k look-keys]   ;;; TODO: this should use a lazy iterator ovedr this, maybe something like lazy-cat
                              (let [v (get node k)]
                                (if-not (nil? v)
                                  (lazy-seq (rec (cons k key-so-far)
@@ -112,6 +114,21 @@
     (for [[k node] (trie-get-values-collection this key)
           val node]
       [k val]))
+
+  (trie-get-values-collection-no-wildcard [this key]
+    (let [key (if (nil? key) (repeat arity nil) key)]
+      (assert (= (count key) arity))
+      ((fn rec [key-so-far key-query node]
+         (if (empty? key-query)
+           [[(reverse key-so-far) node]]
+           (let [key (first key-query)
+                 look-keys (if (nil? key) [nil] [nil key])
+                 next-key (rest key-query)]
+             (apply concat (for [k look-keys]
+                             (let [v (get node k)]
+                               (if-not (nil? v)
+                                 (lazy-seq (rec (cons k key-so-far) next-key v)))))))))
+       () key root)))
 
   (trie-map-collection [this key0 map-fn]
     (let [key (if (nil? key0) (repeat arity nil) key0)]

@@ -37,7 +37,11 @@
   ;; return the name of this type of R-expr as a string, can be used by external
   ;; code.  internally it is more efficient to use match or is-X? for matching
   ;; against the type of R-expr
-  (rexpr-name [this]))
+  (rexpr-name [this])
+
+  (is-empty-rexpr? [this]) ;; if the multiplicity of this expression is zero
+  (is-non-empty-rexpr? [this]) ;; if there is some branch of the disjunct which is non-zero
+  )
 
   ;; (visit-rexpr-children [this remap-function]) ;; this will visit any nested R-exprs on the expression, and return a new expression of the same type with
   ;(visit-all-children [this remap-function]) ;; this will visit
