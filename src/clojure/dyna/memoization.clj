@@ -136,10 +136,20 @@
             (do ;; the update was not successful
               (system/push-agenda-work #(refresh-memo-table this))
               (debug-repl "failed to save refresh of memo table")
-              (???))))))))
+              (???)))))))
+
+  Object
+  (toString [this] (str "<<<MemoContainer id=" (System/identityHashCode this)  ">>>"))
+  )
 
 (defmethod print-method MemoContainer [^MemoContainer this ^java.io.Writer w]
-  (.write w (str @(.Rconditional+Rmemo this) "\n" @(.Rorig+assumption-upstream this))))
+  (.write w (.toString this))
+  ;(.write w (str @(.Rconditional+Rmemo this) "\n" @(.Rorig+assumption-upstream this)))
+  )
+
+(defmethod print-dup MemoContainer [^MemoContainer this ^java.io.Writer w]
+  (.write w "(dyna.memoization/MemoContainer. ")
+  (print-dup (.Rconditional+Rmemo this)))
 
 (def-base-rexpr memoized-rexpr [:unchecked memoization-container
                                 :var-map variable-name-mapping])
@@ -156,8 +166,10 @@
             memo-rexpr (get-value-for-key memoization-container key)]
         (if (nil? memo-rexpr)
           nil ;; then the key is not specific enough to return something yet
-          (let [res (simplify (remap-variables-handle-hidden memo-rexpr variable-name-mapping))]
-                                        ;(debug-repl "return memo")
+          (let [rr (context/bind-no-context (remap-variables-handle-hidden memo-rexpr variable-name-mapping))
+                res (simplify rr)]
+            #_(when (is-empty-rexpr? res)
+              (debug-repl "return memo"))
             res))))))
 
 
@@ -313,13 +325,21 @@
       (system/push-agenda-work #(rebuild-memo-table-for-term term-name)))))
 
 
-(defn print-memo-table [term-name]
-  (let [term (get-user-term term-name)]
-    (if (nil? term)
-      (println "term " term-name " not found")
-      (do
-        (println "~~~~~~~~~~~~~~Memo table~~~~~~~~~~~~~~~~")
-        (println term-name)
-        (println "mode: " (:memoization-mode term))
-        (println "table: " (:memoized-rexpr term))
-        (println "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")))))
+(defn print-memo-table
+  ([term-name]
+   (let [term (get-user-term term-name)]
+     (if (nil? term)
+       (println "term " term-name " not found")
+       (do
+         (println "~~~~~~~~~~~~~~Memo table~~~~~~~~~~~~~~~~")
+         (println term-name)
+         (println "mode: " (:memoization-mode term))
+         (println "table: " (:memoized-rexpr term))
+         (println "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")))))
+  ([name arity] ;; a simple shortcut to make it easy to print these values
+   (doseq [tname (keys @system/user-defined-terms)]
+     (when (and (= name (:name tname)) (= arity (:arity tname)))
+       (print-memo-table tname)))))
+
+(swap! debug-useful-variables assoc
+       'print-memo-table (fn [] print-memo-table))

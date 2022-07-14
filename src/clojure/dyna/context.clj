@@ -21,6 +21,7 @@
 
 (defn get-context [] *context*)
 
+(def context-set-value-history {})
 
 (deftype context
     [parent
@@ -57,7 +58,8 @@
                 (and (contains? #{:aggregator-conjunctive :proj} context-kind)
                      (contains? value-map variable)))
           ;; then we set the value locally
-          (set! value-map (assoc value-map variable value))
+          (do (set! value-map (assoc value-map variable value))
+              (def context-set-value-history (assoc context-set-value-history variable [value (Throwable.)])))
           ;; then we are going to pass this up to something else
           (ctx-set-value! parent variable value)))))
   (ctx-add-rexpr! [this rexpr]

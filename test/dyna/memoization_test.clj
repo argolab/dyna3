@@ -46,7 +46,7 @@ assert fact(5) = 120.")
 :- memoize_unk fib/1.
 fib(0) := 0.
 fib(1) := 1.
-fib(N) := fib(N-1) + fib(N-2) for N > 1.
+fib(N) := fib(N-2) + fib(N-1) for N > 1.
 
 print fib(3).
 

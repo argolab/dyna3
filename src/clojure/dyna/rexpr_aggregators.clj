@@ -332,7 +332,9 @@
           ;; then we need to multiply in the result
           (case (:mult nR)
             0 (if body-is-conjunctive
-                (make-multiplicity 0)
+                (do
+                  (debug-repl "agg 0")
+                  (make-multiplicity 0))
                 (make-unify result-variable (make-constant (:identity aop))))
             1 (let [val (get-value-in-context incoming-variable ctx)]
                 (make-unify result-variable (make-constant ((:lower-value aop identity) val))))

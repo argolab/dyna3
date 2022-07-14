@@ -105,6 +105,11 @@
 (defmethod print-method assumption [^assumption this ^java.io.Writer w]
   (.write w (.toString this)))
 
+(defmethod print-dup assumption [^assumption this ^java.io.Writer w]
+  ;; in the case that this is duplicated, this is going to have to start as
+  ;; invalid, as we are going to have to recheck everything if it was to get reloaded
+  (.write w "(dyna.assumptions/make-invalid-assumption)"))
+
 (defn make-assumption []
   (assumption. (WeakHashMap.)                               ; downstream dependents
                (atom true)                                  ; if this is still valid, this is atomic
@@ -114,11 +119,11 @@
   (assumption. nil (atom false)))
 
 
-(comment
-  (defn make-reactive-value [initial-value]
-    (reactive-value. (atom [(make-assumption)
-                            initial-value])
-                            (fn [] nil))))
+;; (comment
+;;   (defn make-reactive-value [initial-value]
+;;     (reactive-value. (atom [(make-assumption)
+;;                             initial-value])
+;;                             (fn [] nil))))
 
 (defn depend-on-assumption [assumption & {:keys [hard] :or {hard true}}]
   ;; in this case, we are stating that the current computation would need to get
