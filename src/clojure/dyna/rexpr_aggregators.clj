@@ -333,7 +333,7 @@
           (case (:mult nR)
             0 (if body-is-conjunctive
                 (do
-                  (debug-repl "agg 0")
+                  ;(debug-repl "agg 0")
                   (make-multiplicity 0))
                 (make-unify result-variable (make-constant (:identity aop))))
             1 (let [val (get-value-in-context incoming-variable ctx)]
