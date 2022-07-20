@@ -423,7 +423,7 @@
 
             ["$define_term" 4] (let [[head dynabase aggregator body] (.arguments ^DynaTerm ast)
                                      new-body (make-comma-conjunct
-                                               (apply make-comma-conjunct (for [[idx arg] (zipmap (range) (.arguments ^DynaTerm head))]
+                                               (apply make-comma-conjunct (for [[idx arg] (zipseq (range) (.arguments ^DynaTerm head))]
                                                                             (DynaTerm. "$unify" [(DynaTerm. "$variable" [(str "$" idx)])
                                                                                                  arg])))
                                                (DynaTerm. "$unify" [(DynaTerm. "$variable" ["$self"])
@@ -575,7 +575,7 @@
                                     (merge
                                      {(make-variable "$self") dynabase-val
                                       (make-variable (str "$" arity)) out-variable}
-                                     (into {} (for [[i v] (zipmap (range) call-vals)]
+                                     (into {} (for [[i v] (zipseq (range) call-vals)]
                                                 [(make-variable (str "$" i)) v])))
                                     0 ;; the call depth
                                     #{})  ;; the set of arguments which need to get avoid

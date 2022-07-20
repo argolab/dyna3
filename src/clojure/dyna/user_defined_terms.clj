@@ -242,7 +242,7 @@
   (fn [& args]
     (assert (= arity (count args)))
     (let [result-var (make-variable 'Result)
-          rexpr (make-user-call term-name (merge (into {} (for [[k v] (zipmap (range) args)]
+          rexpr (make-user-call term-name (merge (into {} (for [[k v] (zipseq (range) args)]
                                                             [(make-variable (str "$" k)) (make-constant v)]))
                                                  {(make-variable (str "$" arity)) result-var}))
           ctx (context/make-empty-context rexpr)

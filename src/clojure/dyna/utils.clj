@@ -394,3 +394,21 @@
   (if (set? s)
     s
     (into #{} s)))
+
+
+(defn zipseq [& seqs]
+  (if (or (empty? seqs) (some empty? seqs))
+    ()
+    (cons (map first seqs)
+          (lazy-seq (apply zipseq (map next seqs))))))
+
+(defn zipseq-longest [& seqs]
+  (if (or (empty? seqs) (every? empty? seqs))
+    ()
+    (cons (map first seqs)
+          (lazy-seq (apply zipseq-longest (map next seqs))))))
+
+(defn indexof [col pred]
+  (for [[idx val] (zipseq (range) col)]
+    (when (pred val)
+      idx)))

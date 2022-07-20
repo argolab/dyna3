@@ -88,7 +88,7 @@
          clojure.lang.ILookup
          (~'valAt ~'[this name-to-lookup-gg not-found]
           (case ~'name-to-lookup-gg
-            ~@(apply concat (for [[idx var] (zipmap (range) vargroup)]
+            ~@(apply concat (for [[idx var] (zipseq (range) vargroup)]
                               `[~idx ~(cdar var)]))
             ~@(apply concat (for [var vargroup]
                               `[~(keyword (cdar var)) ~(cdar var)]))
@@ -124,7 +124,7 @@
          ;; constructing the vector is likely going to be slow.  Would be nice if there was some array representation or something
          (~'get-argument ~'[this n] ;; trying to add a type hit to this makes it such that the interface will not get cast correctly
           (case (unchecked-int ~'n)
-            ~@(apply concat (for [[var idx] (zipmap vargroup (range))]
+            ~@(apply concat (for [[var idx] (zipseq vargroup (range))]
                               `(~idx ~(cdar var))))
             (throw (RuntimeException. "invalid index for get-argument"))))
 
@@ -276,7 +276,7 @@
            (or (identical? ~'this ~'other)
                (and (instance? ~(symbol rname) ~'other)
                     (= (hash ~'this) (hash ~'other))
-                    ~@(for [[var idx] (zipmap vargroup (range))]
+                    ~@(for [[var idx] (zipseq vargroup (range))]
                         `(= ~(cdar var) (get-argument ~'other ~idx))))))
 
          (~'hashCode [this] ~'cached-hash-code) ;; is this something that should only be computed on demand instead of when it is constructed?
@@ -296,7 +296,7 @@
           ;; this hash implementation needs to match the one below....
           (unchecked-int ~(reduce (fn [a b] `(unchecked-add-int ~a ~b))
                                   (hash rname)
-                                  (for [[var idx] (zipmap vargroup (range))]
+                                  (for [[var idx] (zipseq vargroup (range))]
                                     `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
           nil                           ; the cached unique variables
           ~@(if system/track-where-rexpr-constructed `[(Throwable.) (last dyna.rexpr/*current-simplify-stack*)])
@@ -318,7 +318,7 @@
                               ;; this hash implementation needs to match the one above....
                               (unchecked-int ~(reduce (fn [a b] `(unchecked-add-int ~a ~b))
                                   (hash rname)
-                                  (for [[var idx] (zipmap vargroup (range))]
+                                  (for [[var idx] (zipseq vargroup (range))]
                                     `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
                               nil       ; the cached unique variables
                               ~@(if system/track-where-rexpr-constructed `[(Throwable.) (do
@@ -415,7 +415,7 @@
 
 
 (defn make-constant [val]
-  (dyna-debug (when (nil? val) (debug-repl)))
+  (dyna-debug (when (nil? val) (debug-repl "make constant with nil")))
   (assert (not (nil? val))) ;; otherwise this is a bug
   (dyna-debug (assert (not (instance? constant-value-rexpr val))))
   (constant-value-rexpr. val))
@@ -1412,6 +1412,7 @@
          :rexpr-result nR
          :simplify simplify  ;; this will be the simplify methods that is being used in context
          (let [Aval (get-value A)
+               zzzz (when (nil? Aval) (debug-repl))
                rr (make-conjunct [(iterator-encode-state-ignore-vars #{A})
                                   (context/bind-no-context
                                    (remap-variables-handle-hidden nR {A (make-constant Aval)}))])]
