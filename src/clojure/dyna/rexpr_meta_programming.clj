@@ -116,10 +116,10 @@
     (if-not (instance? DynaTerm call-ref-val)
       (make-multiplicity 0)
       (let [value-map (merge
-                       (into {} (for [[i v] (zipmap (range) (.arguments call-ref-val))]
+                       (into {} (for [[i v] (zipseq (range) (.arguments call-ref-val))]
                                   [(make-variable (str "$" i)) (make-constant v)]))
                        (if-not (dnil? (.dynabase call-ref-val)) {(make-variable "$self") (make-constant (.dynabase call-ref-val))})
-                       (into {} (for [[i v] (zipmap (range) arguments)]
+                       (into {} (for [[i v] (zipseq (range) arguments)]
                                   [(make-variable (str "$" (+ i (.arity call-ref-val)))) v]))
                        {(make-variable (str "$" (+ (.arity call-ref-val) (count arguments)))) result})
             cname (if (dnil? (.dynabase call-ref-val))

@@ -120,7 +120,9 @@
       (let [[orig-result-assumpt orig-result] (context/bind-no-context
                                               (compute-with-assumption
                                                (simplify-top (make-conjunct [cond Rorig]))))]
-        (when (not= orig-result memo)
+        (when-not (deep-equals orig-result memo)
+          (debug-delay-ntimes 20
+                        (debug-repl "refresh"))
           #_(let [vv (simplify-top orig-result)]
             (debug-repl "tables not equal"))
           ;; then we need to save the memo in to the table, and signal that an event happened

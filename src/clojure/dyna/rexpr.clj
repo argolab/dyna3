@@ -53,12 +53,27 @@
 (def ^:dynamic *current-simplify-stack* [])
 (def ^:dynamic *current-simplify-running* nil)
 
+
 (when system/track-where-rexpr-constructed  ;; meaning that the above variable will be defined
   (swap! debug-useful-variables assoc
          'rexpr (fn [] (last *current-simplify-stack*))
          'rexpr-top-level (fn [] *current-top-level-rexpr*)
          'top-level-rexpr (fn [] *current-top-level-rexpr*)
          'simplify-stack (fn [] *current-simplify-stack*)))
+
+(def deep-equals-compare-fn (atom {}))
+(defmacro def-deep-equals [rexpr args & body]
+  `(swap! deep-equals-compare-fn update ~(symbol (str rexpr "-rexpr")) conj (fn ~args ~@body)))
+
+(defn deep-equals [a b]
+  (if (= a b)
+    true
+    (let [af (get @deep-equals-compare-fn (type a))
+          bf (get @deep-equals-compare-fn (type b))]
+      (or (some #(% a b) af)
+          (some #(% b a) bf)))))
+
+(swap! debug-useful-variables assoc 'deep-equals (fn [] deep-equals))
 
 (defn construct-rexpr [name & args]
   (apply (get @rexpr-constructors name) args))
@@ -333,6 +348,16 @@
        (defmethod print-method ~(symbol rname) ~'[this ^java.io.Writer w]
          (assert (not (nil? ~'w)))
          (aprint (as-list ~'this) ~'w))
+       ~(when (some #(= % :rexpr) (map car vargroup))
+          `(def-deep-equals ~(symbol name) ~'[a b]
+             (and (instance? ~(symbol rname) ~'b)
+                  ;; check the non-rexprs first as those should be faster
+                  ~@(remove nil? (for [[var-type vname] vargroup]
+                                   (when (not= var-type :rexpr)
+                                     `(= (~(keyword vname) ~'a) (~(keyword vname) ~'b)))))
+                  ~@(remove nil? (for [[var-type vname] vargroup]
+                                   (when (= :rexpr var-type)
+                                     `(deep-equals (~(keyword vname) ~'a) (~(keyword vname) ~'b))))))))
        (intern 'dyna.rexpr-constructors '~(symbol (str "make-" name)) ~(symbol (str "make-" name)))
        (intern 'dyna.rexpr-constructors '~(symbol (str "make-no-simp-" name)) ~(symbol (str "make-no-simp-" name)))
        (intern 'dyna.rexpr-constructors '~(symbol (str "is-" name "?")) ~(symbol (str "is-" name "?")))
@@ -533,9 +558,37 @@
 (def-base-rexpr conjunct [:rexpr-list args]
   (is-constraint? [this] (every? is-constraint? args)))
 
+
 (def-base-rexpr disjunct [:rexpr-list args]
   (is-non-empty-rexpr? [this] (some is-non-empty-rexpr? args)))
 
+(defn- deep-equals-list-compare [a b]
+  (if (and (empty? a) (empty? b))
+    true
+    (let [af (first a)
+          ar (next a)]
+      (some (fn [x]
+              (and (deep-equals af x)
+                   (deep-equals-list-compare ar (remove #(identical? x %) b))))
+            b))))
+
+(def-deep-equals conjunct [a b]
+  (when (instance? conjunct-rexpr b)
+    (let [as (:args a)
+          bs (:args b)]
+      (if (not= (count as) (count bs))
+        false
+        ;; going to attempt to match against which
+        (deep-equals-list-compare as bs)))))
+
+
+(def-deep-equals disjunct [a b]
+  (when (instance? disjunct-rexpr b)
+    (let [as (:args a)
+          bs (:args b)]
+      (if (not= (count as) (count bs))
+        false
+        (deep-equals-list-compare as bs)))))
 
 ;; there should be a more complex expression for handling this in the case of a if statement or something
 ;; this will want for this to somehow handle if there are some ways in which this can handle if there
@@ -559,6 +612,12 @@
 (def-base-rexpr unify [:value a ;; this should be changed to just use :var
                        :value b]
   (is-constraint? [this] true))
+
+(def-deep-equals unify [a b]
+  (when (instance? unify-rexpr b)
+    ;; we only have to check the args in the different order, as we have already done a check against the stanard equals expression
+    (and (= (:a a) (:b b))
+         (= (:b a) (:a b)))))
 
 (def-base-rexpr unify-structure [:var out
                                  :file-name file-name
@@ -1050,7 +1109,7 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def-rewrite
+#_(def-rewrite
   :match (unify (:any A) (:any B))
   nil)
 

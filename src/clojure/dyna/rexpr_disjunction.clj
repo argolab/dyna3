@@ -290,3 +290,29 @@
       (let [rx (into [] (map second (trie-get-values rexprs nil)))]
         (debug-repl "R-expr in trie has extra exposed variables"))
       (???))))
+
+
+
+(def-deep-equals disjunct-op [a b]
+  (when (instance? disjunct-rexpr b)
+    ;; in the case of the origional disjunct, this is going to have that
+    ;; unification between variables is represented as unify expressions instead
+    ;; of as a trie.  I suppose that we could attempt to construct a representation and then compare between them
+    (debug-repl "disjunct and disjunct-op deep equals")
+    (???)
+    ))
+
+(def-deep-equals disjunct-op [a b]
+  (when (instance? disjunct-op-rexpr b)
+    ;; the tries could be in different orderes, in which case, we are going to have to reorder one of the tries
+    ;; from there we are going to have to zip the tries, and compare if there is some kind of representation which is the same between them
+    (let [va (:disjunction-variables a)
+          vb (:disjunction-variables b)]
+      (if (or (not= (count va) (count vb))
+              (not= (into #{} va) (into #{} vb)))
+        false ;; the variables exposed are different, so this is going to
+        (do
+          ;; this needs to compare the triesss, need to implement this
+          (debug-repl "disjunct op deep equals")
+          (???))
+        ))))
