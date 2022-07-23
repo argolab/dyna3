@@ -31,7 +31,10 @@
          is-variable-set?
          make-constant
          is-constant?
-         make-structure)
+         make-structure
+;         is-empty-rexpr?
+ ;        is-non-empty-rexpr?
+         )
 
 
 (def modification-lock (Object.))

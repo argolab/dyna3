@@ -10,22 +10,25 @@
   (eval-string "assert_fails 1 = 0.")
   (is true)
   (try (do
-         (binding [dyna.system/debug-on-assert-fail false]
+         (binding [dyna.utils/debug-on-assert-fail false]
            (eval-string "assert 1 = 0.")) ;; this should fail, and it will run an assert
          (is false))
        (catch DynaUserAssert e
          (is (not= -1 (.indexOf (.toString e) "Assert "))))))
 
+(defn run-string [test-str]
+  (try
+    (let [sstate (make-new-dyna-system)]
+      (run-under-system sstate
+                        (eval-string test-str))
+      (is true))
+    (catch DynaUserAssert e
+      (is false (str (.toString e) "\nREXPR: " (.assert_rexpr e))))))
+
 (defmacro str-test [name test-str]
   `(deftest ~name
      (println ~(str "Running test " name))
-     (try
-       (let [sstate# (make-new-dyna-system)]
-         (run-under-system sstate#
-                           (eval-string ~test-str))
-         (is true))
-       (catch DynaUserAssert e#
-         (is false (str (.toString e#) "\nREXPR: " (.assert_rexpr e#)))))))
+     (run-string ~test-str)))
 
 
 (str-test simple-math
@@ -345,6 +348,7 @@ assert f(4) = 6.
 (str-test reflect1 "
 r(X) = $reflect(X, \"foo\", [Y]), Y.
 
+%print r(&foo(77)).
 assert r(&foo(77)) = 77.
 ")
 
@@ -399,4 +403,23 @@ assert f(1) = f(1).
 
 (str-test random-gen "
 print random.
+")
+
+
+(str-test aggregator-sum-many "
+f(1) += 1.
+f(1) += 2.
+f(1) += 3.
+f(2) += 4.
+f(2) += 5.
+f(2) += 6.
+
+assert f(1) = 6.
+")
+
+
+(str-test aggregator-range "
+a += X: range(0,10).
+%print a.
+assert a = 45.  % 0 + . . . + 9 = 45
 ")

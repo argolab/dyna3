@@ -15,16 +15,19 @@ public class DynaAgenda {
     }
 
     public void process_agenda() {
+        if(queue.isEmpty())
+            return;
         System.err.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Running agenda~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
         long local_processed = 0;
         long agenda_start_processing = System.currentTimeMillis();
         try {
             while(true) {
+                //System.out.println("Running work");
                 IDynaAgendaWork work = queue.poll();
                 if(work == null) break;
                 work.run();
                 local_processed++;
-                if(print_progress && work_processed % 5173 == 0) {
+                if(print_progress && local_processed % 5173 == 0) {
                     System.err.print("\rAgenda status, work processed: "+local_processed);
                 }
             }

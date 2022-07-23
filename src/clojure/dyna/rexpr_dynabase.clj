@@ -4,7 +4,7 @@
   (:import  [dyna.base_protocols Dynabase])
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.user-defined-terms :refer [def-user-term]])
-  (:require [dyna.assumptions :refer [make-assumption]])
+  (:require [dyna.assumptions :refer [make-assumption is-valid? depend-on-assumption invalidate!]])
   (:require [dyna.system :as system])
   (:require [dyna.rexpr-builtins :refer [def-builtin-rexpr]])
   (:require [clojure.set :refer [subset?]])
@@ -26,14 +26,29 @@
 (def-base-rexpr dynabase-constructor [:str name
                                       :var-list arguments
                                       :var parent-dynabase  ;; either constant nil, or a variable which references what dynabase this is constructed from
-                                      :var dynabase])
+                                      :var dynabase]
+  (is-constraint? [this] (let [metadata (get @system/dynabase-metadata name)
+                               assump (:does-not-self-inerhit-assumption metadata)]
+                           (if (is-valid? assump)
+                             (do
+                               (depend-on-assumption assump)
+                               true)
+                             false))))
 
-; this should be used for accessing a field or function on a dynabase.  It will
-; read any variables which were captured in the closure of the dynabase and
-; check the type matches for the function that we are evaluating
+                                        ; this should be used for accessing a field or function on a dynabase.  It will
+                                        ; read any variables which were captured in the closure of the dynabase and
+                                        ; check the type matches for the function that we are evaluating
+
 (def-base-rexpr dynabase-access [:str name
                                  :var dynabase
-                                 :var-list arguments])
+                                 :var-list arguments]
+  (is-constraint? [this] (let [metadata (get @system/dynabase-metadata name)
+                               assump (:does-not-self-inerhit-assumption metadata)]
+                           (if (is-valid? assump)
+                             (do
+                               (depend-on-assumption assump)
+                               true)
+                             false))))
 
 
 (def-rewrite
@@ -46,6 +61,8 @@
                   (instance? Dynabase parent-val) (let [parent-obj (.access-map ^Dynabase parent-val)
                                                         dbm (assoc parent-obj name (conj (get parent-obj name ()) args))
                                                         db (Dynabase. dbm)]
+                                                    (when (contains? parent-obj name) ;; meaning that the same class appears more than once
+                                                      (invalidate! (:does-not-self-inerhit-assumption metadata)))
                                                     ;; this needs to track which kinds of dynabases this is going to inherit from
                                                     (make-unify dynabase (make-constant db)))
                   :else (do ;; this means the user did something like `new (5) {foo = 123. }` which is ill-formed
@@ -89,7 +106,7 @@
           (if (= 1 (count arr))
             ;; then we can just make a unification of all of the values directly
             ;; this will likely set the values into the context info
-            (make-conjunct (doall (map (fn [var val]
+            (make-conjunct (vec (map (fn [var val]
                                          (make-unify var (make-constant val)))
                                        args (first arr))))
             ;; this needs to have some disjunct over all of the different values that this can take on.  In this case, this would
@@ -99,6 +116,19 @@
                                               (fn [var val] (make-no-simp-unify var (make-constant val)))
                                               args ae))))
                        arr)))))))))
+
+
+;; TODO: this depends on the assumption that there are no children dynabases.  As a given rule has to match in multiple places
+#_(def-rewrite
+  :match {:rexpr (dynabase-access (:str name) (:free dynabase) (:variable-list args))
+          :check (empty? args)}
+  :run-at :construction
+  ;; if there are no args in the dynabase, then the dynabase does not require
+  ;; this delayed expression to match against.
+  (let [metadata (get @system/dynabase-metadata name)]
+    (when-not (:has-super metadata)
+      (debug-repl)
+      (make-unify dynabase (make-constant (Dynabase. {name (list ())}))))))
 
 (comment
   (def-rewrite
@@ -162,7 +192,16 @@
                                            ;; dynabase not inheriting from itself.  This willx
                              ;; enable us to have more "efficient" code where an
                              ;; expression can again make the same assumptions
-                             ;; as the there not being any parents
+            ;; as the there not being any parents
+
+
+            ;; this should track which dynabases are seen as parent and children
+            ;; dynabases during the construction phase.  This should allow for
+            ;; additional optimizations when it is doing inference with having
+            ;; multiple dynabases access operations.  Also there will need to be
+            ;; assumptions that these values haven't changed
+            ;:seen-super-dynabases #{}
+            ;:seen-child-dynabases #{}
             })
     name))
 
@@ -182,9 +221,9 @@
                  am))))
 
 (def-builtin-rexpr is-dynabase-instance 3
-  (:allground (v2 (and (instance? Dynabase v0)
-                       (instance? Dynabase v1)
-                       (is-dynabase-subset v0 v1))))
+  (:allground (= v2 (and (instance? Dynabase v0)
+                         (instance? Dynabase v1)
+                         (is-dynabase-subset v0 v1))))
   (v2 (and (instance? Dynabase v0)
            (instance? Dynabase v1)
            (is-dynabase-subset v0 v1))))
@@ -195,3 +234,34 @@
 ;; dynabases are equal to each other, or the instance is a superset of the first
 ;; map
 ;(def-user-term "instance" 2 (make-multiplicity 1))
+
+
+
+
+;; NOTE: might have something like the set of keys which are known about on a
+;; given dynabase.  then it could pass those through explicitly.  this would
+;; allow for memoization of the parent dynabases while still having overrides
+;; for the expressions that would get blocked.  this would require that there is
+;; something like the "top level" dynabase which could get used.  though this
+;; would have to ensure that there is no self inherit, otherwise that would be
+;; come too complex for it to figure out which expression might have been the
+;; previous parent expression
+;;
+;; though I suppose that becauise we are going allow memos to go anywhere, it
+;; could happen after the dynabsae has already been dispatched, in which case
+;; the child dynabase could also allow for it to use the same memo without
+;; having to get combined together.
+;;
+;; I suppose we could also split aggregators up more such that different
+;; dynabases are groupped together.  then the dynabase access operator could
+;; appear before the aggregation.  This would require some more complex rewrites
+;; which are going to know about dynabases inside of aggregators such that it
+;; can figure out the best way to arrange the R-expr.
+
+
+
+;; There should be a lot more optimizations that can be done with dynabases once
+;; we have assumptions working fully.  The diea being that if something would
+;; inhert from a given dynabase, then it would know which expression would
+;; result in it creating something.  I suppose that we could also track all of
+;; the subclasses which inherit from a given dynabase

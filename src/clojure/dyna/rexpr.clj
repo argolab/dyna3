@@ -53,12 +53,27 @@
 (def ^:dynamic *current-simplify-stack* [])
 (def ^:dynamic *current-simplify-running* nil)
 
+
 (when system/track-where-rexpr-constructed  ;; meaning that the above variable will be defined
   (swap! debug-useful-variables assoc
          'rexpr (fn [] (last *current-simplify-stack*))
          'rexpr-top-level (fn [] *current-top-level-rexpr*)
          'top-level-rexpr (fn [] *current-top-level-rexpr*)
          'simplify-stack (fn [] *current-simplify-stack*)))
+
+(def deep-equals-compare-fn (atom {}))
+(defmacro def-deep-equals [rexpr args & body]
+  `(swap! deep-equals-compare-fn update ~(symbol (str rexpr "-rexpr")) conj (fn ~args ~@body)))
+
+(defn deep-equals [a b]
+  (if (= a b)
+    true
+    (let [af (get @deep-equals-compare-fn (type a))
+          bf (get @deep-equals-compare-fn (type b))]
+      (or (some #(% a b) af)
+          (some #(% b a) bf)))))
+
+(swap! debug-useful-variables assoc 'deep-equals (fn [] deep-equals))
 
 (defn construct-rexpr [name & args]
   (apply (get @rexpr-constructors name) args))
@@ -88,7 +103,7 @@
          clojure.lang.ILookup
          (~'valAt ~'[this name-to-lookup-gg not-found]
           (case ~'name-to-lookup-gg
-            ~@(apply concat (for [[idx var] (zipmap (range) vargroup)]
+            ~@(apply concat (for [[idx var] (zipseq (range) vargroup)]
                               `[~idx ~(cdar var)]))
             ~@(apply concat (for [var vargroup]
                               `[~(keyword (cdar var)) ~(cdar var)]))
@@ -103,11 +118,12 @@
          Rexpr
          ~'(primitive-rexpr [this] this) ;; this is a primitive expression so we are going to just always return ourselves
          ~'(is-constraint? [this] false) ;; if this is going to return a multiplicity of at most 1
+         (~'rexpr-name ~'[this] ~(str name)) ;; the name for this type of R-expr
          (~'get-variables ~'[this]
           (filter is-variable?
                   (union (set (list ~@(map cdar (filter #(contains?  #{:var :value} (car %1)) vargroup))))
                          ~@(map (fn [x] `(set ~(cdar x))) (filter #(= :var-list (car %1)) vargroup))
-                         ~@(map (fn [x] `(set (values ~(cdar x)))) (filter #(= :var-map (car %1)) vargroup))
+                         ~@(map (fn [x] `(set (vals ~(cdar x)))) (filter #(= :var-map (car %1)) vargroup))
                          ;; TODO: this needs to handle the case where there is the var-set-map which will have nested variable inside of the arguments
                          ;;~@(map (fn [x] `(set (values ))))
                          )))
@@ -123,7 +139,7 @@
          ;; constructing the vector is likely going to be slow.  Would be nice if there was some array representation or something
          (~'get-argument ~'[this n] ;; trying to add a type hit to this makes it such that the interface will not get cast correctly
           (case (unchecked-int ~'n)
-            ~@(apply concat (for [[var idx] (zipmap vargroup (range))]
+            ~@(apply concat (for [[var idx] (zipseq vargroup (range))]
                               `(~idx ~(cdar var))))
             (throw (RuntimeException. "invalid index for get-argument"))))
 
@@ -182,7 +198,7 @@
                                             :var-set-map `(into #{} (for [~'s ~(cdar v)]
                                                                       (into {} (for [~'[kk vv] ~'s] [~'kk (get ~'variable-map ~'vv ~'vv)]))))
                                             :rexpr `(remap-variables ~(cdar v) ~'variable-map)
-                                            :rexpr-list `(map #(remap-variables % ~'variable-map) ~(cdar v))
+                                            :rexpr-list `(vec (map #(remap-variables % ~'variable-map) ~(cdar v)))
                                             (cdar v) ;; the default is that this is the same
                                             )])))
                 (if (and ~@(for [v vargroup]
@@ -192,13 +208,15 @@
                   (~(symbol (str "make-" name)) ~@(for [v vargroup]
                                                     (symbol (str "new-" (cdar v)))))))))))
          (~'rewrite-rexpr-children ~'[this remap-function]
+          ~(when (some #{:prefix-trie} (map car vargroup))
+             `(throw (RuntimeException. "using rewrite-rexpr-children on a R-expr with :prefix-trie type")))
           (let ~(vec (apply concat
                             (for [v vargroup]
                               (when (contains? #{:rexpr :rexpr-list} (car v))
                                 [(symbol (str "new-" (cdar v)))
                                  (case (car v)
                                    :rexpr `(~'remap-function ~(cdar v))
-                                   :rexpr-list `(map ~'remap-function ~(cdar v)))]
+                                   :rexpr-list `(vec (map ~'remap-function ~(cdar v))))]
                                 ))))
             (if (and ~@(for [v vargroup]
                          (when (contains? #{:rexpr :rexpr-list} (car v))
@@ -219,7 +237,7 @@
                                 [(symbol (str "new-" (cdar v)))
                                  (case (car v)
                                    :rexpr `(~'remap-function ~(cdar v))
-                                   :rexpr-list `(map ~'remap-function ~(cdar v)))]
+                                   :rexpr-list `(vec (map ~'remap-function ~(cdar v))))]
                                 ))))
             (if (and ~@(for [v vargroup]
                          (when (contains? #{:rexpr :rexpr-list} (car v))
@@ -253,7 +271,7 @@
                                           :var-set-map `(into #{} (for [~'s ~(cdar v)]
                                                                     (into {} (for [~'[kk vv] ~'s] [~'kk (get ~'variable-map ~'vv ~'vv)]))))
                                           :rexpr `(remap-variables-handle-hidden ~(cdar v) ~'variable-map)
-                                          :rexpr-list `(map #(remap-variables-handle-hidden % ~'variable-map) ~(cdar v))
+                                          :rexpr-list `(vec (map #(remap-variables-handle-hidden % ~'variable-map) ~(cdar v)))
                                           (cdar v) ;; the default is that this is the same
                                           )])))
               (let [result# (~(symbol (str "make-" name)) ~@(for [v vargroup]
@@ -267,16 +285,19 @@
                   ~'this
                   result#)))))
 
+         (~'is-empty-rexpr? ~'[this] false)
+         (~'is-non-empty-rexpr? [this] false)
+
          Object
-         (equals ~'[this other]
+         (~'equals ~'[this other]
            (or (identical? ~'this ~'other)
                (and (instance? ~(symbol rname) ~'other)
                     (= (hash ~'this) (hash ~'other))
-                    ~@(for [[var idx] (zipmap vargroup (range))]
+                    ~@(for [[var idx] (zipseq vargroup (range))]
                         `(= ~(cdar var) (get-argument ~'other ~idx))))))
 
-         (hashCode [this] ~'cached-hash-code) ;; is this something that should only be computed on demand instead of when it is constructed?
-         (toString ~'[this] (trim (str (as-list ~'this)))))
+         (~'hashCode [this] ~'cached-hash-code) ;; is this something that should only be computed on demand instead of when it is constructed?
+         (~'toString ~'[this] (trim (str (as-list ~'this)))))
 
        (defn ~(symbol (str "make-no-simp-" name))
          {:rexpr-constructor (quote ~name)
@@ -292,7 +313,7 @@
           ;; this hash implementation needs to match the one below....
           (unchecked-int ~(reduce (fn [a b] `(unchecked-add-int ~a ~b))
                                   (hash rname)
-                                  (for [[var idx] (zipmap vargroup (range))]
+                                  (for [[var idx] (zipseq vargroup (range))]
                                     `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
           nil                           ; the cached unique variables
           ~@(if system/track-where-rexpr-constructed `[(Throwable.) (last dyna.rexpr/*current-simplify-stack*)])
@@ -314,7 +335,7 @@
                               ;; this hash implementation needs to match the one above....
                               (unchecked-int ~(reduce (fn [a b] `(unchecked-add-int ~a ~b))
                                   (hash rname)
-                                  (for [[var idx] (zipmap vargroup (range))]
+                                  (for [[var idx] (zipseq vargroup (range))]
                                     `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
                               nil       ; the cached unique variables
                               ~@(if system/track-where-rexpr-constructed `[(Throwable.) (do
@@ -329,6 +350,16 @@
        (defmethod print-method ~(symbol rname) ~'[this ^java.io.Writer w]
          (assert (not (nil? ~'w)))
          (aprint (as-list ~'this) ~'w))
+       ~(when (some #(= % :rexpr) (map car vargroup))
+          `(def-deep-equals ~(symbol name) ~'[a b]
+             (and (instance? ~(symbol rname) ~'b)
+                  ;; check the non-rexprs first as those should be faster
+                  ~@(remove nil? (for [[var-type vname] vargroup]
+                                   (when (not= var-type :rexpr)
+                                     `(= (~(keyword vname) ~'a) (~(keyword vname) ~'b)))))
+                  ~@(remove nil? (for [[var-type vname] vargroup]
+                                   (when (= :rexpr var-type)
+                                     `(deep-equals (~(keyword vname) ~'a) (~(keyword vname) ~'b))))))))
        (intern 'dyna.rexpr-constructors '~(symbol (str "make-" name)) ~(symbol (str "make-" name)))
        (intern 'dyna.rexpr-constructors '~(symbol (str "make-no-simp-" name)) ~(symbol (str "make-no-simp-" name)))
        (intern 'dyna.rexpr-constructors '~(symbol (str "is-" name "?")) ~(symbol (str "is-" name "?")))
@@ -363,6 +394,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; things like variables and constants should instead be some other type rather than an R-expr
 
+(declare make-constant)
 
 (defrecord variable-rexpr [varname]
   RexprValue
@@ -373,6 +405,10 @@
   (is-bound? [this]  (context/need-context (ctx-is-bound? (context/get-context) this)))
   (is-bound-in-context? [this context] (ctx-is-bound? context this))
   (all-variables [this] #{this})
+  (get-representation-in-context [this ctx]
+    (if (is-bound-in-context? this ctx)
+      (make-constant (get-value-in-context this ctx))
+      this))
   Object
   (toString [this] (str "(variable " varname ")")))
 
@@ -400,13 +436,15 @@
   (is-bound? [this] true)
   (is-bound-in-context? [this context] true)
   (all-variables [this] #{})
+  (get-representation-in-context [this ctx] this)
   Object
   (toString [this] (str "(constant " value ")")))
 
 
 (defn make-constant [val]
-  (dyna-debug (when (nil? val) (debug-repl)))
+  (dyna-debug (when (nil? val) (debug-repl "make constant with nil")))
   (assert (not (nil? val))) ;; otherwise this is a bug
+  (dyna-debug (assert (not (instance? constant-value-rexpr val))))
   (constant-value-rexpr. val))
 (intern 'dyna.rexpr-constructors 'make-constant make-constant)
 
@@ -472,7 +510,7 @@
 ;; these are checks which are something that we might want to allow ourselves to turn off
 (defn check-argument-mult [x] (or (and (int? x) (>= x 0)) (= ##Inf x)))
 (defn check-argument-rexpr [x] (rexpr? x))
-(defn check-argument-rexpr-list [x] (and (seqable? x) (every? rexpr? x)))
+(defn check-argument-rexpr-list [x] (and (seqable? x) (every? rexpr? x) (not (instance? clojure.lang.LazySeq x))))
 (defn check-argument-var [x] (or (is-variable? x) (is-constant? x))) ;; a variable or constant of a single value.  Might want to remove is-constant? from this
 (defn check-argument-var-list [x] (and (seqable? x) (every? check-argument-var x)))
 (defn check-argument-var-map [x] (and (map? x) (every? (fn [[a b]] (and (check-argument-var a)
@@ -495,7 +533,9 @@
 
 
 (def-base-rexpr multiplicity [:mult mult]
-  (is-constraint? [this] (<= mult 1)))
+  (is-constraint? [this] (<= mult 1))
+  (is-empty-rexpr? [this] (= mult 0))
+  (is-non-empty-rexpr? [this] (not= mult 0)))
 
 ;; there is meta information on this which needs to be carried forward
 (when-not system/track-where-rexpr-constructed ;; if we are tracing where it was
@@ -520,24 +560,51 @@
 (def-base-rexpr conjunct [:rexpr-list args]
   (is-constraint? [this] (every? is-constraint? args)))
 
-(def make-* make-conjunct)
 
-(def-base-rexpr disjunct [:rexpr-list args])
+(def-base-rexpr disjunct [:rexpr-list args]
+  (is-non-empty-rexpr? [this] (some is-non-empty-rexpr? args)))
 
-(def make-+ make-disjunct)
+(defn deep-equals-list-compare [a b]
+  (if (and (empty? a) (empty? b))
+    true
+    (let [af (first a)
+          ar (next a)]
+      (some (fn [x]
+              (and (deep-equals af x)
+                   (deep-equals-list-compare ar (remove #(identical? x %) b))))
+            b))))
 
+(def-deep-equals conjunct [a b]
+  (when (instance? conjunct-rexpr b)
+    (let [as (:args a)
+          bs (:args b)]
+      (if (not= (count as) (count bs))
+        false
+        ;; going to attempt to match against which
+        (deep-equals-list-compare as bs)))))
+
+
+(def-deep-equals disjunct [a b]
+  (when (instance? disjunct-rexpr b)
+    (let [as (:args a)
+          bs (:args b)]
+      (if (not= (count as) (count bs))
+        false
+        (deep-equals-list-compare as bs)))))
 
 ;; there should be a more complex expression for handling this in the case of a if statement or something
 ;; this will want for this to somehow handle if there are some ways in which this can handle if there
-(defn is-empty-rexpr? [rexpr]
-  (and (rexpr? rexpr) (= (make-multiplicity 0) rexpr)))
+;; (defn is-empty-rexpr? [rexpr]
+;;   (and (rexpr? rexpr) (= (make-multiplicity 0) rexpr)))
+;; (intern 'dyna.rexpr-constructors 'is-empty-rexpr? is-empty-rexpr?)
 
+;; ;; that we are 100% sure that this R-expr will return a non-zero multiplicity
+;; (defn ^{:redef true} is-non-empty-rexpr? [rexpr]
+;;   (and (rexpr? rexpr)
+;;        (or (and (is-multiplicity? rexpr) (> (get-argument rexpr 0) 0))
+;;            (and (is-disjunct? rexpr) (some is-non-empty-rexpr? (get-argument rexpr 0))))))
+;; (intern 'dyna.rexpr-constructors 'is-non-empty-rexpr? is-non-empty-rexpr?)
 
-;; that we are 100% sure that this R-expr will return a non-zero multiplicity
-(defn is-non-empty-rexpr? [rexpr]
-  (and (rexpr? rexpr)
-       (or (and (is-multiplicity? rexpr) (> (get-argument rexpr 0) 0))
-           (and (is-disjunct? rexpr) (some is-non-empty-rexpr? (get-argument rexpr 0))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -547,6 +614,12 @@
 (def-base-rexpr unify [:value a ;; this should be changed to just use :var
                        :value b]
   (is-constraint? [this] true))
+
+(def-deep-equals unify [a b]
+  (when (instance? unify-rexpr b)
+    ;; we only have to check the args in the different order, as we have already done a check against the stanard equals expression
+    (and (= (:a a) (:b b))
+         (= (:b a) (:a b)))))
 
 (def-base-rexpr unify-structure [:var out
                                  :file-name file-name
@@ -574,7 +647,7 @@
                                  (let [new-hidden-name (make-variable (gensym 'proj-hidden))]
                                    (make-proj new-hidden-name (remap-variables-handle-hidden body (assoc variable-map var new-hidden-name)))))
   (remap-variables [this variable-map]
-                   (dyna-debug (when-not (not (some #{var} (vals variable-map)))
+                   #_(dyna-debug (when-not (not (some #{var} (vals variable-map)))
                                  (debug-repl "bad remap")))
 
                    (make-proj var (remap-variables body variable-map))))
@@ -607,7 +680,8 @@
                            :unchecked call-depth
                            :var-set-map args-parent-map ;; this needs to track which
                            ]
-  (get-variables [this] (into #{} (vals args-map))))
+  ;(get-variables [this] (into #{} (vals args-map)))
+  )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -734,8 +808,8 @@
     `(let [~source ~source-variable] ;; copying the variable is probably not necessary in most cases???
        ~(make-rexpr-matching-function source #{source source-variable} matcher (fn [pv] body)))))
 
-(defn- get-match-base-type [matcher]
-  (car (if (map? matcher) (:rexpr matcher) matcher)))
+;; (defn- get-match-base-type [matcher]
+;;   (car (if (map? matcher) (:rexpr matcher) matcher)))
 
 (defmacro match-rexpr [source-variable matcher & body]
   `(do ~(if system/status-counters `(StatusCounters/match_attempt))
@@ -744,7 +818,7 @@
                            ~(when system/status-counters `(StatusCounters/match_sucessful))
                            ~@body))))
 
-(defn- make-rewriter-function [matcher body from-file]
+(defn- make-rewriter-function [kw-args matcher body from-file]
   ;; this needs to go through and define something where the different functions
   ;; are invoked on the relvant parts of the expression.  Because the
   ;; expressions have different field values, and are not positional, this means
@@ -753,10 +827,18 @@
         do-rewrite-body `(let [~res (do ~body)]
                            ~(when system/print-rewrites-performed
                               `(when (and (not (nil? ~res)) (not= ~res ~'rexpr))
+                                 ;(debug-delay-ntimes 1000 (debug-repl))
                                  (print ~(str "Performed rewrite:"  (meta from-file) "\nOLD: ") ~'rexpr "NEW: " ~res "CONTEXT:" (context/get-context))))
                            ~(when system/status-counters
                               `(when (and (not (nil? ~res)) (not= ~res ~'rexpr))
                                  (StatusCounters/rewrite_performed)))
+                           ~(when (:check-exposed-variables kw-args)
+                              `(let [~'exposed-incoming (exposed-variables ~'rexpr)
+                                     ~'result ~res
+                                     ~'exposed-outgoing (exposed-variables ~res)
+                                     ~'exposed-difference (difference ~'exposed-incoming ~'exposed-outgoing)]
+                                 (when (and (is-non-empty-rexpr? ~'result) (some #(not (is-bound? %)) ~'exposed-difference))
+                                   (debug-repl "difference in exposed-variables"))))
                            ~res)]
     `(fn (~'[rexpr simplify]
           (match-rexpr ~'rexpr ~matcher ~do-rewrite-body)))))
@@ -796,37 +878,39 @@
         functor-name (car matcher-rexpr)
         arity (if (= (cdar matcher-rexpr) :any) nil (- (count matcher-rexpr) 1))
         runs-at (:run-at kw-args :standard)
-        rewriter-function (make-rewriter-function matcher rewrite &form)
+        rewriter-function (make-rewriter-function kw-args matcher rewrite &form)
         rewrite-func-var (gensym 'rewrite-func)]
-    (let [ret `(let [~rewrite-func-var ~rewriter-function]
-                 (locking dyna.rexpr-constructors/modification-lock
-                   ~@(for [run-at (if (seqable? runs-at) runs-at [runs-at])]
-                       `(let [[rewrite-collection# rewrite-collection-func#]
-                              ~(case run-at
-                                 :standard `[(var-get #'rexpr-rewrites) (var-get #'rexpr-rewrites-func)]
-                                 :construction `[(var-get #'rexpr-rewrites-construct) (var-get #'rexpr-rewrites-construct-func)]
-                                 :inference `[(var-get #'rexpr-rewrites-inference) (var-get #'rexpr-rewrites-inference-func)])
-                              functor-name# ~(symbol (str functor-name "-rexpr"))]
-                          ;; this is now also protected by the modification lock above???, so we don't need the atomic I guess....
-                          (swap-vals! rewrite-collection# (fn [old#] (assoc old# functor-name# (conj (get old# functor-name# #{}) ~rewrite-func-var))))
-                          ;; TODO: the first function is going to be the identity, which does not make since
-                          (let [combined-func# (~combine-rewrite-function
-                                   ~(symbol "dyna.rexpr-constructors" (str (case run-at
-                                                                             :standard "simplify-"
-                                                                             :construction "simplify-construct-"
-                                                                             :inference "simplify-inference-")
-                                                                           functor-name))
-                                                ~rewrite-func-var)]
-                            (intern 'dyna.rexpr-constructors '~(symbol (str (case run-at
-                                                                              :standard "simplify-"
-                                                                              :construction "simplify-construct-"
-                                                                              :inference "simplify-inference-"
-                                                                              )
-                                                                            functor-name))
-                                    combined-func#)
-                            ;(swap-vals! rewrite-collection-func# assoc functor-name# combined-func#)
-                            )))))]
-      ret)))
+    (when (and (not (and (:is-check-rewrite kw-args) (not system/check-rexpr-arguments)))
+               (not (and (:is-debug-rewrite kw-args) (not system/debug-statements))))
+      (let [ret `(let [~rewrite-func-var ~rewriter-function]
+                   (locking dyna.rexpr-constructors/modification-lock
+                     ~@(for [run-at (if (seqable? runs-at) runs-at [runs-at])]
+                         `(let [[rewrite-collection# rewrite-collection-func#]
+                                ~(case run-at
+                                   :standard `[(var-get #'rexpr-rewrites) (var-get #'rexpr-rewrites-func)]
+                                   :construction `[(var-get #'rexpr-rewrites-construct) (var-get #'rexpr-rewrites-construct-func)]
+                                   :inference `[(var-get #'rexpr-rewrites-inference) (var-get #'rexpr-rewrites-inference-func)])
+                                functor-name# ~(symbol (str functor-name "-rexpr"))]
+                            ;; this is now also protected by the modification lock above???, so we don't need the atomic I guess....
+                            (swap-vals! rewrite-collection# (fn [old#] (assoc old# functor-name# (conj (get old# functor-name# #{}) ~rewrite-func-var))))
+                            ;; TODO: the first function is going to be the identity, which does not make since
+                            (let [combined-func# (~combine-rewrite-function
+                                                  ~(symbol "dyna.rexpr-constructors" (str (case run-at
+                                                                                            :standard "simplify-"
+                                                                                            :construction "simplify-construct-"
+                                                                                            :inference "simplify-inference-")
+                                                                                          functor-name))
+                                                  ~rewrite-func-var)]
+                              (intern 'dyna.rexpr-constructors '~(symbol (str (case run-at
+                                                                                :standard "simplify-"
+                                                                                :construction "simplify-construct-"
+                                                                                :inference "simplify-inference-"
+                                                                                )
+                                                                              functor-name))
+                                      combined-func#)
+                                        ;(swap-vals! rewrite-collection-func# assoc functor-name# combined-func#)
+                              )))))]
+        ret))))
 
 (defmacro def-iterator [& args]
   (let [kw-args (apply hash-map (drop-last args))
@@ -845,7 +929,7 @@
     ret))
 
 
-(defn make-iterator [variable iterator]
+#_(defn make-iterator [variable iterator]
   ;; these are going to need to be hashable, otherwise this would mean that we can't use the set to identify which expressions are iterable
   ;; there are some values which
   #{[variable iterator]})
@@ -963,7 +1047,8 @@
 ;; this is going to have to have some context in which an expression
 
 (defn is-ground? [var-name]
-  (or (and (is-variable? var-name) (is-variable-set? var-name))
+  (or (and (is-variable? var-name)
+           (is-variable-set? var-name))
       (is-constant? var-name)))
 
 (def-rewrite-matcher :str [string] (string? string))
@@ -1026,7 +1111,7 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def-rewrite
+#_(def-rewrite
   :match (unify (:any A) (:any B))
   nil)
 
@@ -1049,7 +1134,7 @@
 (def-rewrite
   ;; the matched variable should have what value is the result of the matched expression.
   :match (unify (:ground A) (:ground B))
-  :run-at [:standard :construction]
+  :run-at [:standard :construction :inference]
   (if (= (get-value A) (get-value B))
     (make-multiplicity 1)
     (make-multiplicity 0)))
@@ -1074,7 +1159,7 @@
 ; this should run at both, so there should be a :run-at :both option that can be selected
 (def-rewrite
   :match (unify (:free A) (:ground B))
-  :run-at [:standard :construction] ; this will want to run at construction and when it encounters the value so that we can use it as early as possible
+  :run-at [:standard :construction :inference] ; this will want to run at construction and when it encounters the value so that we can use it as early as possible
   (when (context/has-context)
     ;;(debug-repl)
     (assert (not (is-ground? A))) ;; otherwise the setting the value into the context should fail
@@ -1104,7 +1189,7 @@
 
 (def-rewrite
   :match (unify-structure (:free out) (:unchecked file-name) (:ground dynabase) (:unchecked name-str) (:ground-var-list arguments))
-  :run-at [:construction :standard]
+  :run-at [:construction :standard :inference]
   (let [dbval (get-value dynabase)
         arg-vals (map get-value arguments)
         sterm (DynaTerm. name-str dbval file-name arg-vals)]
@@ -1115,7 +1200,7 @@
 
 (def-rewrite
   :match (unify-structure (:ground out) (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:any-list arguments))
-  :run-at [:construction :standard]
+  :run-at [:construction :standard :inference]
   (let [out-val (get-value out)]
     (if (or (not (instance? DynaTerm out-val))
             (not= (.name ^DynaTerm out-val) name-str)
@@ -1135,20 +1220,9 @@
     (make-multiplicity 0) ;; then these two failed to unify together
     (let [res  ;; this needs to unify all of the arguments together
           (make-conjunct [(make-unify dynabase dynabase2)
-                          (make-conjunct (doall (map make-unify arguments arguments2)))])]
+                          (make-conjunct (vec (map make-unify arguments arguments2)))])]
       res)))
 
-
-;; (def-rewrite
-;;   :match (unify-structure-get-meta (:ground struct) (:any dynabase) (:any from-file))
-;;   (let [struct-val (get-value struct)]
-;;     (if-not (instance? DynaTerm struct-val)
-;;       (make-multiplicity 0)
-;;       ;; java null should get cast to $nil as the dyna term that represents that value
-;;       (make-conjunct [(make-unify dynabase (make-constant (or (.dynabase ^DynaTerm struct-val)
-;;                                                               null-term)))
-;;                       (make-unify from-file (make-constant (or (.from_file ^DynaTerm struct-val)
-;;                                                                null-term)))]))))
 
 
 (comment
@@ -1164,7 +1238,7 @@
 (def-rewrite
   :match (conjunct (:rexpr-list children))
   :run-at [:standard :inference]
-  (let [res (make-conjunct (doall (map simplify children)))]
+  (let [res (make-conjunct (vec (map simplify children)))]
     res))
 
 
@@ -1244,7 +1318,7 @@
 (def-rewrite
   :match (disjunct ((fn [x] (some is-empty-rexpr? x)) children))
   :run-at :construction
-  (make-disjunct (doall (filter #(not (is-empty-rexpr? %)) children))))
+  (make-disjunct (vec (filter #(not (is-empty-rexpr? %)) children))))
 
 (def-rewrite
   ;; if there are two (or more) multiplicies in the disjunct, combine the values together
@@ -1272,13 +1346,13 @@
                                                                              (catch UnificationFailure e (make-multiplicity 0))))]
                                 [new-rexpr ctx])))
         intersected-ctx (reduce ctx-intersect (map second new-children))
-        children-with-contexts (doall
+        children-with-contexts (vec
                                  (for [[child-rexpr child-ctx] new-children]
                                    (ctx-exit-context (ctx-subtract child-ctx intersected-ctx)
                                                      child-rexpr)))]
     ;; the intersected context is what can be passed up to the parent, we are going to have to make new contexts for the children
     (ctx-add-context! outer-context intersected-ctx)
-    ;(debug-repl "disjunct standard")
+                                        ;(debug-repl "disjunct standard")
     (make-disjunct children-with-contexts)))
 
 (def-iterator
@@ -1298,13 +1372,15 @@
   ;; proj(A, 1) -> inf
   :match (proj (:free A) (is-multiplicity? M))
   :run-at :construction
+  ;:is-check-rewrite true
   (when (not= (get-argument M 0) 0)
-    (debug-repl "should not happen")
+    (debug-repl "should not happen, proj to inf multiplicity")
     (make-multiplicity ##Inf)))
 
 (def-rewrite
   :match (proj (:free A) (:rexpr R))
   :run-at :construction
+  :is-check-rewrite true
   (do
     (when-not (contains? (exposed-variables R) A)
       (debug-repl "proj var not in body")
@@ -1334,7 +1410,9 @@
         replaced-R)
       (do
         (dyna-debug (when-not (or (is-empty-rexpr? nR) (contains? (exposed-variables nR) A))
+                      (print "failed find projected var")
                       (debug-repl "gg9")))
+        ;(when (<= (count (exposed-variables nR)) 1)  (debug-repl "proj??"))
         (make-proj A nR)))))
 
 (def-rewrite
@@ -1347,7 +1425,7 @@
 (def-rewrite
   ;; lift disjuncts out of projection
   :match (proj (:variable A) (disjunct (:rexpr-list Rs)))
-  (let [res (make-disjunct (doall (map #(make-proj A %) Rs)))]
+  (let [res (make-disjunct (vec (map #(make-proj A %) Rs)))]
     ;;(debug-repl "proj disjunct")
     res))
 
@@ -1356,7 +1434,7 @@
   :match (proj (:variable A) (conjunct (:rexpr-list Rs)))
   :run-at :inference
   (let [not-contain-var (transient [])
-        conj-children (doall (remove nil? (map (fn [r]
+        conj-children (vec (remove nil? (map (fn [r]
                                                  (if (contains? (exposed-variables r) A)
                                                    r
                                                    (do
@@ -1372,20 +1450,61 @@
 (def-iterator
   :match (proj (:variable A) (:rexpr R))
   (let [iters (find-iterators R)]
-    (into #{} (filter #(not (contains? (iter-what-variables-bound %) A)) iters))))
+    ;; if the variable that is projected is contained in the iterator, then we
+    ;; will just project it out of the iterator as well
+    (remove nil? (map (fn [i]
+                        (let [b (iter-what-variables-bound i)]
+                          (if (not (some #{A} b))
+                            i
+                            (if (>= (count b) 2)
+                              (iterators/make-skip-variables-iterator i #{A})))))
+                      iters))))
 
 (def-rewrite
+  :match (proj (:variable A) (:rexpr R))
+  :run-at :inference
+  (let [iters (find-iterators R)]
+    (when (some #(some #{A} (iter-what-variables-bound %)) iters) ;; if there is some iterator that can bind the value of the variable
+      (let [results (transient [])]
+        (iterators/run-iterator
+         :iterators iters
+         :required [A]
+         :rexpr-in R
+         :rexpr-result nR
+         :simplify simplify  ;; this will be the simplify methods that is being used in context
+         (let [Aval (get-value A)
+               zzzz (when (nil? Aval) (debug-repl))
+               rr (make-conjunct [(iterator-encode-state-ignore-vars #{A})
+                                  (context/bind-no-context
+                                   (remap-variables-handle-hidden nR {A (make-constant Aval)}))])]
+           ;; the results are just going to become disjuncts, so we will just store them
+
+           ;; this is going to have to encode the state as an R-expr while removing some of the variables
+           ;; I suppose that this will mean that it
+           ;(debug-repl "in proj iterator")
+           (dyna-assert (not (contains? (exposed-variables rr) A)))
+           (conj! results rr)))
+        ;(debug-repl "proj used iterator")
+        (when (= 0 (count results))
+          (debug-repl "pp"))
+        (make-disjunct (persistent! results))))))
+
+#_(def-rewrite
   :match (proj (:variable A) (:rexpr R))
   :run-at :inference
   (let [iter (find-iterators R)
         iter-self (filter #(contains? (iter-what-variables-bound %) A) iter)]
     (when-not (empty? iter-self)
       (let [proj-vals (transient #{})
-            iter-run (iter-create-iterator (first iter-self) A)] ;; the binding would need to be which variable is getting bound or something...
+            iter-selected (first iter-self)
+            iter-which-binding-order (first (iter-variable-binding-order iter-selected)) ;; this should choose somehow which
+            zzz (assert (.contains iter-which-binding-order A)) ;; this should be a vector
+            iter-run (iter-create-iterator (first iter-self) iter-which-binding-order)] ;; the binding would need to be which variable is getting bound or something...
         (iter-run-cb iter-run #(conj! proj-vals (get % A)))
 
         (let [nR (make-disjunct (doall (for [val (persistent! proj-vals)]
                                          (remap-variables R {A (make-constant val)}))))]
+          ;(debug-repl "ff")
           nR)))))
 
 

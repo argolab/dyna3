@@ -43,9 +43,9 @@ echo " \                                              / /  \                    
 echo "  \                                            / /    \                      "
 echo "   \                                          / /      \                     "
 echo "    \                                        / /        \                    "
-echo "     \                                      / /          \                   "
-echo "      \                                    / /            \                  "
-echo "       \                                  / /              \                 "
+echo "     \     Impelemented by                  / /          \                   "
+echo "      \       Matthew Francis-Landau       / /            \                  "
+echo "       \                  (2020-2022)     / /              \                 "
 echo "        \                                / /                \                "
 echo "         \                              / /                  \               "
 echo "          \                            / /                    \              "
@@ -58,17 +58,12 @@ echo "                \                / /                                \     
 echo "                 \              / /                                  \       "
 echo "                  \            / /                                    \      "
 echo "                   \          / /                                      \     "
-echo "                    \        / /                                        \    "
+echo "                    \        / /    https://github.com/argolab/dyna3    \    "
 echo "                     \      / /                                          \   "
 echo "                      \    / /                                            \  "
 echo "                       \  / /                                              \ "
 echo "                        \/ --------------------------------------------------"
 echo "                                                                             "
-echo "                                 Impelemented By                             "
-echo "                                      Matthew Francis-Landau (2020-2022)     "
-# echo ""
-# echo "                                      https://github.com/matthewfl/dyna-R/   "
-echo ""
 }
 
 dyna_args=""
@@ -116,6 +111,7 @@ while [ $# -gt 0 ]; do
             jvm_args+="-Ddyna.unchecked_math=true "
             ;;
         --fast)
+            # maybe should just set this at the same time as debug
             jvm_arg+="-Ddyna.check_rexprs_args=false "
             ;;
 

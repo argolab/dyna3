@@ -45,12 +45,19 @@
 
   Watcher
   (notify-invalidated! [this from-watcher] (invalidate! this))
-  (notify-message! [this from-watcher message] (???))
+  (notify-message! [this from-watcher message] (send-message! this (assoc message
+                                                                          :from-upstream (conj (:from-upstream message ())
+                                                                                               from-watcher))))
 
   Object
-  (toString [this] (str "[Assumption isvalid=" (is-valid? this) " watchers=" (let [w watchers]
-                                                                               (if-not (nil? w)
-                                                                                 (locking w (str (.keySet w))))) "]")))
+  (toString [this] (str "[Assumption isvalid=" (is-valid? this)
+                        " watchers=" (let [w watchers]
+                                       (if-not (nil? w)
+                                         (locking w (str (.keySet w)))))
+                        " id=" (.hashCode this)
+                        "]"))
+  (hashCode [this] (System/identityHashCode this))
+  (equals [this other] (identical? this other)))
 
 (defn add-watcher-function! [assumption func]
   (add-watch assumption (reify Watcher
@@ -59,7 +66,7 @@
 
 ;; this can be done via atoms or agents and then there can be a watcher which is
 ;; added in the case that the value changes
-(comment
+#_(comment
   (defprotocol Modifable-value
     (set-value! [this value])
     (set-recompute-function! [this func]))
@@ -98,6 +105,11 @@
 (defmethod print-method assumption [^assumption this ^java.io.Writer w]
   (.write w (.toString this)))
 
+(defmethod print-dup assumption [^assumption this ^java.io.Writer w]
+  ;; in the case that this is duplicated, this is going to have to start as
+  ;; invalid, as we are going to have to recheck everything if it was to get reloaded
+  (.write w "(dyna.assumptions/make-invalid-assumption)"))
+
 (defn make-assumption []
   (assumption. (WeakHashMap.)                               ; downstream dependents
                (atom true)                                  ; if this is still valid, this is atomic
@@ -107,11 +119,11 @@
   (assumption. nil (atom false)))
 
 
-(comment
-  (defn make-reactive-value [initial-value]
-    (reactive-value. (atom [(make-assumption)
-                            initial-value])
-                            (fn [] nil))))
+;; (comment
+;;   (defn make-reactive-value [initial-value]
+;;     (reactive-value. (atom [(make-assumption)
+;;                             initial-value])
+;;                             (fn [] nil))))
 
 (defn depend-on-assumption [assumption & {:keys [hard] :or {hard true}}]
   ;; in this case, we are stating that the current computation would need to get
@@ -123,3 +135,20 @@
       ;; there should be some exception to restart the computation or something
       ;; it would allow for the runtime to check which of the expressions
       (throw (RuntimeException. "attempting to use invalid assumption")))))
+
+(defmacro bind-assumption [assumpt & body]
+  `(binding [*current-watcher* ~assumpt]
+     ~@body))
+
+(defmacro compute-with-assumption [& body]
+  `(loop [assumpt# (make-assumption)]
+     (let [[ok# res#]
+           (binding [*current-watcher* assumpt#
+                     *fast-fail-on-invalid-assumption* true]
+             (try
+               [true (do ~@body)]
+               (catch ~InvalidAssumption err#
+                 [false false])))]
+       (if ok#
+         [assumpt# res#]
+         (recur (make-assumption))))))

@@ -70,7 +70,7 @@
    :term-name name})
 
 
-(defn update-user-term [name function]
+(defn update-user-term! [name function]
   (let [[old new](swap-vals! system/user-defined-terms
                              (fn [old]
                                (let [v (get old name nil)]
@@ -117,7 +117,8 @@
           assumpt (get-in old-defs [object-name :def-assumption])
           assumpt-db (get-in old-defs [object-name :dynabases-assumptions])]
       ;; invalidate after the swap so that if something goes to the object, it will find the new value already in place
-      (if assumpt (invalidate! assumpt))
+      (when assumpt
+        (invalidate! assumpt))
       (if (and (not (nil? assumpt-db)) (not (identical? assumpt-db (get-in new-defs [object-name :dynabases-assumptions]))))
         (invalidate! assumpt-db)))))
 
@@ -159,7 +160,7 @@
                        (let [res
                              (make-aggregator op out-var in-var
                                               true ;; the body is conjunctive, meaning that we can move constraints out
-                                              (make-disjunct (doall rexprs)))]
+                                              (make-disjunct (vec rexprs)))]
                          res))
            groupped-aggs (into {} (for [[op children] grouped]
                                     (if (= 1 (count children))
@@ -181,6 +182,7 @@
 (defn user-rexpr-combined-no-memo [term-rep]
   ;; this should check if there is some optimized
   (assert (nil? (:optimized-rexpr term-rep)))
+  (depend-on-assumption (:def-assumption term-rep))
   (combine-user-rexprs-bodies (:rexprs term-rep)))
 
 (defn user-rexpr-combined [term-rep]
@@ -240,7 +242,7 @@
   (fn [& args]
     (assert (= arity (count args)))
     (let [result-var (make-variable 'Result)
-          rexpr (make-user-call term-name (merge (into {} (for [[k v] (zipmap (range) args)]
+          rexpr (make-user-call term-name (merge (into {} (for [[k v] (zipseq (range) args)]
                                                             [(make-variable (str "$" k)) (make-constant v)]))
                                                  {(make-variable (str "$" arity)) result-var}))
           ctx (context/make-empty-context rexpr)

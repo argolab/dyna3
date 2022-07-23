@@ -21,6 +21,7 @@
 
 (defn get-context [] *context*)
 
+(def context-set-value-history {})
 
 (deftype context
     [parent
@@ -39,8 +40,10 @@
       (if (not (nil? parent))
         (ctx-get-value parent variable))))
   (ctx-is-bound? [this variable]
-    (or (not (nil? (get value-map variable)))
-        (and (not (nil? parent)) (ctx-is-bound? parent variable))))
+    (let [v (get value-map variable :not-found-in-map)]
+      (if (= v :not-found-in-map)
+        (and (not (nil? parent)) (ctx-is-bound? parent variable))
+        (not (nil? v)))))
   ;; TODO: there should be a recursive version of the set-value! function which avoids rechecking what the current
   ;; value of the variable is
   (ctx-set-value! [this variable value]
@@ -51,11 +54,12 @@
           (throw (UnificationFailure. "Value does not match")))
         ;; then depending on the kind of context this is, we might have different behavior of
         ;; setting the value of the variable.
-        (if (or (contains? #{:root :disjunct :aggregator :if-expr-coditional} context-kind)
+        (if (or (contains? #{:root :disjunct :aggregator :if-expr-coditional :memo-expr-conditional} context-kind)
                 (and (contains? #{:aggregator-conjunctive :proj} context-kind)
                      (contains? value-map variable)))
           ;; then we set the value locally
-          (set! value-map (assoc value-map variable value))
+          (do (set! value-map (assoc value-map variable value))
+              (def context-set-value-history (assoc context-set-value-history variable [value (Throwable.)])))
           ;; then we are going to pass this up to something else
           (ctx-set-value! parent variable value)))))
   (ctx-add-rexpr! [this rexpr]
@@ -97,12 +101,12 @@
                                                             ;; then we have to save the value of these variables into the R-expr
                                                             (make-conjunct [(make-variable-assignment-conjunct value-map)
                                                                             resulting-rexpr])
-                                                            resulting-rexpr  ;; there is nothing to add to this expression
-                                                            )
+                                                            resulting-rexpr)  ;; there is nothing to add to this expression
+
       (= context-kind :proj) (let [proj-var (:var root-rexpr)]
                                (assert (empty? (dissoc value-map proj-var))) ;; all of the other variable assignments should have already been propagated out
-                               resulting-rexpr ;;
-                               )
+                               resulting-rexpr) ;;
+
       ;; (do (debug-repl)
                              ;;   (let [proj-var (:var root-rexpr)]
                              ;;       (if (contains? value-map proj-var)
@@ -123,18 +127,22 @@
       (= context-kind :memo-expr-conditional) resulting-rexpr  ;; I suppose this will just reset after it runs
       :else (do
               (dyna-debug (debug-repl "context unknown kind"))
-              (???))  ;; todo: other kinds of contexts which are going
-      ))
+              (???))))  ;; todo: other kinds of contexts which are going
+
   (ctx-scan-through-conjuncts [this scan-fn]
-    (let [r (reduce
-             (fn [_ x] (let [r (scan-fn x)] (if-not (nil? r) (reduced r))))
-             rexprs)]
+    (let [r (first (remove nil? (map scan-fn rexprs)))]
       (if (and (nil? r) (not (nil? parent)))
         (ctx-scan-through-conjuncts parent scan-fn)
         r)))
 
   (ctx-contains-rexpr? [this rexpr]
     (or (contains? rexprs rexpr) (and (not (nil? parent) (ctx-contains-rexpr? parent rexpr)))))
+
+  (ctx-get-value-map-upto-context [this parent-context]
+    (if (identical? this parent-context)
+      nil
+      (merge (when parent (ctx-get-value-map-upto-context parent parent-context))
+             value-map)))
 
   Object
   (toString ^String [this]
@@ -172,8 +180,8 @@
                     ;; to read the value out of the parent context instead of
                     ;; creating a local slot for this variable.  This can
                     ;; happenin the case that the incoming
-                {incoming-var nil})
-              )))
+                {incoming-var nil}))))
+
 
 (defn make-nested-context-memo-conditional [rexpr]
   (assert (bound? #'*context*))
@@ -186,7 +194,8 @@
   ;; this should remap any call to get-context to whatever is the new variable
 
   `(let [new-ctx# ~val]
-     (assert (satisfies? RContext new-ctx#))
+     (dyna-assert (and (satisfies? RContext new-ctx#)
+                       (not (nil? new-ctx#))))
      (let [resulting-rexpr# (binding [*context* new-ctx#]
                               ~@args)]
        ;; there should be some exit operation which can check if there is anything which should happen with the grounding
@@ -194,7 +203,8 @@
 
 (defmacro bind-context-raw [val & args]
   `(let [new-ctx# ~val]
-     (assert (satisfies? RContext new-ctx#))
+     (dyna-assert (and (satisfies? RContext new-ctx#)
+                       (not (nil? new-ctx#))))
      (binding [*context* new-ctx#]
        ~@args)))
 

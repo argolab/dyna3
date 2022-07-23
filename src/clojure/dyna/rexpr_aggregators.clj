@@ -5,9 +5,11 @@
   (:require [dyna.rexpr-builtins :refer [make-lessthan make-lessthan-eq
                                          make-add make-times make-min make-max make-lor make-land
                                          make-not-equals]])
+  (:require [dyna.context :as context])
+  (:require [dyna.iterators :refer [run-iterator make-skip-variables-iterator]])
   (:import (dyna UnificationFailure DynaTerm DynaUserError ParserUtils))
   (:import [dyna.rexpr aggregator-rexpr])
-  (:require [dyna.context :as context])
+
   (:require [clojure.set :refer [subset?]]))
 
 (def aggregators (atom {}))
@@ -60,14 +62,21 @@
 (comment (def-aggregator "prob+="
            :combine +))
 
-(def-aggregator "="
-  ;; in the case that there are two different, then that is an error, though not 100% sure where the unification failure is going to pop up in this case???
-  :combine (fn [a b]
-             (if (not= a b)
-               (throw (UnificationFailure. "The equals aggregator (=) requires only one contribution"))
-               a))
-  :identity DynaTerm/null_term
-  :many-items (fn [val mul] (throw (UnificationFailure. "The equals aggregator (=) requires only one contribution"))))
+(let [ident (Object.)]
+  (def-aggregator "="
+    ;; in the case that there are two different, then that is an error, though not 100% sure where the unification failure is going to pop up in this case???
+    :combine (fn [a b]
+               (if (identical? a ident)
+                 b
+                 (if (not= a b)
+                   (throw (UnificationFailure. (str "The equals aggregator (=) requires only one contribution, got " a " and " b)))
+                   a)))
+    :identity ident ;DynaTerm/null_term
+    :many-items (fn [val mul] (throw (UnificationFailure. "The equals aggregator (=) requires only one contribution")))
+    :lower-value (fn [x]
+                   (when (identical? x ident)
+                     (throw (UnificationFailure. "No contributions on aggregator")))
+                   x)))
 
 ;; used if there are multiple aggregators on a single rule which need to get combined together
 ;; this will throw an exception if we attempt to combine multiple expressions together at once
@@ -76,7 +85,9 @@
   (def-aggregator "only_one_contrib"
     :identity ident
     :combine (fn [a b]
-               (throw (DynaUserError. "multiple aggregators on the same rule")))
+               (if (identical? ident a)
+                 b
+                 (throw (DynaUserError. "multiple aggregators on the same rule"))))
     :lower-value (fn [x]
                    (when (identical? ident x)
                      (throw (UnificationFailure. "no contributionso on aggregator")))
@@ -227,7 +238,7 @@
                     ;;(let [eee (exposed-variables R)])
                     (contains? (exposed-variables R) incoming-variable)
                     (is-empty-rexpr? R)) ;; check that the variable is in the body of the expression
-        (debug-repl)
+        (debug-repl "aggregator body does not contain incoming variable")
         (assert false))
       nil)) ;; this is just a check, so we make no rewrites in this case
 
@@ -300,22 +311,30 @@
 (def-rewrite
   :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:unchecked body-is-conjunctive) (:rexpr R))
   :run-at [:standard :inference]
+  :check-exposed-variables true
   (let [aop (get @aggregators operator)
         ctx (context/make-nested-context-aggregator rexpr incoming-variable body-is-conjunctive)]
-    (when (nil? aop)
-      (debug-repl "aggregator operator not found"))
-    ;(debug-repl)
+    (dyna-debug
+     (when (nil? aop)
+       (debug-repl "aggregator operator not found")))
+    (when (and (not (is-constant? incoming-variable)) (not (contains? (exposed-variables R) incoming-variable)))
+      (debug-repl "wtf"))
     (let [nR (context/bind-context ctx (try (simplify R)
-                                            (catch UnificationFailure e (make-multiplicity 0))))]
+                                            (catch UnificationFailure e
+                                              (do
+                                                (debug-repl "agg unification failure")
+                                                (make-multiplicity 0)))))]
       (assert (= true body-is-conjunctive))
       (assert (not (nil? nR)))
-      ;;(debug-repl "agg1")
+      ;(debug-repl "agg1")
       (if (is-bound-in-context? incoming-variable ctx)
         (if (is-multiplicity? nR)
           ;; then we need to multiply in the result
           (case (:mult nR)
             0 (if body-is-conjunctive
-                (make-multiplicity 0)
+                (do
+                  ;(debug-repl "agg 0")
+                  (make-multiplicity 0))
                 (make-unify result-variable (make-constant (:identity aop))))
             1 (let [val (get-value-in-context incoming-variable ctx)]
                 (make-unify result-variable (make-constant ((:lower-value aop identity) val))))
@@ -330,52 +349,75 @@
                              (make-conjunct [(make-no-simp-unify incoming-variable
                                                                  (make-constant incom-val))
                                              nR]))))
-        (let [rel-iterators (filter #(contains? (iter-what-variables-bound %) incoming-variable) (find-iterators nR))]
-          (if (and (every? is-ground? (filter #(not= incoming-variable %) (exposed-variables R)))
-                   (not (empty? rel-iterators))
-                   (not (is-unify? nR)))
-            ;; this code is not really "efficient" yet, it should attempt to be a lot lazier with getting the values from the different sets
-            ;; and check which values can be reasonably determined.
+        (let [can-directly-aggregate (every? #(is-bound-in-context? % ctx) (disj (exposed-variables rexpr) incoming-variable result-variable))
+              ;; TODO: in the future, when can-directly-aggregate is false, we could aggregate into a map rather than just not doing anything
+              iterators (when can-directly-aggregate
+                          (find-iterators nR))]
+          (if (some #(some #{incoming-variable} (iter-what-variables-bound %)) iterators) ;; through we might need for there to be more than just binding the root iterator
             (let [current-value (volatile! (:identity aop))
-                  un-finished-rexprs (transient [])
+                  unfinished-rexprs (transient [])
                   is-empty-aggregation (volatile! true)
-                  ground-values-set (transient #{})]
-              (println "aggregator found iterator to run")
-              (let [iter-run (iter-create-iterator (first rel-iterators) incoming-variable)]
-                (iter-run-cb iter-run (fn [itv]
-                                        (assert (not (contains? ground-values-set itv)))
-                                        (conj! ground-values-set itv))))
+                  is-empty-value (volatile! true)]
+              (run-iterator
+               :iterators iterators
+               :bind-all true
+               :rexpr-in nR
+               :rexpr-result new-rexpr
+               :simplify simplify-fully ;; we want to perform full simplification
+               ;; the expressions as we should already have
+               ;; all of the incoming values bound, so if
+               ;; there is something which is not able to
+               ;; get resolved, then that means that the expression essentially can not get resolved
+               :required [incoming-variable]  ;; we only require that the incoming
+               ;; variable to aggregation is bound,
+               ;; though it should attempt to bind
+               ;; all of the variables
+               (do
+                 (assert (not (is-empty-rexpr? new-rexpr))) ;; I suppose that this should already get checked by the iterator when it is running simplify
+                 (if (is-multiplicity? new-rexpr)
+                   ;; this is a multiplicity, we can just save this into the result directly
+                   (let [ival (get-value incoming-variable)
+                         mult (:mult new-rexpr)]
+                     (vreset! is-empty-aggregation false)
+                     (vreset! is-empty-value false)
+                     (vswap! current-value #((:combine-mult aop) % ival mult)))
+                   ;; then there is something in the result that we have not be able
+                   ;; to reduce all of the way this should not happen (at least in
+                   ;; this code).  through this couldhappen in the case that we are
+                   ;; running an aggregator when there are exposed variables which
+                   ;; are not ground.
+                   (let [nr (make-conjunct [(iterator-encode-state-as-rexpr) new-rexpr])]
+                     ;(dyna-assert (contains? (exposed-variables nr) incoming-variable) )
+                     (vreset! is-empty-aggregation false)
+                     (conj! unfinished-rexprs nr)))))
 
-              (doseq [val (persistent! ground-values-set)]
-                (let [child-r (remap-variables R (into {} (for [[k v] val]
-                                                            [k (make-constant v)])))
-                      dctx (context/make-nested-context-disjunct child-r)
-                      ;zzz (debug-repl "zzz")
-                      new-rexpr (context/bind-context-raw dctx (try (simplify-fully child-r)
-                                                                    (catch UnificationFailure e (make-multiplicity 0))))
-                      ;zzz2 (debug-repl "zzz2")
-                      ]
-                  ;; if not, then that means there is something in the expression that could not be rewritten
-                  ;; this is something that that could happen given the user's program, so this should be some kind of warning
-                  ;; along with returning the R-expr which can not be rewritten further
-                  ;;
-                  ;;  We might also consider returning an error from an
-                  ;;  aggregator in this case?  This is the scenario where there
-                  ;;  does not exist a way to rewrite a user's program into a value
-                  ;(assert (is-multiplicity? new-rexpr)) ;; this needs to get handled for the lessthan case, as it is possible some branch will still get eleminated...., though that should already happen as everything is ground already?  So what could possibly cause this
-                  (if-not (is-multiplicity? new-rexpr)
-                    (do (debug-repl "should have reduced to a multiplicity")
-                        (???)))
-                  (when-not (is-empty-rexpr? new-rexpr)
-                    (vreset! is-empty-aggregation false)
-                    (vswap! current-value #((:combine-mult aop) % (get val incoming-variable) (:mult new-rexpr))))))
-              (println "aggregator done running iterator")
-              (if @is-empty-aggregation
-                (if body-is-conjunctive
-                  (make-multiplicity 0)
-                  (make-unify result-variable (make-constant ((:lower-value aop identity) (:identity aop)))))
-                (make-unify result-variable (make-constant ((:lower-value aop identity) @current-value)))))
-            (make-aggregator operator result-variable incoming-variable body-is-conjunctive nR)))))))
+              (let [ret (if (= 0 (count unfinished-rexprs))
+                          ;; then we have fully processed everything
+                          (if @is-empty-aggregation
+                            (if body-is-conjunctive
+                              (make-multiplicity 0) ;; there was nothing returned from the different branches of aggregation,
+                              (make-unify result-variable (make-constant (:identity aop))))
+                            (make-unify result-variable (make-constant ((:lower-value aop identity) @current-value))))
+                          ;; there is something that is not processed yet, so we are going to
+                          ;; have to construct an aggregator to wrap the remaining expressions
+                          (let [remain-disjunct (make-disjunct (persistent! unfinished-rexprs))
+                                body (if @is-empty-value
+                                       remain-disjunct
+                                       (make-disjunct [(make-no-simp-unify incoming-variable (make-constant @current-value))
+                                                       remain-disjunct]))]
+                            (make-aggregator operator result-variable incoming-variable body-is-conjunctive body)))]
+                ;(debug-repl "done iterating domain")
+                ret))
+            ;; then there are no iterators to bind, we need to return the aggregator wrapped around some expression
+            (do
+              ;(debug-repl "need to return the aggregator as unable to resolve")
+              (make-aggregator operator
+                               (get-representation-in-context result-variable ctx)
+                               (get-representation-in-context incoming-variable ctx)
+                               body-is-conjunctive
+                               nR))))))))
+
+
 
 (def-rewrite
   :match {:rexpr (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (true? _) ;; if the body isn't conjunctive, then there could be some interaction between having different identity elements that needs to be considered
@@ -384,37 +426,7 @@
   :run-at :construction
   (make-aggregator operator2 result-variable incoming-variable2 true R2))
 
-(comment
-  (dyna-debug
-   (def-rewrite
-     :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:unchecked body-is-conjunctive)
-                        (conjunct (:rexpr-list Rs)))
-     :run-at :standard
-     (do
-       (debug-repl "agg conj dist")
-       nil))))
 
-
-;; (comment
-;;   (def-rewrite
-;;     :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (:unchecked body-is-conjunctive) (:rexpr R))
-;;     :run-at :standard
-;;     (let [aop (get @aggregators operator)
-;;           ctx (context/make-nested-context-aggregator rexpr incoming-variable body-is-conjunctive)
-;;           interested-variables (disj (exposed-variables R) incoming-variable) ;; these are the variables that we want to bind
-;;           body-iterators (find-iterators R)]
-;;       (debug-repl "gg")
-;;       (when (not (empty? interested-variables))
-;;         (debug-repl "has interested"))
-;;       (when (and (not (empty? body-iterators)) (not (empty? interested-variables)))
-;;         (let [selected (first body-iterators)]
-;;           (assert (subset? (iter-what-variables-bound selected) (exposed-variables R)))
-;;                                         ;(debug-repl "agg iterator")
-;;           (let [iter (iter-create-iterator selected nil) ;; this should indicate somehow which of teh variable bindings is getting selected
-;;                 iter-res (iter-run-cb iter (fn [var-value-mapping]
-;;                                              (debug-repl "agg iterator inside fn"))
-;;                                       )]
-;;             (debug-repl "iter result")))))))
 
 (comment
  (def-rewrite
@@ -439,9 +451,18 @@
   ;; find some upper bound on the possible values for variables.  If the
   ;; expression is not conjunctive, then in the case that the value is "outside"
   ;; of what the iterator, but this would just return the identity value
-  :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (true? _) (:rexpr R))
+  :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (true? is-conjunctive) (:rexpr R))
   (let [iters (find-iterators R)]
-    (if (is-bound? incoming-variable)
+    (if (is-bound? incoming-variable) ;; I suppose that the iterator could still
+                                      ;; show up in the case that it would be
+                                      ;; bound, but then it would still need to
+                                      ;; get filtered out in all cases??
       iters
       ;; for iterators which contain the incoming variable, this should get filtered out
-      (filter #(not (contains? (iter-what-variables-bound %) incoming-variable)) iters))))
+      (remove nil? (map (fn [i]
+                          (let [b (iter-what-variables-bound i)]
+                            (if (not (some #{incoming-variable} b))
+                              i
+                              (if (>= (count b) 2)
+                                (make-skip-variables-iterator i #{incoming-variable})))))
+                        iters)))))

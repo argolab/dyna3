@@ -13,6 +13,7 @@ package dyna;
 import java.math.BigInteger;
 import clojure.java.api.Clojure;
 import static dyna.ParserUtils.*;
+import clojure.lang.BigInt;
 
 }
 
@@ -64,6 +65,13 @@ EscapedAtom
 
 Comma
     : ','
+    ;
+
+// we can be like a database where there are some values which can be passed by an external method
+// these values can just be opaque in the case that we are uanble to figure out their primitive type, otherwise
+// this could be used in the case that we don't want to escape something
+DollaredExternalValue
+    : '$' [0-9]+
     ;
 
 
@@ -126,7 +134,7 @@ NumberInt16
     ;
 
 NumberFloat
-    : [0-9]* '.' [0-9]+ ('e' [0-9]+)?  // this always requires some number after the '.' otherwise it could be an end of term
+    : [0-9]* '.' [0-9]+ ('e' '-'? [0-9]+)?  // this always requires some number after the '.' otherwise it could be an end of term
     ;
 
 StringConst
@@ -162,18 +170,19 @@ primitive returns[Object v]
     // this should parse as a bigint, and then check if it size is with in the range of a 64 bit int.
     : neg='-'? a=NumberInt {
       BigInteger b = new BigInteger($a.getText());
-      if(b.bitCount() <= 63) {
-          $v = ($neg != null ? -1 : 1) * b.longValue();
-      } else {
-          $v = $neg != null ? b.negate() : b;
+      if($neg != null) b = b.negate();
+      try {
+          $v = b.longValueExact();
+      } catch (ArithmeticException err) {
+          $v = BigInt.fromBigInteger(b);
       }
     }
     | a=NumberInt16 {
       BigInteger b = new BigInteger($a.getText().substring(2), 16);
-      if(b.bitCount() <= 63) {
-          $v = b.longValue();
-      } else {
-          $v = b;
+      try {
+          $v = b.longValueExact();
+      } catch (ArithmeticException err) {
+          $v = BigInt.fromBigInteger(b);
       }
     }
     // question if that should just always use double when inputed, or try and cast down in the case that it can represent
@@ -557,6 +566,7 @@ expressionRoot returns [DynaTerm rterm]
     | '`' '(' e=expression ')' { $rterm = DynaTerm.create("\$escaped", $e.rterm); }
     | '`' v=Variable { $rterm = DynaTerm.create("\$escaped", DynaTerm.create("\$variable", $v.getText())); }
     | '*' { $rterm = DynaTerm.create("\$self_term_uid"); }
+    | dd=DollaredExternalValue { $rterm = DynaTerm.create("\$external_value", Long.parseLong($dd.getText().substring(1))); }
     ;
 
 
@@ -732,8 +742,10 @@ compilerExpressionParams returns [ArrayList<Object> args = new ArrayList<>()]
     | '(' ')'
     | '(' (p=compilerExpressionArgument { $args.add($p.val); } Comma)*
            p=compilerExpressionArgument { $args.add($p.val); } Comma? ')'
+    | pr=primitive {$args.add($pr.v);}
     ;
 
+// should maybe make the list of the compiler intrinsics explicit in the parser, this is fairly general atm
 compilerExpression returns [DynaTerm rterm]
 locals [ArrayList<Object> args]
     : 'import'  {$args = new ArrayList<>();}
@@ -756,43 +768,6 @@ locals [ArrayList<Object> args]
     | a=atom b=atom p=compilerExpressionParams {$rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create($a.t, DynaTerm.create_arr($b.t, $p.args)));}
     | a=atom m=methodId { $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create($a.t, $m.rterm)); }
 ;
-
-// // expressions which change how the parser behaves or how the runtime works for given expression
-// compilerExpression returns [ParseNode trm]
-//     : 'dispos' disposeAnnotation { $trm = $disposeAnnotation.trm; }
-//     | 'dynabase_auto' '(' onOffArgument ')' { $trm = new FeatureEnable("dynabase_auto", $onOffArgument.t); }
-//     | 'allow_dollar_define' '(' onOffArgument ')' { $trm = new FeatureEnable("allow_dollar_define", $onOffArgument.t); }
-//     | 'allow_define' '(' methodId Comma  onOffArgument ')' { $trm = new FeatureEnable("allow_define_"+$methodId.name+"/"+$methodId.n, $onOffArgument.t); }
-//     | 'dispos_auto_quote' '(' onOffArgument ')' { $trm = new FeatureEnable("dispos_auto_quote", $onOffArgument.t); }
-//     | 'allow_ir_expressions' '(' onOffArgument ')' { $trm = new FeatureEnable("allow_ir_expressions", $onOffArgument.t); }
-//     | 'auto_allocate_variables' '(' onOffArgument ')' { $trm = new FeatureEnable("auto_allocate_variables", $onOffArgument.t); }
-//     | 'auto_iterate_variables' '(' onOffArgument ')' { $trm = new FeatureEnable("auto_iterate_variables", $onOffArgument.t); }
-//     | 'import' f=stringConst { $trm = new ImportOtherFile($f.t); }
-//     | 'forward_chained' methodId { $trm = new ForceMethodMode("forward_chained", $methodId.name, $methodId.n); }
-//     | 'force_backwards' methodId { $trm = new ForceMethodMode("force_backwards", $methodId.name, $methodId.n); }
-//     | 'memoized_default_unk' methodId { $trm = new ForceMethodMode("memoized_default_unk", $methodId.name, $methodId.n); }
-//     | 'memoized_default_null' methodId { $trm = new ForceMethodMode("memoized_default_null", $methodId.name, $methodId.n); }
-//     | 'parameter_container' methodId { $trm = new ForceMethodMode("parameter_container", $methodId.name, $methodId.n); }
-//     | 'never_optimize_as_constant' methodId { $trm = new FeatureEnable("never_optimize_constant_load_"+$methodId.name+"/"+$methodId.n, true); }
-//     | 'dump_memotable_at_end' methodId { $trm = new ForceMethodMode("dump_memotable_at_end", $methodId.name, $methodId.n); }
-//     | 'delete_all' methodId { $trm = new ForceMethodMode("delete_term", $methodId.name, $methodId.n); }
-//     ;
-
-// disposeAnnotation returns [ParseNode trm]
-// locals [ArrayList<String> args = new ArrayList<>();]
-//     : self=('*'|'&')? n=methodName ('(' (ar=disposeArgument Comma { $args.add($ar.t); } )* ar=disposeArgument { $args.add($ar.t); } ')' )?
-//       { $trm = new DisposExpression($n.name, $self.getText(), $args); }
-//     ;
-
-// disposeArgument returns [String t]
-//     : '*' { $t = "*"; }
-//     | '&' { $t = "&"; }
-//     ;
-
-// onOffArgument returns [boolean t]
-//     : 'on' { $t = true; }
-//     | 'off' { $t = false; }
-//     ;
 
 methodId returns [DynaTerm rterm]
     : a=atom '/' b=NumberInt { $rterm = DynaTerm.create("/", $a.t, java.lang.Long.valueOf($b.getText())); }

@@ -33,8 +33,8 @@ fst_dynbase(X) = {
         end(X) = Self.end(X).
 
         node_remove_epsilon(A, A) *= 1.
-        node_remove_epsilon(From, To) *= edge(From, T1, epislon, epislon) * node_remove_epsilon(T1, To).
-        edge(From, To, IL, OL) = edge(From, T1, IL, OL) * node_remove_epsilon(T1, To) for (IL != epislon || OL != epislon).
+        node_remove_epsilon(From, To) *= Self.edge(From, T1, epislon, epislon) * $self.node_remove_epsilon(T1, To).
+        edge(From, To, IL, OL) = Self.edge(From, T1, IL, OL) * $self.node_remove_epsilon(T1, To) for (IL != epislon || OL != epislon).
     } for Self=$self.
 
     minimize = fst_dynabase {

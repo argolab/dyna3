@@ -1,5 +1,5 @@
 
+:- load_clojure "/dyna/builtin_libraries/parser_generator".
 
-generate_parser(Grammar) = $builtin_library("dyna.builtin-libraries.parser-generator/generate-parser", Grammar).
-
-run_parser(Grammar, InputString) = $builtin_library("dyna.builtin-libraries.parser-generator/run-parser", Grammar, InputString).
+:- export parse/2.
+parse(Grammar, String) = '$$__instaparse_run_parser'('$$__instaparse_construct_parser'(Grammar), String).

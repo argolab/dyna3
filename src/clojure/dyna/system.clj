@@ -25,6 +25,8 @@
 (def ^:dynamic *auto-run-agenda-before-query*
   (= "true" (System/getProperty "dyna.auto_run_agenda" "true")))
 
+(def ^:dynamic *use-optimized-rexprs* true)
+
 ;; terms which are included by the system.  These will get automattically
 ;; replaced once the objects are created in the first place these should not be
 ;; recursive statements or anything
@@ -59,7 +61,11 @@
 ;; if a query is made, where it should get printed to
 (def ^:dynamic query-output println)
 
-(def ^:dynamic debug-on-assert-fail true)
+;; in the parser expressions like `$0$`, `$1`, .... can be replaced with an R-expr.  This is done via this handler
+;; this is used in the case of using the system like a database
+(def ^:dynamic parser-external-value (fn [index]
+                                       (throw (RuntimeException. "External value handler not set"))))
+
 
 ;; metadata associated with all of the different types of dynabases
 (def ^:dynamic dynabase-metadata (atom {}))
@@ -74,8 +80,8 @@
    :work-agenda (DynaAgenda.)
    :user-recursion-limit (atom default-recursion-limit)
    :query-output println
-   :system-is-inited (atom false)
-   })
+   :system-is-inited (atom false)})
+
 
 
 (defmacro run-under-system [system & args]

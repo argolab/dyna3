@@ -20,8 +20,6 @@ list(A) :- list_rec(A).
 :- export list/2.
 :- dispose list(quote1, eval).  % this is going to quote the type argument, but if we make quoting something that is already hapening, then could this have some issue?
 
-% % allows for type annotation against something.  This
-
 list_rec(Type, []).
 list_rec(Type, [X|A]) :- Type(X), list_rec(Type, A).
 list(Type, L) :- list_rec(Type, L).
@@ -61,3 +59,6 @@ $null = &$null.
 is_defined(X) = `((|= false ; true for _ is `X)).
 
 :- make_system_term is_defined/1.
+
+:- macro $term/0.
+$term = `(&$term(`(&$variable("$functor_name")), `(&$variable("$functor_arity")))).

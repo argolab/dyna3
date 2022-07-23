@@ -5,6 +5,7 @@
   :dependencies [[org.clojure/clojure "1.11.1" ;"1.12.0-mfl-SNAPSHOT"
                   ]
                  [org.clojure/tools.namespace "1.2.0"]
+                 ;[org.clojure/tools.macro "0.1.5"]
                  [aprint "0.1.3"]  ;; for formatted printing
                  ;[clj-python/libpython-clj "2.00-beta-22"]
                  [com.clojure-goes-fast/clj-java-decompiler "0.3.0"] ;; for debugging what the generated code looks like
@@ -12,8 +13,13 @@
                  [org.jline/jline "3.20.0"]  ;; for the front end repl
                  [robert/hooke "1.3.0"]
                  ;[jise "0.1.0-SNAPSHOT"] ;; can get more control over the generated java classes
-                 ;[datalevin "0.6.6"]
+                                        ;[datalevin "0.6.6"]
+                                        ;[io.replikativ/datahike "0.5.1504"]
+
                  [org.clojure/tools.analyzer.jvm "0.7.3"]
+                 [instaparse "1.4.12"]
+
+                 ;[reply "0.5.1"]
                  ]
   :repl-options {:init-ns dyna.core}
   ;; :aot [dyna.interface
@@ -47,5 +53,6 @@
                                         ;*unchecked-math* :warn-on-boxed ;; boxed math is slow9
                 }
 
-   :repositories [["matthewfl.com" "https://matthewfl.com/maven-repo"]]
+  ;; this will check the repo every time it runs...
+  ;:repositories [["matthewfl.com" "https://matthewfl.com/maven-repo"]]
   )

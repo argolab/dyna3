@@ -1,7 +1,14 @@
 (ns dyna.utils
   (:require [aprint.core :refer [aprint]])
-  (:require [dyna.system :refer [debug-on-assert-fail debug-statements]])
+  (:require [clojure.main :refer [demunge]])
+  (:require [clojure.reflect :refer [reflect]])
+  (:require [clojure.set :refer [union]])
   (:import [dyna DynaTerm]))
+
+(def ^:dynamic debug-on-assert-fail true)
+
+(def debug-statements
+  (= "true" (System/getProperty "dyna.debug" "true")))
 
 ;; make functions like car caar cdr etc
 
@@ -35,6 +42,7 @@
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; impements debug-repl which is based off the following gist
 ;; https://gist.github.com/ato/252421
 
 (declare ^:dynamic *locals*)
@@ -65,7 +73,8 @@
 
 ;; the system.out might be getting messed with.  The system/in is not getting echoed back
 
-(def debug-useful-variables (atom {'aprint (fn [] aprint)}))
+(def debug-useful-variables (atom {'aprint (constantly aprint)
+                                   'reflect (constantly reflect)}))
 
 (defn- debug-repl-fn [prompt local-bindings ^Throwable traceback]
   (let [all-bindings  (merge (into {} (for [[k v] @debug-useful-variables]
@@ -76,7 +85,8 @@
                                         [k (var-get v)]))
                              local-bindings)]
     (.printStackTrace traceback System/out)
-    (aprint local-bindings)
+    (try (aprint local-bindings)
+         (catch Exception err nil))
     (clojure.main/repl
      :read (fn [fresh-request exit-request]
              (let [res (clojure.main/repl-read fresh-request exit-request)]
@@ -89,7 +99,7 @@
                      (contains? #{'locals} res) (do (aprint local-bindings)
                                                     fresh-request)
                      (contains? #{'locals-names 'local-names} res) (do (print (keys local-bindings) "\n")
-                                                          fresh-request)
+                                                                       fresh-request)
                      ;; TODO: this should attempt to lookup names in some context
                      :else res)))
      :prompt #(print prompt "=> ")
@@ -101,37 +111,13 @@
   ([] `(debug-repl "dr"))
   ([prompt] `(~debug-repl-fn ~prompt (debugger-get-local-bindings) (Throwable. "Entering Debugger"))))
 
-;; (defmacro debug-repl
-;;   "Starts a REPL with the local bindings available."
-;;   ([] `(debug-repl "dr"))
-;;   ([prompt]
-;;    `(let [local-bindings# (debugger-get-local-bindings)
-;;           all-bindings#  (merge (into {} (for [[k# v#] @~'dyna.utils/debug-useful-variables]
-;;                                            [k# (v#)]))
-;;                                 (into {} (for [[k# v#] (ns-publics 'dyna.rexpr-constructors)]
-;;                                            [k# (var-get v#)]))
-;;                                 (into {} (for [[k# v#] (ns-publics 'dyna.base-protocols)]
-;;                                            [k# (var-get v#)]))
-;;                                  local-bindings#)]
-;;       (.printStackTrace (Throwable. "Entering Debugger") System/out)
-;;       (aprint local-bindings#)
-;;       (clojure.main/repl
-;;        :read (fn [fresh-request# exit-request#]
-;;                (let [res# (clojure.main/repl-read fresh-request# exit-request#)]
-;;                  ;(println "===========\n" res# "\n" (type res#) "\n==========")
-;;                  (cond (contains? ~'#{'quit 'exit} res#) (do (System/exit 0)
-;;                                                              fresh-request#)
-;;                        (contains? ~'#{'c 'continue} res#) exit-request#  ;; exit the eval loop
-;;                        (contains? ~'#{'bt 'backtrace} res#) (do (.printStackTrace (Throwable. "Entering Debugger") System/out)
-;;                                                                 fresh-request#)
-;;                        (contains? ~'#{'locals} res#) (do (aprint local-bindings#)
-;;                                                          fresh-request#)
-;;                        (contains? ~'#{'locals-names} res#) (do (print (keys local-bindings#) "\n")
-;;                                                                fresh-request#)
-;;                        ;; TODO: this should attempt to lookup names in some context
-;;                        :else res#)))
-;;        :prompt #(print ~prompt "=> ")
-;;        :eval (partial ~eval-with-locals all-bindings#)))))
+(defmacro debug-delay-ntimes [ntimes & body]
+  (let [sym (gensym 'debug-delay)
+        isym (intern *ns* sym 0)]
+    `(do
+       (alter-var-root ~isym inc)
+       (when (>= @~isym ~ntimes)
+         ~@body))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -189,12 +175,20 @@
 (defmacro deftype-with-overrides
   [name args overrides & bodies]
   (let [override-map (into {} (for [o  overrides]
-                                [(car o) o]))]
-    `(deftype ~name ~args
-       ~@(for [b bodies]
-           (if (and (seqable? b) (contains? override-map (car b)))
-             (get override-map (car b))
-             b)))))
+                                ;; using (name) as otherwise we might get a name which is already resolved in the namespace
+                                [(symbol (clojure.core/name (car o))) o]))
+        override-used (transient #{})
+        ret (doall `(deftype ~name ~args
+                      ~@(for [b bodies]
+                          (if (and (seqable? b) (contains? override-map (car b)))
+                            (do
+                              (conj! override-used (car b))
+                              (get override-map (car b)))
+                            b))))]
+    (let [override-used (persistent! override-used)]
+      (when (not= (into #{} (keys override-map)) override-used)
+        (debug-repl "failed override")))
+    ret))
 
 
 ;; (defmacro deftype-with-overrides
@@ -310,9 +304,113 @@
                    ~@(second m))))
          ~name)))
 
+(defn- get-superclass-methods [^Class cls]
+  (let [r (reflect cls)
+        pm (into #{} (filter #(and (instance? clojure.reflect.Method %)
+                                   (:public (:flags %))) (:members r)))]
+    (apply union pm (map #(get-superclass-methods (resolve %)) (:bases r)))))
+
+(defmacro import-interface-methods [interface-name]
+  (let [^Class cls (if (instance? Class interface-name) interface-name (resolve interface-name))
+        class-name (.getName cls)
+        refl (reflect cls)
+        methods (filter #(and (instance? clojure.reflect.Method %)
+                              (:public (:flags %)))
+                        (:members refl))
+        super-members (into #{} (map (fn [x] [(name (:name x)) (count (:parameter-types x))]) (apply union (map #(get-superclass-methods (resolve %)) (:bases refl)))))
+        this-var (gensym)
+        methods-to-create (into #{} (for [mth (.getDeclaredMethods cls)
+                                          :when (not (contains? super-members [(.getName mth) (.getParameterCount mth)]))]
+                                      [(.getName mth) (.getParameterCount mth)]))]
+    `(let []  ;; we can do this as a single compile unit
+       ;(defonce ~interface-name {})
+       ~@(for [[name arity] methods-to-create
+               :let [param-list (vec (repeatedly arity gensym))]]
+             ;; the method name will have to become unmunged.  additionally, this is going to find that there are
+           (when-not (resolve (symbol (demunge name)))
+              ;; because of the different arit of functions, this might not work if it has the same signature with different values
+              ;; maybe we should collect this into a name/arity collection
+             `(defn ~(symbol (demunge name))
+                {:inline (fn [~this-var & args#]
+                           (concat (list '. (with-meta ~this-var ~{:tag class-name})
+                                         (quote ~(symbol name)))
+                                   args#))
+                 :inline-arities #{~(+ arity 1)}}
+                ~(into [(with-meta this-var {:tag class-name})] param-list)
+                (. ~(with-meta this-var {:tag class-name})
+                   ~(symbol name)
+                   ~@param-list))))
+       #_(alter-var-root (var ~interface-name) merge {:on (quote ~interface-name)
+                                                    :on-interface ~interface-name})
+       ~interface-name)))
+
+
+;; create macros which are local.  this is modeled after
+;; clojure.tools.macro/macrolet but this version is simpler and does not do
+;; recursive expansion of the macros.
+(defn- macrolet-expand [mm form]
+  (cond (and (seq? form) (contains? mm (first form))) (apply (mm (first form)) (rest form))
+        (symbol? form) form
+        (seq? form) (reverse (into () (map #(macrolet-expand mm %) form)))
+        (vector? form) (into [] (map #(macrolet-expand mm %) form))
+        (map? form) (into {} (map #(macrolet-expand mm %) form))
+        (set? form) (into #{} (map #(macrolet-expand mm %) form))
+        :else form))
+
+#_(defmacro macrolet [bnds & body]
+  (assert (even? (count bnds)))
+  (print bnds)
+  (let [m (into {} (for [[name f] (apply hash-map bnds)]
+                     [name (eval (cons 'fn f))]))]
+    `(do ~@(map #(macrolet-expand m %) body))))
+
+
+(defmacro function-let [bnds & body]
+  (assert (even? (count bnds)))
+  (let [m (into {} (for [[n f] (apply hash-map bnds)]
+                     [(symbol (name n)) (fn [& args]
+                                          (let [r (for [a f]
+                                                    (if (symbol? a)
+                                                      (let [n (name a)
+                                                            mat (re-matches #"%([0-9]+)" n)]
+                                                        (if (= n "%")
+                                                          (nth args 0)
+                                                          (if mat (nth args (Integer/valueOf (second mat)))
+                                                              a)))
+                                                      a))]
+                                            r))]))]
+    (macrolet-expand m `(do ~@body))))
+
 ;; this would have to make some interface for the methods or this could just
 ;; define methods which cast the type to the class, and then invoke
 
 (comment
   (defmacro deflcass [name & methods+parent]
     nil))
+
+
+(defn ensure-simple-symbol [s]
+  (symbol (name s)))
+
+(defn ensure-set [s]
+  (if (set? s)
+    s
+    (into #{} s)))
+
+
+(defn zipseq [& seqs]
+  (if (or (empty? seqs) (some empty? seqs))
+    ()
+    (cons (map first seqs)
+          (lazy-seq (apply zipseq (map next seqs))))))
+
+(defn zipseq-longest [& seqs]
+  (if (or (empty? seqs) (every? empty? seqs))
+    ()
+    (cons (map first seqs)
+          (lazy-seq (apply zipseq-longest (map next seqs))))))
+
+(defn indexof [col pred]
+  (for [[idx val] (zipseq (range) col)]
+    (when (pred val)
+      idx)))

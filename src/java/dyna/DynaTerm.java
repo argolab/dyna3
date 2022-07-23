@@ -38,6 +38,14 @@ public final class DynaTerm implements ILookup {
         this.arguments = arguments;
     }
 
+    private DynaTerm() {
+        // make the nil term.  Note the nil term references itself as the dynabase as it is not associated with a dynabase
+        this.name = "$nil";
+        this.dynabase = this;
+        this.from_file = null;
+        this.arguments = new Object[]{};
+    }
+
     public static boolean include_filename_in_print = false;
 
     public String toString() {
@@ -89,6 +97,8 @@ public final class DynaTerm implements ILookup {
                 // .get does not work with a list
                 h = h * 31 + ((java.lang.Number)clojure_hash.invoke(clojure_nth.invoke(arguments, i))).intValue();
             }
+            // if(dynabase != null_term)
+            //     h ^= dynabase.hashCode();
             hashcode_cache = hash_scramble(h);
         }
         return hashcode_cache;
@@ -107,6 +117,10 @@ public final class DynaTerm implements ILookup {
                                  clojure_nth.invoke(t.arguments, i)) != Boolean.TRUE)
                 return false;
         }
+        // should the dynabase be included in the check for equality.  I suppose
+        //that these objects will not unify with eachother.  But the different from_file will still unify together
+
+        //if(this.dynabase != t.dynabase && !this.dynabase.equals(t.dynabase))  return false;
         return true;
     }
 
@@ -157,7 +171,7 @@ public final class DynaTerm implements ILookup {
         clojure_concat = Clojure.var("clojure.core", "concat");
         clojure_list = Clojure.var("clojure.core", "list");
 
-        null_term = new DynaTerm("$nil", new Object[]{});
+        null_term = new DynaTerm();//"$nil", new Object[]{});
     }
 
     public static DynaTerm create(String name, Object... args) {
@@ -187,7 +201,7 @@ public final class DynaTerm implements ILookup {
         // this has to construct a clojure vector from a dyna linked list object
         int count = 0;
         DynaTerm s = this;
-        while(s.name.equals(".")) {
+        while(".".equals(s.name)) {
             count++;
             Object v = s.get(1);
             if(v == null || !(v instanceof DynaTerm)) return null; // the structure is not what we expect

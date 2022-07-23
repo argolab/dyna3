@@ -17,7 +17,7 @@ clean:
 	rm -rf target/ $(TARGET)
 
 test:
-	_JAVA_OPTIONS='-Ddyna.debug=false -Ddyna.trace_rexpr_construction=false' $(LEIN) test
+	_JAVA_OPTIONS='-Ddyna.debug=false -Ddyna.trace_rexpr_construction=false -Xss8m' $(LEIN) test
 
 test-debug:
 	$(LEIN) test
@@ -47,6 +47,9 @@ $(PARSER_TARGET): src/antlr/dyna/dyna_grammar2.g4
 $(TARGET): $(JAR_TARGET) standalone-header.sh
 	cat standalone-header.sh $(JAR_TARGET) > $(TARGET)
 	chmod +x $(TARGET)
+
+test_python: $(JAR_TARGET)
+	cd python_module && python test_wrapper.py
 
 
 # example to run a single test
