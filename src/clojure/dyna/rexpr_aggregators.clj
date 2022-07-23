@@ -415,8 +415,8 @@
                                (get-representation-in-context result-variable ctx)
                                (get-representation-in-context incoming-variable ctx)
                                body-is-conjunctive
-                               nR)
-              )))))))
+                               nR))))))))
+
 
 
 (def-rewrite

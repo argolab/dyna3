@@ -179,7 +179,11 @@
           (let [djv (nth var-binding i)
                 dv (nth dj-vars i)]
             (when (and (not (nil? djv)) (is-variable? dv))
-              (ctx-set-value! child-context dv djv))))
+              ;(dyna-assert (not (is-bound-in-context? dv child-context)))
+              (try (ctx-set-value! child-context dv djv)
+                   (catch UnificationFailure e
+                     (do (debug-repl "bad") ;; in this case, we should stop processing, but this is not going to have set the value somewhere yet.  This is going to need to figure out what the issue is and skip it
+                       (???)))))))
         (context/bind-context-raw child-context
                                   (let [new-child-rexpr (try (simplify child)
                                                              (catch UnificationFailure e (make-multiplicity 0)))]
@@ -195,10 +199,13 @@
                                          :rexpr-in new-child-rexpr
                                          :rexpr-result child-rexpr-itered
                                          :simplify simplify
-                                         (save-result-in-trie (try (simplify child-rexpr-itered)
-                                                                   (catch UnificationFailure e (make-multiplicity 0)))
-                                                              (context/get-context) ;; we have to use get-context here as the iterator might have rebound the context
-                                                              )))
+                                         (let [] #_[nnr (try (simplify child-rexpr-itered)
+                                                            (catch UnificationFailure e (make-multiplicity 0)))]
+                                           #_(when (not= nnr child-rexpr-itered)
+                                             (debug-repl "nnr"))
+                                           (save-result-in-trie child-rexpr-itered
+                                                                (context/get-context) ;; we have to use get-context here as the iterator might have rebound the context
+                                                                ))))
                                       (save-result-in-trie new-child-rexpr child-context))))))
     ;; set the values of variables which are the same across all branches
     (doseq [i (range (count dj-vars))]
@@ -213,7 +220,7 @@
           child)
         ;; then there are multiple children, so we have to return the entire trie
         (let [ret (make-disjunct-op dj-vars @ret-children)]
-                                        ;(debug-repl "qqq")
+          ;(debug-delay-ntimes 450 (debug-repl "disjunct res"))
           ret)))))
 
 

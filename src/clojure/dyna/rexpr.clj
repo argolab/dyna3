@@ -1425,7 +1425,7 @@
 (def-rewrite
   ;; lift disjuncts out of projection
   :match (proj (:variable A) (disjunct (:rexpr-list Rs)))
-  (let [res (make-disjunct (doall (map #(make-proj A %) Rs)))]
+  (let [res (make-disjunct (vec (map #(make-proj A %) Rs)))]
     ;;(debug-repl "proj disjunct")
     res))
 
