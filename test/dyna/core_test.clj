@@ -42,14 +42,15 @@
 
 
 (deftest basic-disjunct
-  (let [rexpr (make-disjunct
-               [(make-unify (make-variable 'foo) (make-constant 123))
-                (make-unify (make-variable 'foo) (make-constant 123))])
-        ctx (context/make-empty-context rexpr)
-        r2 (context/bind-context-raw ctx (simplify-fully rexpr))
-        r3 (make-multiplicity 2)]
-    (is (= r2 r3))
-    (is (= (ctx-get-value ctx (make-variable 'foo)) 123))))
+  (binding [system/*use-optimized-rexprs* false]
+    (let [rexpr (make-disjunct
+                 [(make-unify (make-variable 'foo) (make-constant 123))
+                  (make-unify (make-variable 'foo) (make-constant 123))])
+          ctx (context/make-empty-context rexpr)
+          r2 (context/bind-context-raw ctx (simplify-fully rexpr))
+          r3 (make-multiplicity 2)]
+      (is (= r2 r3))
+      (is (= (ctx-get-value ctx (make-variable 'foo)) 123)))))
 
 (deftest basic-disjunct2
   ;; these can not be combined because the values of the variables are different
@@ -87,17 +88,18 @@
     (is (= (ctx-get-value ctx (make-variable 'out)) 666))))
 
 (deftest basic-aggregator3
-  (let [rexpr (make-aggregator "+="
-                               (make-variable 'out)
-                               (make-variable 'agg-in)
-                               true
-                               (make-disjunct
-                                [(make-unify (make-variable 'agg-in) (make-constant 111))
-                                 (make-unify (make-variable 'agg-in) (make-constant 666))]))
-        ctx (context/make-empty-context rexpr)
-        r2 (context/bind-context-raw ctx (simplify-fully rexpr))]
-    (is (= (make-multiplicity 1) r2))
-    (is (= (ctx-get-value ctx (make-variable 'out)) 777))))
+  (binding [system/*use-optimized-rexprs* false]
+    (let [rexpr (make-aggregator "+="
+                                 (make-variable 'out)
+                                 (make-variable 'agg-in)
+                                 true
+                                 (make-disjunct
+                                  [(make-unify (make-variable 'agg-in) (make-constant 111))
+                                   (make-unify (make-variable 'agg-in) (make-constant 666))]))
+          ctx (context/make-empty-context rexpr)
+          r2 (context/bind-context-raw ctx (simplify-fully rexpr))]
+      (is (= (make-multiplicity 1) r2))
+      (is (= (ctx-get-value ctx (make-variable 'out)) 777)))))
 
 
 (deftest make-match-term

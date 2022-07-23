@@ -43,4 +43,4 @@
 (def-user-term "$$__instaparse_construct_parser" 1 (make-instaparse-construct-parser v0 v1))
 (def-user-term "$$__instaparse_run_parser" 2 (make-instaparse-run-parser v0 v1 v2))
 
-(println "loaded parser generator clojure file")
+;(println "loaded parser generator clojure file")

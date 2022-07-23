@@ -160,7 +160,7 @@
                        (let [res
                              (make-aggregator op out-var in-var
                                               true ;; the body is conjunctive, meaning that we can move constraints out
-                                              (make-disjunct (doall rexprs)))]
+                                              (make-disjunct (vec rexprs)))]
                          res))
            groupped-aggs (into {} (for [[op children] grouped]
                                     (if (= 1 (count children))

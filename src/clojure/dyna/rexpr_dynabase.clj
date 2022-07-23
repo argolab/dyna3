@@ -106,7 +106,7 @@
           (if (= 1 (count arr))
             ;; then we can just make a unification of all of the values directly
             ;; this will likely set the values into the context info
-            (make-conjunct (doall (map (fn [var val]
+            (make-conjunct (vec (map (fn [var val]
                                          (make-unify var (make-constant val)))
                                        args (first arr))))
             ;; this needs to have some disjunct over all of the different values that this can take on.  In this case, this would

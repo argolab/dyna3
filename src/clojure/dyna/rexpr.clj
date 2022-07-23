@@ -198,7 +198,7 @@
                                             :var-set-map `(into #{} (for [~'s ~(cdar v)]
                                                                       (into {} (for [~'[kk vv] ~'s] [~'kk (get ~'variable-map ~'vv ~'vv)]))))
                                             :rexpr `(remap-variables ~(cdar v) ~'variable-map)
-                                            :rexpr-list `(map #(remap-variables % ~'variable-map) ~(cdar v))
+                                            :rexpr-list `(vec (map #(remap-variables % ~'variable-map) ~(cdar v)))
                                             (cdar v) ;; the default is that this is the same
                                             )])))
                 (if (and ~@(for [v vargroup]
@@ -208,13 +208,15 @@
                   (~(symbol (str "make-" name)) ~@(for [v vargroup]
                                                     (symbol (str "new-" (cdar v)))))))))))
          (~'rewrite-rexpr-children ~'[this remap-function]
+          ~(when (some #{:prefix-trie} (map car vargroup))
+             `(throw (RuntimeException. "using rewrite-rexpr-children on a R-expr with :prefix-trie type")))
           (let ~(vec (apply concat
                             (for [v vargroup]
                               (when (contains? #{:rexpr :rexpr-list} (car v))
                                 [(symbol (str "new-" (cdar v)))
                                  (case (car v)
                                    :rexpr `(~'remap-function ~(cdar v))
-                                   :rexpr-list `(map ~'remap-function ~(cdar v)))]
+                                   :rexpr-list `(vec (map ~'remap-function ~(cdar v))))]
                                 ))))
             (if (and ~@(for [v vargroup]
                          (when (contains? #{:rexpr :rexpr-list} (car v))
@@ -235,7 +237,7 @@
                                 [(symbol (str "new-" (cdar v)))
                                  (case (car v)
                                    :rexpr `(~'remap-function ~(cdar v))
-                                   :rexpr-list `(map ~'remap-function ~(cdar v)))]
+                                   :rexpr-list `(vec (map ~'remap-function ~(cdar v))))]
                                 ))))
             (if (and ~@(for [v vargroup]
                          (when (contains? #{:rexpr :rexpr-list} (car v))
@@ -269,7 +271,7 @@
                                           :var-set-map `(into #{} (for [~'s ~(cdar v)]
                                                                     (into {} (for [~'[kk vv] ~'s] [~'kk (get ~'variable-map ~'vv ~'vv)]))))
                                           :rexpr `(remap-variables-handle-hidden ~(cdar v) ~'variable-map)
-                                          :rexpr-list `(map #(remap-variables-handle-hidden % ~'variable-map) ~(cdar v))
+                                          :rexpr-list `(vec (map #(remap-variables-handle-hidden % ~'variable-map) ~(cdar v)))
                                           (cdar v) ;; the default is that this is the same
                                           )])))
               (let [result# (~(symbol (str "make-" name)) ~@(for [v vargroup]
@@ -508,7 +510,7 @@
 ;; these are checks which are something that we might want to allow ourselves to turn off
 (defn check-argument-mult [x] (or (and (int? x) (>= x 0)) (= ##Inf x)))
 (defn check-argument-rexpr [x] (rexpr? x))
-(defn check-argument-rexpr-list [x] (and (seqable? x) (every? rexpr? x)))
+(defn check-argument-rexpr-list [x] (and (seqable? x) (every? rexpr? x) (not (instance? clojure.lang.LazySeq x))))
 (defn check-argument-var [x] (or (is-variable? x) (is-constant? x))) ;; a variable or constant of a single value.  Might want to remove is-constant? from this
 (defn check-argument-var-list [x] (and (seqable? x) (every? check-argument-var x)))
 (defn check-argument-var-map [x] (and (map? x) (every? (fn [[a b]] (and (check-argument-var a)
@@ -1132,7 +1134,7 @@
 (def-rewrite
   ;; the matched variable should have what value is the result of the matched expression.
   :match (unify (:ground A) (:ground B))
-  :run-at [:standard :construction]
+  :run-at [:standard :construction :inference]
   (if (= (get-value A) (get-value B))
     (make-multiplicity 1)
     (make-multiplicity 0)))
@@ -1157,7 +1159,7 @@
 ; this should run at both, so there should be a :run-at :both option that can be selected
 (def-rewrite
   :match (unify (:free A) (:ground B))
-  :run-at [:standard :construction] ; this will want to run at construction and when it encounters the value so that we can use it as early as possible
+  :run-at [:standard :construction :inference] ; this will want to run at construction and when it encounters the value so that we can use it as early as possible
   (when (context/has-context)
     ;;(debug-repl)
     (assert (not (is-ground? A))) ;; otherwise the setting the value into the context should fail
@@ -1187,7 +1189,7 @@
 
 (def-rewrite
   :match (unify-structure (:free out) (:unchecked file-name) (:ground dynabase) (:unchecked name-str) (:ground-var-list arguments))
-  :run-at [:construction :standard]
+  :run-at [:construction :standard :inference]
   (let [dbval (get-value dynabase)
         arg-vals (map get-value arguments)
         sterm (DynaTerm. name-str dbval file-name arg-vals)]
@@ -1198,7 +1200,7 @@
 
 (def-rewrite
   :match (unify-structure (:ground out) (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:any-list arguments))
-  :run-at [:construction :standard]
+  :run-at [:construction :standard :inference]
   (let [out-val (get-value out)]
     (if (or (not (instance? DynaTerm out-val))
             (not= (.name ^DynaTerm out-val) name-str)
@@ -1218,7 +1220,7 @@
     (make-multiplicity 0) ;; then these two failed to unify together
     (let [res  ;; this needs to unify all of the arguments together
           (make-conjunct [(make-unify dynabase dynabase2)
-                          (make-conjunct (doall (map make-unify arguments arguments2)))])]
+                          (make-conjunct (vec (map make-unify arguments arguments2)))])]
       res)))
 
 
@@ -1236,7 +1238,7 @@
 (def-rewrite
   :match (conjunct (:rexpr-list children))
   :run-at [:standard :inference]
-  (let [res (make-conjunct (doall (map simplify children)))]
+  (let [res (make-conjunct (vec (map simplify children)))]
     res))
 
 
@@ -1316,7 +1318,7 @@
 (def-rewrite
   :match (disjunct ((fn [x] (some is-empty-rexpr? x)) children))
   :run-at :construction
-  (make-disjunct (doall (filter #(not (is-empty-rexpr? %)) children))))
+  (make-disjunct (vec (filter #(not (is-empty-rexpr? %)) children))))
 
 (def-rewrite
   ;; if there are two (or more) multiplicies in the disjunct, combine the values together
@@ -1344,7 +1346,7 @@
                                                                              (catch UnificationFailure e (make-multiplicity 0))))]
                                 [new-rexpr ctx])))
         intersected-ctx (reduce ctx-intersect (map second new-children))
-        children-with-contexts (doall
+        children-with-contexts (vec
                                  (for [[child-rexpr child-ctx] new-children]
                                    (ctx-exit-context (ctx-subtract child-ctx intersected-ctx)
                                                      child-rexpr)))]
@@ -1432,7 +1434,7 @@
   :match (proj (:variable A) (conjunct (:rexpr-list Rs)))
   :run-at :inference
   (let [not-contain-var (transient [])
-        conj-children (doall (remove nil? (map (fn [r]
+        conj-children (vec (remove nil? (map (fn [r]
                                                  (if (contains? (exposed-variables r) A)
                                                    r
                                                    (do

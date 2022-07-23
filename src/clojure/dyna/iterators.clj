@@ -527,7 +527,7 @@
                      ]
                  (if (nil? picked-iterator#)
                    (callback-fn# ~rexpr) ;; there is nothing to iterate, so just run the callback function
-                   (do (assert (subset? picked-binding-order# (ensure-set (iter-what-variables-bound picked-iterator#))))
+                   (do ;(dyna-assert (subset? picked-binding-order# (ensure-set (iter-what-variables-bound picked-iterator#))))
                        (~run-iterator-fn
                         picked-iterator#
                         picked-binding-order#

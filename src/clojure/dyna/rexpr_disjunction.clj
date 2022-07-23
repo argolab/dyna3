@@ -47,7 +47,12 @@
                              ;iter (trie-get-values-collection rexprs vmap)
                              ]
                          (first (remove nil? (for [[key r] (trie-get-values-collection-no-wildcard rexprs vmap)]
-                                               (when (some is-non-empty-rexpr? r) true)))))))
+                                               (when (some is-non-empty-rexpr? r) true))))))
+  (rewrite-rexpr-children [this remap-function]
+                          (make-disjunct-op disjunction-variables
+                                            (trie-map-values rexprs nil (fn [trie-path r]
+                                                                          (remap-function r)))))
+  )
 
 (defn- remap-variables-disjunct-op [this variable-renaming-map remap-fn]
   (if (empty? variable-renaming-map)
@@ -155,6 +160,8 @@
                                       (debug-repl "should combine tries into the current trie")
                                       (???))
                                     (let [added-new (volatile! false)]
+                                      #_(when-not (empty? (filter is-unify? (conjunct-iterator new-child-rexpr)))
+                                        (debug-repl "contains unify2"))
                                       (vswap! ret-children trie-update-collection dj-key
                                               (fn [col]
                                                 (let [[made-new ret] (merge-rexpr-disjunct-list col new-child-rexpr)]
@@ -188,7 +195,10 @@
                                          :rexpr-in new-child-rexpr
                                          :rexpr-result child-rexpr-itered
                                          :simplify simplify
-                                         (save-result-in-trie child-rexpr-itered (context/get-context))))
+                                         (save-result-in-trie (try (simplify child-rexpr-itered)
+                                                                   (catch UnificationFailure e (make-multiplicity 0)))
+                                                              (context/get-context) ;; we have to use get-context here as the iterator might have rebound the context
+                                                              )))
                                       (save-result-in-trie new-child-rexpr child-context))))))
     ;; set the values of variables which are the same across all branches
     (doseq [i (range (count dj-vars))]
@@ -272,23 +282,6 @@
               ret)))})))
 
 
-(def-rewrite
-  :match (disjunct-op (:any-list var-list) rexprs)
-  :run-at :construction
-  :is-check-rewrite true
-  (let [var-set (into #{} var-list)]
-    (when-not (every? (fn [[var-bindings x]] (if (and (rexpr? x)
-                                                      ;; the variables which are exposed should be a subset of what is not ground
-                                                      ;; or are we going to have to represent which of the values are represented with
-                                                      (subset? (exposed-variables x) var-set))
-                                               true
-                                               (do
-                                                 (debug-repl "gg1")
-                                                 false)))
-                      (trie-get-values rexprs nil))
-      (let [rx (into [] (map second (trie-get-values rexprs nil)))]
-        (debug-repl "R-expr in trie has extra exposed variables"))
-      (???))))
 
 
 
@@ -332,3 +325,41 @@
                                  (rec (- d 1) xv yv))))))
            (count va) (.root ta) (.root tbr)))
         ))))
+
+
+(def-rewrite
+  :match (disjunct-op (:any-list var-list) rexprs)
+  :run-at :construction
+  :is-check-rewrite true
+  (let [var-set (into #{} var-list)]
+    (when-not (every? (fn [[var-bindings x]] (if (and (rexpr? x)
+                                                      ;; the variables which are exposed should be a subset of what is not ground
+                                                      ;; or are we going to have to represent which of the values are represented with
+                                                      (subset? (exposed-variables x) var-set))
+                                               true
+                                               (do
+                                                 (debug-repl "gg1")
+                                                 false)))
+                      (trie-get-values rexprs nil))
+      (let [rx (into [] (map second (trie-get-values rexprs nil)))]
+        (debug-repl "R-expr in trie has extra exposed variables"))
+      (???))))
+
+#_(def-rewrite
+  :match (disjunct-op (:any-list var-list) ^PrefixTrie rexprs)
+  :run-at :construction
+  :is-check-rewrite true
+  (let [var-set (ensure-set var-list)
+        res (for [[bindings rexpr] (trie-get-values rexprs nil)
+                  r (conjunct-iterator rexpr)
+                  :when (is-unify? r)]
+              [bindings r])]
+    (when-not (empty? res)
+      (let [sw (java.io.StringWriter.)]
+        (.printStackTrace (Throwable.) (java.io.PrintWriter. sw))
+        (when-not (or (.contains (.toString sw) "rexpr_disjunction.clj:132")  ;; this is the place where it is first constructed
+                      (.contains (.toString sw) "rexpr_disjunction.clj:57") ;; the remap disjunction variables op
+                      (.contains (.toString sw) "user_defined_terms.clj:227") ;; rewrite user defined terms when they are introduced
+                      (.contains (.toString sw) "memoization.clj:171")  ;; when the rexpr is getting returned by a memoized expression
+                      )
+          (debug-repl "contains unify"))))))

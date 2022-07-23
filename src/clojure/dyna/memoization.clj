@@ -162,8 +162,8 @@
     (when (or (= :null (:memo-mode memo-config))
               (every? is-ground? (map variable-name-mapping (:required-ground-variables memo-config))))
       (let [key (case (:memo-mode memo-config)
-                  :unk (make-conjunct (doall (map #(make-no-simp-unify % (get variable-name-mapping %))
-                                             (:required-ground-variables memo-config))))
+                  :unk (make-conjunct (vec (map #(make-no-simp-unify % (get variable-name-mapping %))
+                                                (:required-ground-variables memo-config))))
                   :null (make-multiplicity 1))
             memo-rexpr (get-value-for-key memoization-container key)]
         (if (nil? memo-rexpr)

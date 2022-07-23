@@ -301,6 +301,7 @@
     (or (identical? this other)
         (and (instance? PrefixTrie other)
              (= arity (.arity ^PrefixTrie other))
+             (= contains-wildcard (.contains-wildcard ^PrefixTrie other))
              (equal-tries arity root (.root ^PrefixTrie other)))))
 
   (hashCode [this]
