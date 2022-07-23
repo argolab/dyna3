@@ -216,10 +216,14 @@
                  )
          (if (= 0 (bit-and skips (bit-shift-left 1 idx)))
            ;; this variable is something that we are interested in
-           (doseq [i (iter-run-iterable iter)]
-             (rec (cons (iter-variable-value i) binding) (iter-continuation i) (+ idx 1)))
+           (doseq [i (iter-run-iterable-unconsolidated iter)
+                   :let [val (iter-variable-value i)]]
+             ;(dyna-assert (not (nil? val)))  ;; this is allowed to be nil
+             ;(dyna-assert (not (nil? (iter-continuation i)))) ;; this can happen in the case that (= idx (- arity 1))
+             (rec (cons val binding) (iter-continuation i) (+ idx 1)))
            ;; this is some variable that we would like to skip
            (doseq [i (iter-run-iterable-unconsolidated iter)]
+             (dyna-assert (not (nil? (iter-continuation i))))
              (rec binding (iter-continuation i) (+ idx 1))))))
      () iterator 0)
     @ret))
@@ -229,57 +233,62 @@
     (iter-run-cb [this cb-fn]
       (doseq [v (iter-run-iterable this)] (cb-fn v)))
     (iter-run-iterable [this]
+      (dyna-assert (not (contains? trie nil)))  ;; otherwise we can only run the unconsolidated version
+      (iter-run-iterable-unconsolidated this)
+      )
+    (iter-run-iterable-unconsolidated [this]
       (for [[k v] trie]
         (reify DIteratorInstance
           (iter-variable-value [this] k)
           (iter-continuation [this]
-            (if (nil? v) nil
-                (iterator-over-trie v))))))
-    (iter-run-iterable-unconsolidated [this] (iter-run-iterable this))
+            (when (map? v)
+              (iterator-over-trie v))))))
     (iter-bind-value [this value]
       (let [v (get trie value)]
         (if (nil? v) nil
             (iterator-over-trie v))))
-    (iter-debug-which-variable-bound [this] (???))
+    (iter-debug-which-variable-bound [this] [:trie-iterator trie])
     (iter-estimate-cardinality [this] (count trie))))
 
 (defn- iterator-skip-variables [^DIterator underlying binding-order skipped-variables]
-  (let [trie (delay (let [skips (reduce bit-or 0 (for [i (range (count binding-order))]
-                                                   (if (skipped-variables (nth binding-order i))
-                                                     (bit-shift-left 1 i)
-                                                     0)))]
-                      (build-skip-trie underlying (count binding-order) skips)))]
-    (if (skipped-variables (first binding-order))
-      (iterator-over-trie @trie)
-      (reify DIterator
-        (iter-run-cb [this cb-fn] (doseq [v (iter-run-iterable this)] (cb-fn v)))
-        (iter-run-iterable [this]
-          (let [r (rest binding-order)]
-            (for [v (iter-run-iterable underlying)]
-              (reify DIteratorInstance
-                (iter-variable-value [this] (iter-variable-value v))
-                (iter-continuation [this] (iterator-skip-variables (iter-continuation v) r skipped-variables))))))
-        (iter-run-iterable-unconsolidated [this]
-          (let [r (rest binding-order)]
-            (for [v (iter-run-iterable-unconsolidated underlying)]
-              (reify DIteratorInstance
-                (iter-variable-value [this] (iter-variable-value v))
-                (iter-continuation [this] (iterator-skip-variables (iter-continuation v) r skipped-variables))))))
-        (iter-bind-value [this value]
-          (let [v (iter-bind-value underlying value)]
-            (if (nil? v) nil
-                (iterator-skip-variables v (rest binding-order) skipped-variables))))
-        (iter-estimate-cardinality [this] (iter-estimate-cardinality underlying))))))
+  (if (skipped-variables (first binding-order))
+    (let [skips (reduce bit-or 0 (for [i (range (count binding-order))]
+                                   (if (skipped-variables (nth binding-order i))
+                                     (bit-shift-left 1 i)
+                                     0)))
+          ;zzz (debug-repl)
+          trie (build-skip-trie underlying (count binding-order) skips)]
+      (iterator-over-trie trie))
+    (reify DIterator
+      (iter-run-cb [this cb-fn] (doseq [v (iter-run-iterable this)] (cb-fn v)))
+      (iter-run-iterable [this]
+        (let [r (rest binding-order)]
+          (for [v (iter-run-iterable underlying)]
+            (reify DIteratorInstance
+              (iter-variable-value [this] (iter-variable-value v))
+              (iter-continuation [this] (iterator-skip-variables (iter-continuation v) r skipped-variables))))))
+      (iter-run-iterable-unconsolidated [this]
+        (let [r (rest binding-order)]
+          (for [v (iter-run-iterable-unconsolidated underlying)]
+            (reify DIteratorInstance
+              (iter-variable-value [this] (iter-variable-value v))
+              (iter-continuation [this] (iterator-skip-variables (iter-continuation v) r skipped-variables))))))
+      (iter-bind-value [this value]
+        (let [v (iter-bind-value underlying value)]
+          (if (nil? v) nil
+              (iterator-skip-variables v (rest binding-order) skipped-variables))))
+      (iter-debug-which-variable-bound [this] [:iter-skip-variables underlying binding-order skipped-variables])
+      (iter-estimate-cardinality [this] (iter-estimate-cardinality underlying)))))
 
 (defn make-skip-variables-iterator [^DIterable iterator skipped-variables]
   (reify DIterable
     (iter-what-variables-bound [this] (remove skipped-variables (iter-what-variables-bound iterator)))
-    (iter-variable-binding-order [this] (into [] (map #(remove skipped-variables %) (iter-variable-binding-order iterator))))
+    (iter-variable-binding-order [this] (let [ret (into [] (map #(remove skipped-variables %) (iter-variable-binding-order iterator)))]
+                                          ;(debug-repl "bo")
+                                          ret))
     (iter-create-iterator [this which-binding]
       (let [selected-binding (first (filter #(= which-binding (into [] (remove skipped-variables %))) (iter-variable-binding-order iterator)))
-            underlying (iter-create-iterator iterator selected-binding)
-                                        ;bding (apply list selected-binding)
-            ]
+            underlying (iter-create-iterator iterator selected-binding)]
         (iterator-skip-variables underlying selected-binding skipped-variables)))))
 
 (defn- iterator-disjunct-diterator [branch-iters]
@@ -368,7 +377,7 @@
         iters (if (empty? bv)
                  ;; if there are no requirements on the iterators, then we can just pick anything
                 (filter #(not (empty? (iter-what-variables-bound %))) iterators)
-                (filter #(intersection (into #{} (iter-what-variables-bound %)) bv) iterators))
+                (filter #(some bv (iter-what-variables-bound %)) iterators))
         ]
     ;; this should somehow identify a preference bteween the different binding
     ;; orders I suppose that if the code is going to get copiled, then it should
@@ -518,14 +527,15 @@
                      ]
                  (if (nil? picked-iterator#)
                    (callback-fn# ~rexpr) ;; there is nothing to iterate, so just run the callback function
-                   (~run-iterator-fn
-                    picked-iterator#
-                    picked-binding-order#
-                    (iter-what-variables-bound picked-iterator#)
-                    ~rexpr
-                    ~ctx
-                    callback-fn#
-                    ~simplify-method))
+                   (do (assert (subset? picked-binding-order# (ensure-set (iter-what-variables-bound picked-iterator#))))
+                       (~run-iterator-fn
+                        picked-iterator#
+                        picked-binding-order#
+                        (iter-what-variables-bound picked-iterator#)
+                        ~rexpr
+                        ~ctx
+                        callback-fn#
+                        ~simplify-method)))
                  )]
       ;(debug-repl "iter runner")
       ret)

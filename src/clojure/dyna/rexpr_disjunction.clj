@@ -211,44 +211,43 @@
 (declare run-trie-iterator-from-node
          run-trie-iterator-from-node-unconsolidated)
 
-(defn- trie-diterator-instance [remains node]
+(defn- trie-diterator-instance [remains node variable-order]
   (reify DIterator
     (iter-run-cb [this cb-fn]
       (doseq [v (iter-run-iterable this)]
         (cb-fn v)))
     (iter-run-iterable [this]
-      (run-trie-iterator-from-node remains node))
+      (run-trie-iterator-from-node remains node variable-order))
     (iter-run-iterable-unconsolidated [this]
-      (run-trie-iterator-from-node-unconsolidated remains node))
+      (run-trie-iterator-from-node-unconsolidated remains node variable-order))
     (iter-bind-value [this value]
       (let [v (get node value)]
         (when-not (nil? v)
-          (trie-diterator-instance (- remains 1) v))))
-    (iter-debug-which-variable-bound [this] (???))
+          (trie-diterator-instance (- remains 1) v (next variable-order)))))
+    (iter-debug-which-variable-bound [this] (first variable-order))
     (iter-estimate-cardinality [this]
       (count node))))
 
 ;; return a lazy sequence over bindings
-(defn- run-trie-iterator-from-node [remains trie-node]
-  (assert (not (contains? trie-node nil))) ;; if this happens, this means that it is trying to iterate over something which would
+(defn- run-trie-iterator-from-node [remains trie-node variable-order]
+  (dyna-assert (not (contains? trie-node nil))) ;; if this happens, this means that it is trying to iterate over something which would
   (for [[key next-node] trie-node]
     (reify DIteratorInstance
       (iter-variable-value [this] key)
       (iter-continuation [this]
         (if (= 0 remains)
           nil  ;; there are going to be more disjuncts here
-          (trie-diterator-instance (- remains 1) next-node))
-        ))
-    ))
+          (trie-diterator-instance (- remains 1) next-node (next variable-order)))
+        ))))
 
-(defn- run-trie-iterator-from-node-unconsolidated [remains trie-node]
+(defn- run-trie-iterator-from-node-unconsolidated [remains trie-node variable-order]
   (for [[key next-node] trie-node]
     (reify DIteratorInstance
-      (iter-variable-value [this] (???)) ;; the value should not be used in this case, as it could be replicated etc
+      (iter-variable-value [this] key)
       (iter-continuation [this]
         (if (= 0 remains)
           nil
-          (trie-diterator-instance (- remains 1) next-node))))))
+          (trie-diterator-instance (- remains 1) next-node (next variable-order)))))))
 
 (def-iterator
   :match (disjunct-op (:any-list dj-vars) (:unchecked rexprs))
@@ -266,7 +265,7 @@
           (iter-variable-binding-order [this] [dj-vars])
           (iter-create-iterator [this which-binding]
             (assert (.contains (iter-variable-binding-order this) which-binding))
-            (let [ret (trie-diterator-instance (count dj-vars) trie-root)
+            (let [ret (trie-diterator-instance (count dj-vars) trie-root dj-vars)
                                         ;(run-trie-iterator-from-node (count dj-vars) trie-root)
                   ]
               ;(debug-repl "creating iterator from trie")
@@ -298,6 +297,9 @@
     ;; in the case of the origional disjunct, this is going to have that
     ;; unification between variables is represented as unify expressions instead
     ;; of as a trie.  I suppose that we could attempt to construct a representation and then compare between them
+
+    ;; if there is a single value in the expression, I suppose that this could also result in creating which of the values would get represented
+    ;; though that would potentially result in a lot of expensive compare options, in the case that it would be constantly looking through the trie
     (debug-repl "disjunct and disjunct-op deep equals")
     (???)
     ))
@@ -311,8 +313,22 @@
       (if (or (not= (count va) (count vb))
               (not= (into #{} va) (into #{} vb)))
         false ;; the variables exposed are different, so this is going to
-        (do
+        (let [^PrefixTrie ta (:rexprs a)
+              ^PrefixTrie tb (:rexprs b)
+              ai (zipmap va (range)) ;; what if a variable appears more than once, then this is not going to work correctly?
+              ^PrefixTrie tbr (trie-reorder-keys tb (map ai vb))]
           ;; this needs to compare the triesss, need to implement this
-          (debug-repl "disjunct op deep equals")
-          (???))
+          ;(debug-repl "disjunct op deep equals")
+          ((fn rec [d x y]
+             (if (= d 0)
+               ;; we are at the leaf, so we have check that the elements contained are the same
+               (deep-equals-list-compare x y)
+               ;; this is somewhere in the middle of the trie, so we should just check that the
+               (if (or (not= (count x) (count y))
+                       (not= (into #{} (keys x)) (into #{} (keys y))))
+                 false
+                 (every? true? (for [[k xv] x
+                                     :let [yv (get y k)]]
+                                 (rec (- d 1) xv yv))))))
+           (count va) (.root ta) (.root tbr)))
         ))))

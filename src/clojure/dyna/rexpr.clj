@@ -562,7 +562,7 @@
 (def-base-rexpr disjunct [:rexpr-list args]
   (is-non-empty-rexpr? [this] (some is-non-empty-rexpr? args)))
 
-(defn- deep-equals-list-compare [a b]
+(defn deep-equals-list-compare [a b]
   (if (and (empty? a) (empty? b))
     true
     (let [af (first a)

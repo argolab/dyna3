@@ -42,6 +42,7 @@
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; impements debug-repl which is based off the following gist
 ;; https://gist.github.com/ato/252421
 
 (declare ^:dynamic *locals*)
@@ -72,7 +73,8 @@
 
 ;; the system.out might be getting messed with.  The system/in is not getting echoed back
 
-(def debug-useful-variables (atom {'aprint (fn [] aprint)}))
+(def debug-useful-variables (atom {'aprint (constantly aprint)
+                                   'reflect (constantly reflect)}))
 
 (defn- debug-repl-fn [prompt local-bindings ^Throwable traceback]
   (let [all-bindings  (merge (into {} (for [[k v] @debug-useful-variables]
@@ -355,7 +357,7 @@
         (set? form) (into #{} (map #(macrolet-expand mm %) form))
         :else form))
 
-(defmacro macrolet [bnds & body]
+#_(defmacro macrolet [bnds & body]
   (assert (even? (count bnds)))
   (print bnds)
   (let [m (into {} (for [[name f] (apply hash-map bnds)]

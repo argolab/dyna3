@@ -18,4 +18,6 @@ concat([X|Xs], Y) := [X|concat(Xs, Y)].
 
 print quicksort([2,3,4,1]).
 
-%assert quicksort([2,3,4,1]) = [1,2,3,4].
+r(X) := X.  % done to make sure that the values do not backflow
+
+assert r(quicksort([2,3,4,1])) = [1,2,3,4].
