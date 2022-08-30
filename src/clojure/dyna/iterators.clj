@@ -257,7 +257,11 @@
                                      (bit-shift-left 1 i)
                                      0)))
           ;zzz (debug-repl)
-          trie (build-skip-trie underlying (count binding-order) skips)]
+          trie (if (= skips (dec (bit-shift-left 1 (inc (count binding-order)))))
+                 (do
+                   (???);(debug-repl "??? skip all")
+                   {}) ;; meaning that we are skipping all of the variables??? wtf
+                 (build-skip-trie underlying (count binding-order) skips))]
       (iterator-over-trie trie))
     (reify DIterator
       (iter-run-cb [this cb-fn] (doseq [v (iter-run-iterable this)] (cb-fn v)))

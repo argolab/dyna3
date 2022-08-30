@@ -24,6 +24,14 @@
 
 (def-base-rexpr disjunct-op [:var-list disjunction-variables
                              :prefix-trie rexprs]
+  (primitive-rexpr [this]
+                   ;; this might want to remap back into a disjunct which is
+                   ;; simple, in which case it would want to find all of the
+                   ;; different branches with the unify expressions?
+
+                   ;; I suppose that would mean that the expression would ned to get some mapping
+                   (debug-repl "make primitive rexpr out of trie")
+                   (???))
   (get-children [this] (map second (trie-get-values rexprs nil)))
 
   (remap-variables [this variable-renaming-map]

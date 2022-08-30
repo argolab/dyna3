@@ -41,6 +41,13 @@
 
   (is-empty-rexpr? [this]) ;; if the multiplicity of this expression is zero
   (is-non-empty-rexpr? [this]) ;; if there is some branch of the disjunct which is non-zero
+
+  ;; return a map of the internal values which are stored, and it .
+                                        ;(get-arguments-map [this])
+
+  (rexpr-map-function-with-access-path [this cb-fn])
+
+  (rexpr-jit-info [this])
   )
 
   ;; (visit-rexpr-children [this remap-function]) ;; this will visit any nested R-exprs on the expression, and return a new expression of the same type with

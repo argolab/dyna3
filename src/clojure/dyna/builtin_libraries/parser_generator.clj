@@ -22,6 +22,7 @@
 
 (def-rewrite
   :match (instaparse-construct-parser (:ground grammar) (:any out))
+  ;:assigns-variable out
   (let [g (get-value grammar)]
     (if-not (string? g)
       (make-multiplicity 0)

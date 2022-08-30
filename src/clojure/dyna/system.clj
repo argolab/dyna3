@@ -45,9 +45,10 @@
 ;; expressions which are defined by the user
 (def ^:dynamic user-defined-terms (atom {}))
 
-;; a map of which terms are exported from a
+;; a map of which terms are exported from a file
 (def ^:dynamic user-exported-terms (atom {}))
 
+;; a set of java.net.URL objects of which files have been imported into the runnint system
 (def ^:dynamic imported-files (atom #{}))
 
 ;; the agenda of pending work.  When an assumption is invalidated, this will want to push the work onto this object

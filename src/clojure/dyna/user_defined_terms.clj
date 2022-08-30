@@ -60,6 +60,12 @@
    ;; this will then have to recurse in finding the other thing
    :imported-from-another-file nil
 
+   ;; if something is a constraint, then we can eliminate multiple copies of the
+   ;; same rule call on an expression.  To determine if something is a
+   ;; constraint, this is going to depend on the internal expression.  if something is an aggregator, then it should be able to find that there are
+   :is-constraint (make-invalid-assumption)
+
+
    ;; would be nice if there was some kind of return value type information as
    ;; well.  This would have to be something which is cached information I
    ;; suppose that it could look at the various R-exprs which are defined for a

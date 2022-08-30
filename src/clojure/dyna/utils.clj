@@ -414,3 +414,11 @@
   (for [[idx val] (zipseq (range) col)]
     (when (pred val)
       idx)))
+
+(defn strict-get [map key]
+  (let [r (get map key :not-found-value)]
+    (if (= :not-found-value r)
+      (do
+        (debug-repl "key not found")
+        (throw (RuntimeException. (str "Key " key " not found in map"))))
+      r)))

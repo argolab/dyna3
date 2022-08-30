@@ -16,6 +16,7 @@
   (:require [dyna.rexpr-meta-programming])
   (:require [dyna.memoization])
   (:require [dyna.rexpr-disjunction])
+  ;(:require [dyna.rexpr-jit])
   (:require [dyna.ast-to-rexpr :refer [parse-string
                                        import-file-url
                                        eval-string
@@ -88,8 +89,11 @@
             (println "Unable to find file " run-file " to run")
             (System/exit 1))
           (let [arg-list (DynaTerm/make_list args)]
-            ;; define $args = ["arg1", "arg2", ..., "argN"]
-            (eval-ast (make-term ("$define_term" ("$args") DynaTerm/null_term "=" ("$constant" arg-list))))
+            ;; define $command_line_args = ["arg1", "arg2", ..., "argN"]
+            ;; and make it a global that can be access anywhere
+            (eval-ast (make-term (","
+                                  ("$define_term" ("$command_line_args") DynaTerm/null_term "=" ("$constant" arg-list))
+                                  ("$compiler_expression" ("make_system_term" ("/" "$command_line_args" 0))))))
             (when system/status-counters
               (StatusCounters/program_start))
             (import-file-url (.toURL run-filef))
@@ -98,7 +102,9 @@
               (StatusCounters/print_counters))
             (System/exit 0)))
         (do
-          ;; then there are no arguments, so just start the repl
+          (eval-string "$command_line_args = [].
+:- make_system_term $command_line_args/0.")
+          ;; then there are no arguments, so just start the repl9
           (repl)
 
           ;; TODO: is there some exception that can be caught in the case that the repl is getting quit, in which case, we should run the

@@ -411,6 +411,8 @@
                                            "load_clojure" (match-term arg1 ("load_clojure" cfile)
                                                                       (load cfile))
 
+                                           "optimized_rexprs" (match-term arg1 ("optimized-rexprs" c)
+                                                                          (alter-var-root system/*use-optimized-rexprs* (if c true false)))
 
                                            (do
                                              ;; in the case that this is invalid, we can raise an exception that should report the error to the user

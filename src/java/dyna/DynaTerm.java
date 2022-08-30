@@ -67,6 +67,9 @@ public final class DynaTerm implements ILookup {
                 return b.toString();
             }
         }
+        // there is no way to tell the difference between $nil and [] as those are the same expression.
+        // I suppose that we could make the end of a list represented as something else?  Like use `[]` as the name of the list term or something
+        // in which case it would
         b.append(name);
         if(arguments != null) {
             int count = arity();
@@ -139,12 +142,14 @@ public final class DynaTerm implements ILookup {
     }
 
     public Object valAt(Object key) {
-        if("name".equals(key)) return name;
+        if(name_keyword == key) return name;
+        if(arity_keyword == key) return arity();
         return clojure_nth.invoke(arguments, key);
     }
 
     public Object valAt(Object key, Object notfound) {
-        if("name".equals(key)) return name;
+        if(name_keyword == key) return name;
+        if(arity_keyword == key) return arity();
         return clojure_nth.invoke(arguments, key, notfound);
     }
 
@@ -158,9 +163,13 @@ public final class DynaTerm implements ILookup {
     static private final IFn clojure_concat;
     static private final IFn clojure_list;
 
+    static private final Object name_keyword;
+    static private final Object arity_keyword;
+
     static public final DynaTerm null_term;
 
     static {
+        // this should get the underlying value, otherwise there is still some indirect through the variable for these values
         clojure_seqable = Clojure.var("clojure.core", "seqable?");
         clojure_hash = Clojure.var("clojure.core", "hash");
         clojure_count = Clojure.var("clojure.core", "count");
@@ -170,6 +179,9 @@ public final class DynaTerm implements ILookup {
         clojure_gensym = Clojure.var("clojure.core", "gensym");
         clojure_concat = Clojure.var("clojure.core", "concat");
         clojure_list = Clojure.var("clojure.core", "list");
+
+        name_keyword = Clojure.var("clojure.core", "keyword").invoke("name");
+        arity_keyword = Clojure.var("clojure.core", "keyword").invoke("arity");
 
         null_term = new DynaTerm();//"$nil", new Object[]{});
     }

@@ -57,14 +57,22 @@
 
        ;; because of the let-expression, it is a little hard to pull apart the map value that is going to be returned
        ;; how efficient is it going to be about destructuring the representation
-     (let ~(vec (apply concat
-                       (for [v required-ground]
+       ~@(if all-ground
+           [:check]
+           [:assigns-variable (car body)])
+       (let ~(vec (apply concat
+                         (for [v required-ground]
                          `[~v (get-value ~(symbol (str "g" v)))])))
-       ~(if all-ground
-          `(if ~(cdar body)
-             (make-multiplicity 1)
-             (make-multiplicity 0))
-          `(make-unify ~(car body) (make-constant ~(cdar body))))
+         ~(cdar body)
+
+         ;; ~@(if all-ground
+         ;;   `[:check ~(cdar body)]
+         ;;   ;; `(if ~(cdar body)
+         ;;   ;;   (make-multiplicity 1)
+         ;;   ;;   (make-multiplicity 0))
+         ;;   `[:assigns {~(car body) ~(cdar body)}]
+         ;;   ;`(make-unify ~(car body) (make-constant ~(cdar body)))
+         ;;   )
        ))
     ))
 
@@ -434,9 +442,6 @@
 (def-user-term "atanh" 1 (make-tanh v1 v0))
 
 
-
-;; this needs to have some way of defining the sequence things
-
 (def-base-rexpr range [:var Low
                        :var High
                        :var Step
@@ -457,35 +462,11 @@
         StepV (get-value Step)
         OutV (get-value Out)
         successful (and (int? OutV)
-                      (>= OutV LowV)
-                      (< OutV HighV)
-                      (= (mod (- OutV LowV) StepV) 0))]
+                        (>= OutV LowV)
+                        (< OutV HighV)
+                        (= (mod (- OutV LowV) StepV) 0))]
     (make-unify Contained
                 (make-constant-bool successful))))
-
-;; there should be notation that this is going to introduce a disjunct
-;; such that it knows that this would have some loop or something
-#_(def-rewrite
-  :match (range (:ground Low) (:ground High) (:ground Step) (:free Out) (is-true? Contained))
-  :run-at :inference ;; there should be some version of run-at where it would be able to indicate that it would introduce a disjunct, so that this could be some "optional" rewrite or something that it might want to defer until later.  This would be trying to find if
-  (do ;(assert (get-value Contained)) ;; in the case that this is false, there is no way for us to rewrite this expression
-      (let [LowV (get-value Low)
-            HighV (get-value High)
-            StepV (get-value Step)]
-        (if (is-bound? Out)
-          (let [OutV (get-value Out)]
-            (make-multiplicity
-             (and (int? OutV)
-                  (>= LowV OutV)
-                  (< OutV HighV)
-                  (= (mod (- OutV LowV) StepV) 0))))
-          (if (>= LowV HighV) (make-multiplicity 0)
-              (make-disjunct [(make-no-simp-unify Out (make-constant LowV)) ; this make-unify will have to avoid running the constructors, otherwise it will assign the value directly.  So no-simp should allow for this to avoid those at construction rewrites
-                              (make-range (make-constant (+ LowV StepV))
-                                          High
-                                          Step
-                                          Out
-                                          Contained)]))))))
 
 
 (def-iterator
@@ -512,7 +493,35 @@
                     iterator-empty-instance
                     nil))
                 (iter-estimate-cardinality [this]
-                  (count r)))))}))))
+                  (quot (- high-v low-v) step-v)
+                  ;(count r) ;; this is not optimized, as it will scan through the entire list when doing this count
+                  ))))}))))
+
+
+;; there should be notation that this is going to introduce a disjunct
+;; such that it knows that this would have some loop or something
+#_(def-rewrite
+  :match (range (:ground Low) (:ground High) (:ground Step) (:free Out) (is-true? Contained))
+  :run-at :inference ;; there should be some version of run-at where it would be able to indicate that it would introduce a disjunct, so that this could be some "optional" rewrite or something that it might want to defer until later.  This would be trying to find if
+  (do ;(assert (get-value Contained)) ;; in the case that this is false, there is no way for us to rewrite this expression
+      (let [LowV (get-value Low)
+            HighV (get-value High)
+            StepV (get-value Step)]
+        (if (is-bound? Out)
+          (let [OutV (get-value Out)]
+            (make-multiplicity
+             (and (int? OutV)
+                  (>= LowV OutV)
+                  (< OutV HighV)
+                  (= (mod (- OutV LowV) StepV) 0))))
+          (if (>= LowV HighV) (make-multiplicity 0)
+              (make-disjunct [(make-no-simp-unify Out (make-constant LowV)) ; this make-unify will have to avoid running the constructors, otherwise it will assign the value directly.  So no-simp should allow for this to avoid those at construction rewrites
+                              (make-range (make-constant (+ LowV StepV))
+                                          High
+                                          Step
+                                          Out
+                                          Contained)]))))))
+
 
 ;; there is no way to define a range with 3 arguments, as it would use the same name here
 ;; that would have to be represented with whatever is some named mapped from a symbol to what is being created

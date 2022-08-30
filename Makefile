@@ -5,7 +5,10 @@ VERSION=0.1.0
 
 SOURCE=$(wildcard src/*/*/*.clj) $(wildcard src/*/*/*.java)
 JAR_TARGET=target/dyna-$(VERSION)-SNAPSHOT-standalone.jar
+JAR_WITH_PYTHON_INSTALLER=target/dyna-combined-$(VERSION)-SNAPSHOT-standalone.jar
 TARGET=dyna-standalone-$(VERSION)
+
+PYTHON_MODULE=python_module
 
 PARSER_TARGET=target/classes/dyna/dyna_grammar2Parser.class
 
@@ -43,9 +46,13 @@ $(JAR_TARGET): $(SOURCE)
 $(PARSER_TARGET): src/antlr/dyna/dyna_grammar2.g4
 	$(LEIN) do antlr, javac, compile
 
+$(JAR_WITH_PYTHON_INSTALLER): $(JAR_TARGET) $(wildcard dyna_python_module/**/*.py)
+	cp $(JAR_TARGET) $(JAR_WITH_PYTHON_INSTALLER)
+	rm -f dyna_python_module/**/*.pyc
+	jar -uf $(JAR_WITH_PYTHON_INSTALLER) dyna_python_module
 
-$(TARGET): $(JAR_TARGET) standalone-header.sh
-	cat standalone-header.sh $(JAR_TARGET) > $(TARGET)
+$(TARGET): $(JAR_WITH_PYTHON_INSTALLER) standalone-header.sh
+	cat standalone-header.sh $(JAR_WITH_PYTHON_INSTALLER) > $(TARGET)
 	chmod +x $(TARGET)
 
 test_python: $(JAR_TARGET)

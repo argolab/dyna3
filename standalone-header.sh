@@ -2,34 +2,6 @@
 
 self="$0"
 
-help() {
-    echo "Dyna implemented using R-exprs"
-    echo ""
-    echo "     --help                Print this message"
-    echo "     --memory=1G           Set the amount of memory for the JVM"
-    echo "     --import [file name]  Import some a file into the REPL from the command line"
-    echo "     --csv-import [term name] [file name]"
-    echo "     --csv-export [term name] [file name]"
-    echo "     --time                Time the different parts of the runtime report when the program exits"
-    echo "     --fast-math           Do not check the math for overflow"
-    echo ""
-    echo "Useage: $self [args] [file to start]"
-    echo ""
-    #echo "To install python package for dyna: $self install-python"
-}
-
-install_python() {
-    exit 1  # Todo????
-    t=`mktemp -d`
-    trap "rm -rf $t" EXIT
-
-    unzip $self "dyna_backend/install-python-package" -d $t
-    cp $self $t/some-path-in-the-install-dir/dyna
-    pushd $t
-    pip install .
-    popd
-}
-
 welcome_message() {
 echo "                _____   __     __  _   _                                     "
 echo "               |  __ \  \ \   / / | \ | |     /\                             "
@@ -65,6 +37,49 @@ echo "                       \  / /                                             
 echo "                        \/ --------------------------------------------------"
 echo "                                                                             "
 }
+
+help() {
+    echo "Dyna implemented using R-exprs"
+    echo ""
+    echo "     --help                Print this message"
+    echo "     --memory=1G           Set the amount of memory for the JVM"
+    echo "     --import [file name]  Import some a file into the REPL from the command line"
+    echo "     --csv-import [term name] [file name]"
+    echo "     --csv-export [term name] [file name]"
+    echo "     --time                Time the different parts of the runtime report when the program exits"
+    echo "     --fast-math           Do not check the math for overflow"
+    echo ""
+    echo "Usage: $self [args] [file to start]"
+    echo ""
+    #echo "To install python package for dyna: $self install-python"
+}
+
+install_python() {
+    set -x
+    t=`mktemp -d`
+    #trap "rm -rf $t" EXIT
+
+    unzip -qq $self "dyna_python_module/*" -d $t 2>/dev/null
+    cp $self $t/dyna_python_module/dyna.jar
+    pushd $t/dyna_python_module > /dev/null
+    #python -m pip install .
+    popd > /dev/null
+}
+
+# set dyna to use a different java runtime
+if [ -z "${DYNA_JVM}" ]; then
+   DYNA_JVM='java'
+fi
+
+which $DYNA_JVM 2>/dev/null >/dev/null
+if [ $? -ne 0 ]; then
+    echo "Unable to find Java in the path ($PATH)."
+    echo ""
+    echo "Either install Java or provide a path to the Java runtime using: "
+    echo "    export DYNA_JVM=/path/to/java-install/bin/java"
+    exit 1
+fi
+
 
 dyna_args=""
 import_args=""
@@ -125,7 +140,7 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         --csv-import|--csv-export)
-            [[ "$2" =~ ^[a-z][a-zA-Z0-9]*\/[0-9]+$ ]] || {
+            [[ "$2" =~ ^[a-z][a-zA-Z0-9_]*\/[0-9]+$ ]] || {
                 echo "term '$2' did not match expected 'name/arity'"
                 exit 2
             }
@@ -136,13 +151,42 @@ while [ $# -gt 0 ]; do
             ;;
 
         install-python)
-            exit 1  # TODO, will need the python package included into the jar
-            echo "Install the dyna runtime package to the current python environment"
+            welcome_message
+            echo
+            echo '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~'
+            echo 'Python environment:'
+            python -m site
+            python -c 'import sys; print("Python prefix:", sys.prefix)'
+            echo '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~'
+            echo ''
+            echo "Install Dyna into the current Python environment."
+            read -p "Are you sure? (y/N) " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[yY]$ ]]; then
+                install_python
+                exit 0
+            else
+                echo "Install canceled"
+                exit 1
+            fi
+            ;;
+
+        install-python-no-confirm)
             install_python
             exit 0
             ;;
 
         *)
+            # I suppose that the program which is running on dyna could also
+            # take command line arguments, so maybe we can not check if the
+            # arguments passed are valid, in which case this is going to have to
+            # start the whole runtime before it returns an error
+
+            # [[ -f "$1" ]] || {
+            #     echo "file not found: $1"
+            #     echo "Use `$self --help` to see command line arguments"
+            #     exit 2
+            # }
             dyna_args+="$1 "
             ;;
     esac
@@ -156,7 +200,7 @@ if [ -z "$dyna_args" ]; then
 fi
 
 
-exec java $jvm_args -Ddyna.runtimejar=$self -jar "$self" $import_args $dyna_args
+exec $DYNA_JVM $jvm_args -Ddyna.runtimejar=$self -jar "$self" $import_args $dyna_args
 exit 1  # should not get to this line
 
 # what follows is the dyna implementation compiled into a jar
