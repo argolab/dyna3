@@ -227,9 +227,47 @@
       ;; return the converted rexpr as well as the type information for this expression
       [(convert-fn rexpr) rtype])))
 
-(defn- check-matches [match-expression]
+(defn- get-matchers-for-value [val]
+  (into [] (map first (filter (fn [[name func]] (func val)) @rexpr-matchers))))
 
-  )
+(defn- check-matches
+  ([rexpr matcher already-matched]
+   (let [rname (rexpr-name rexpr)
+         args (get-arguments rexpr)
+         ret (when (= rname (first matcher)) ;; the name on the match expression does not match
+               (every? true? (for [[match-expr arg] (zipseq (rest matcher) args)]
+                               (cond (= '_ match-expr) true
+                                     (symbol? match-expr) (do (assert (not (contains? already-matched match-expr)))
+                                                              true)
+                                     (and (= 2 (count match-expr))
+                                          (not (contains? @rexpr-containers-signature (car match-expr)))
+                                          (symbol? (cdar match-expr)))
+                                       (let [match-requires (car match-expr)
+                                             var-info (cond (is-constant? arg) {:value arg}
+                                                            (is-variable? arg) (*jit-get-variable* arg)
+                                                            :else (do (debug-repl "todo") (???)))]
+                                         (cond (some #{match-requires} (:var-modes var-info [])) true
+                                               (and (contains? var-info :value) (contains? @rexpr-matchers match-requires)) ((get @rexpr-matchers match-requires) (:value var-info))
+                                               :else (do
+                                                       ;(debug-repl "qq")
+                                                       false)
+                                               ;; TODO: there may be more more cases which can cause something to match
+                                               ;; :else (do (debug-repl "todo2")
+                                               ;;           (???))
+                                               ))
+                                       :else (do (debug-repl "todo3")
+                                                 (???))))))]
+
+     ;(debug-repl "ww")
+     ret))
+  ([rexpr matcher] (check-matches rexpr matcher {})))
+
+(defn- compute-rewrite-ranking [rewrite]
+  ;; bigger numbers will be perfable rewrites.  Rewrites which directly compute
+  ;; a value should be prefered over something which checks for 0 for example.
+  (cond (:is-assignment-rewrite (:kw-args rewrite) false) 100
+        (:is-check-rewrite (:kw-args rewrite) false) 90
+        :else 0))
 
 (defn- is-composit-rexpr [rexpr]
   )
@@ -244,7 +282,13 @@
 
 (defn- simplify-jit-generic [rexpr simplify-method]
   ;; this is called when there is no rewrite for a specific type already defined
-  (debug-repl "generic simplify")
+  ;; this is going to have to look through the possible rewrites which are defined for a given type
+  (let [simplify-mode (:simplify-mode *jit-current-compilation-unit*)
+        rewrites (get @rexpr-rewrites-source (type rexpr) [])
+        matching-rewrites (sort-by compute-rewrite-ranking > (into [] (filter #(check-matches rexpr (:matcher %)) rewrites)))]
+    (debug-repl "generic simplify"))
+
+
 
   (???))
 
@@ -253,7 +297,15 @@
    [*current-simplify-stack* (conj *current-simplify-stack* rexpr)
     *current-simplify-running* simplify-jit]
    (assert (nil? (rexpr-jit-info rexpr))) ;; otherwise this is an already generated expression
-   (let [ff (get @rexpr-rewrites-during-jit-compilation-func (type rexpr))
+   (let [jit-specific (get @rexpr-rewrites-during-jit-compilation (type rexpr) [])
+         jit-res (first (remove nil? (for [f jit-specific]
+                                       (f rexpr simplify-jit))))
+         res (if (nil? jit-res)
+               (simplify-jit-generic rexpr simplify-jit)
+               jit-res)]
+     (debug-repl)
+     )
+   #_(let [ff (get @rexpr-rewrites-during-jit-compilation-func (type rexpr))
          zz (debug-repl)
          ret ((get @rexpr-rewrites-during-jit-compilation-func (type rexpr) simplify-jit-generic) rexpr simplify-jit)]
      (assert (not (nil? ret)))
@@ -276,15 +328,26 @@
         arg-matchers (merge (:arg-matches kwargs)
                             (into {} (for [[var val] (merge example-values values)]
                                        ;; figure out what matching rules can be used for this value
-                                       [var (into [] (map first (filter (fn [[name func]] (func val)) @rexpr-matchers)))]))
+                                       [var
+                                        (get-matchers-for-value val)
+                                        ;(into [] (map first (filter (fn [[name func]] (func val)) @rexpr-matchers)))
+                                        ]))
                             ) ;; these are modes on the variables which can be matched
         generate-new-result-state (:jit-result-state kwargs true) ;; the result state should also be a jitted R-expr unless it is a single R-expr expression
-        compilation-unit {} ;; TODO
+        compilation-unit {:simplify-mode :fast ;; will have the inference mode also run once it runs out of fast stuff???
+                          } ;; TODO
         primitive-rexpr (:prim-rexpr jinfo)
+        rexpr-args-set (into #{} (get-arguments rexpr))
         ]
     ;; the jit info should contain information about what the origional expression was that this was constructed from
     (assert (not (nil? jinfo)))
-    (binding [*jit-current-compilation-unit* compilation-unit]
+    (binding [*jit-current-compilation-unit* compilation-unit
+              *jit-get-variable* (fn [var]
+                                   (assert (contains? rexpr-args-set var)) ;; otherwise this is something that should have been handled?
+                                   (let [val (get values var)
+                                         matchers (get arg-matchers var [])]
+                                     (merge {:var-modes matchers}
+                                            (when-not (nil? val) {:value val}))))]
       (let [ret (simplify-jit-top primitive-rexpr)]
         (debug-repl "rrs")
 
@@ -315,6 +378,10 @@
 (def-rewrite
   :match (proj (:any A) (:rexpr R))
   :run-at :jit-compiler
-  (do
-    (debug-repl "zz")
-    (???)))
+  (let [prev-get *jit-get-variable*]
+    (binding [*jit-get-variable* (fn [var]
+                                   (if (= var A)
+                                     ;; TODO: more matchers which can allow for it to be a a free variable
+                                     {:var-modes (get-matchers-for-value (make-variable 'some-free-variable-xxxx))}
+                                     (prev-get var)))]
+      (simplify R))))

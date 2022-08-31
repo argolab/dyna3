@@ -46,8 +46,6 @@
 (def rexpr-rewrites-construct-func (atom {}))
 (def rexpr-rewrites-inference-func (atom {}))
 
-(def rexpr-rewrites-during-jit-compilation-func (atom {}))
-
 ;; a map of functor type types to a list of rewrite rules bodies.  This is can be used by the JIT to combine rules
 (def rexpr-rewrites-source (atom {}))
 
@@ -930,12 +928,12 @@
       (let [ret `(let [~rewrite-func-var ~rewriter-function]
                    (locking dyna.rexpr-constructors/modification-lock
                      ~@(for [run-at (if (seqable? runs-at) runs-at [runs-at])]
-                         `(let [[rewrite-collection# rewrite-collection-func#]
+                         `(let [[rewrite-collection# rewrite-collection-func#] ;; the collection-func is NOT set here...... it is setup in def-base-rexpr
                                 ~(case run-at
                                    :standard `[(var-get #'rexpr-rewrites) (var-get #'rexpr-rewrites-func)]
                                    :construction `[(var-get #'rexpr-rewrites-construct) (var-get #'rexpr-rewrites-construct-func)]
                                    :inference `[(var-get #'rexpr-rewrites-inference) (var-get #'rexpr-rewrites-inference-func)]
-                                   :jit-compiler `[(var-get #'rexpr-rewrites-during-jit-compilation) (var-get #'rexpr-rewrites-during-jit-compilation-func)])
+                                   :jit-compiler `[(var-get #'rexpr-rewrites-during-jit-compilation) nil])
                                 functor-name# ~(symbol (str functor-name "-rexpr"))]
                             ;; this is now also protected by the modification lock above???, so we don't need the atomic I guess....
                             (swap-vals! rewrite-collection# (fn [old#] (assoc old# functor-name# (conj (get old# functor-name# #{}) ~rewrite-func-var))))
@@ -967,6 +965,8 @@
                                                       ;; this is the source of the rewrite function
                                                       :rewrite-func (quote ~rewriter-function)
                                                       :kw-args (quote ~kw-args)
+                                                      :rewrite-body (quote ~(last args))
+                                                      :namespace *ns*
                                                       }))))))
                    )]
         ;(when (= :jit-compiler runs-at)  (debug-repl "q1"))
@@ -1137,7 +1137,7 @@
 (def-rewrite-matcher :rexpr-list [rexpr-list]
                      (and (seqable? rexpr-list) (every? rexpr? rexpr-list)))
 
-(def-rewrite-matcher :empty-rexpr [rexpr] (is-empty-rexpr? rexpr))
+(def-rewrite-matcher :empty-rexpr [rexpr] (and (rexpr? rexpr) (is-empty-rexpr? rexpr)))
 
 
 ;; something that has a name first followed by a number of different unified expressions
@@ -1169,7 +1169,7 @@
 (def-rewrite-matcher :iterate [x]
   (and (is-variable? x) (not (is-bound? x))))
 
-(def-rewrite-matcher :type-known [x]
+#_(def-rewrite-matcher :type-known [x]
   ;; if there is meta data present for an expression in which case we can just use this
   (do (or (is-ground? x))
       (assert false)))
