@@ -76,7 +76,7 @@
 (def debug-useful-variables (atom {'aprint (constantly aprint)
                                    'reflect (constantly reflect)}))
 
-(defn- debug-repl-fn [prompt local-bindings ^Throwable traceback]
+(defn- debug-repl-fn [prompt local-bindings ^Throwable traceback print-bindings]
   (let [all-bindings  (merge (into {} (for [[k v] @debug-useful-variables]
                                         [k (v)]))
                              (into {} (for [[k v] (ns-publics 'dyna.rexpr-constructors)]
@@ -85,8 +85,9 @@
                                         [k (var-get v)]))
                              local-bindings)]
     (.printStackTrace traceback System/out)
-    (try (aprint local-bindings)
-         (catch Exception err nil))
+    (when print-bindings
+      (try (aprint local-bindings)
+           (catch Exception err nil)))
     (clojure.main/repl
      :read (fn [fresh-request exit-request]
              (let [res (clojure.main/repl-read fresh-request exit-request)]
@@ -109,7 +110,8 @@
 (defmacro debug-repl
   "Starts a REPL with the local bindings available."
   ([] `(debug-repl "dr"))
-  ([prompt] `(~debug-repl-fn ~prompt (debugger-get-local-bindings) (Throwable. "Entering Debugger"))))
+  ([prompt] `(debug-repl ~prompt true))
+  ([prompt print-bindings] `(~debug-repl-fn ~prompt (debugger-get-local-bindings) (Throwable. "Entering Debugger") ~print-bindings)))
 
 (defmacro debug-delay-ntimes [ntimes & body]
   (let [sym (gensym 'debug-delay)

@@ -52,7 +52,7 @@
            `[:is-assignment-rewrite true
              :assignment-requires-ground-vars [~@required-ground]  ;; variables which are required ground by this expression
              :assignment-computes-var ~(car body) ;; which variable is computed as the result of this expression
-             :assignment-computes-expression (quote ~(cdar body)) ;; the code which is going to do the computation
+             :assignment-computes-expression ~(cdar body) ;; the code which is going to do the computation
              ])
 
        ;; because of the let-expression, it is a little hard to pull apart the map value that is going to be returned
