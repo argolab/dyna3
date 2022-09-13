@@ -28,7 +28,8 @@
         [jit-rexpr jit-type] (synthize-rexpr rexpr)]
     ;; make a new rewrite rule
     (synthize-rewrite-rule jit-rexpr
-                           :arg-matches {(make-variable 'a) [:ground]} ;; a list of which pattern matches should be considered as matching
+                           :arg-matches {(make-variable 'a) [:ground]
+                                         (make-variable 'd) [:free]} ;; a list of which pattern matches should be considered as matching
                            :example-values {;(make-variable 'a)  22  ;; an "example" value which can be used to generate code for the rewrite, but not to condition specifically on this value
                                             }
                            :values {;(make-variable 'a) 22  ;; make a rewrite which is _specific_ to this particular value
@@ -38,5 +39,6 @@
                              jit-rexpr])
           ctx (context/make-empty-context rr)
           res (context/bind-context-raw ctx (simplify rr))]
-      (debug-repl "res from jit") ;; this should have that the
+      ;(debug-repl "res from jit") ;; this should have that the
+      (is (= res (make-multiplicity 1)))
       (is (= (ctx-get-value ctx (make-variable 'd)) (* (+ 11 1) 7))))))

@@ -1209,6 +1209,24 @@
   :run-at :construction
   (make-unify B A))
 
+(comment
+  (def-rewrite
+    :match (unify (:ground A) (:ground B))
+    :run-at [:standard :construction :inference]
+    :check (= (get-value A) (get-value B)))
+
+
+  ;; the assigns variable rewrite expands into a make-unify, so can't use it directly....
+  ;; I suppose can make the assigns varible code get included in the make-rewrite-func-body
+
+  (def-rewrite
+    :match (unify (:free A) (:ground B))
+    :run-at [:standard :inference]
+    :assigns-variable A
+    (get-value B))
+
+  )
+
 
 ;; (def-rewrite
 ;;   :match (unify (:structured B) (:ground A))

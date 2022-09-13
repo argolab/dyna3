@@ -12,6 +12,8 @@
 ;; map from the name of the jitted rexpr -> to the metadata which was used during construction
 (def rexprs-types-constructed (atom {}))
 
+(def rexpr-rewrites-constructed (atom #{}))
+
 ;; a map from an R-expr to a jitted rexpr
 (def rexprs-map-to-jit (atom {}))
 
@@ -25,21 +27,63 @@
 
 (def ^:dynamic *jit-get-variable*) ;; will be a function that can be called to get information about the flags, mode.
 
-(def ^:dynamic *jit-generate-clojure-code* (volatile! nil))  ;; a volatile which
-                                                             ;; is a pointer to
-                                                             ;; a function which
-                                                             ;; will return the
-                                                             ;; generated
-                                                             ;; clojure code up
-                                                             ;; to this point
+;; (def ^:dynamic *jit-generate-clojure-code* (volatile! nil))  ;; a volatile which
+;;                                                              ;; is a pointer to
+;;                                                              ;; a function which
+;;                                                              ;; will return the
+;;                                                              ;; generated
+;;                                                              ;; clojure code up
+;;                                                              ;; to this point
+
+(def ^:dynamic *jit-generate-functions* nil)
+
+(defn- add-to-generation! [func]
+  (conj! *jit-generate-functions* func))
+
+(defn- generate-cljcode [generate-functions]
+  (if (empty? generate-functions)
+    identity  ;; I suppose that this could just call its argument
+    (let [f (first generate-functions)
+          r (generate-cljcode (rest generate-functions))]
+      (fn [inner] (f (partial r inner))))))
+
+(defrecord jit-local-variable-rexpr [local-var-symbol]
+  RexprValue
+  (get-value [this] (???))
+  (get-value-in-context [this ctx] (???))
+  (set-value! [this value] (???))
+  (is-bound? [this] true)
+  (is-bound-in-context? [this ctx] true)
+  (all-variables [this] #{this})
+  (get-representation-in-context [this ctx]
+    (???))
+  Object
+  (toString [this] (str "(jit-local-variable " local-var-symbol ")")))
+
+(defmethod print-method jit-local-variable-rexpr [^jit-local-variable-rexpr this ^java.io.Writer w]
+  (.write w (.toString this)))
+
+(defn- generate-cljcode-assign-value [variable value-expression]
+  ;; variable should be some rexpr variable, and value-expression is a symbol of a local variable or a constant
+  (cond (is-constant? variable)
+        `(if (not= ~value-expression (quote ~(get-value variable)))
+           (throw (UnificationFailure.)))
+        (instance? jit-local-variable-rexpr variable)
+        `(if (not= ~value-expression ~(.local-var-symbol variable))
+           (throw (UnificationFailure.)))
+        (is-variable? variable)
+        (let [vinfo (*jit-get-variable* variable)]
+          ((:assign-func-cljcode vinfo) value-expression))
+        :else (do (debug-repl "???")
+                  (???))))
 
 
-(defn delete-rexpr-type [rexpr-name]
-  (???) ;; there should be something whic hcould be used to delete an R-expr.
-        ;; though if we are deleting the construction functions, then that might
-        ;; cause other expressions to break elsewhere.... so not sure how well
-        ;; this would work an practice
-  )
+;; (defn delete-rexpr-type [rexpr-name]
+;;   (???) ;; there should be something whic hcould be used to delete an R-expr.
+;;         ;; though if we are deleting the construction functions, then that might
+;;         ;; cause other expressions to break elsewhere.... so not sure how well
+;;         ;; this would work an practice
+;;   )
 
 
 ;; the iterables should be something like which variables and their orders can be
@@ -186,6 +230,8 @@
              :generated-name new-rexpr-name
              :make-rexpr-type rexpr-def-expr
              :conversion-function-expr conversion-function-expr
+             :variable-name-mapping new-arg-names ;; map from existing-name -> new jit-name
+             :variable-order new-arg-order        ;; the order of jit-names as saved in the R-expr
 
              ;; ;; should the conversion function have that there is some expression.  In the case that it might result in some of
              ;; ;; if there is something which is giong to construct this value, though there might
@@ -194,9 +240,6 @@
              ;; ;; check that the shape of the R-expr matches the kind of the thing that we can convert into this generated code
              ;; :check-could-be-converted (fn [rexpr] (???))
              }]
-
-
-    ;(debug-repl)
     (swap! rexprs-types-constructed assoc new-rexpr-name ret)
     ret))
 
@@ -229,6 +272,10 @@
 
 (defn- get-matchers-for-value [val]
   (into [] (map first (filter (fn [[name func]] (func val)) @rexpr-matchers))))
+
+(def ^:private free-variable-matchers (delay (get-matchers-for-value (make-variable (Object.)))))
+(def ^:private ground-variable-matchers (delay (get-matchers-for-value (make-constant (Object.)))))
+
 
 ;; (defn- check-matches
 ;;   ([rexpr matcher already-matched]
@@ -276,7 +323,10 @@
                                (when match-successful
                                  (assoc! matched-variables (cdar match-expr) (assoc var-info
                                                                                     :rexpr-var arg)))
+                               ;(when-not match-successful (debug-repl "rr"))
                                match-successful)
+
+
                              :else (do (debug-repl "todo3")
                                        (???))))))))
 
@@ -292,8 +342,11 @@
         (:is-check-rewrite (:kw-args rewrite) false) 90
         :else 0))
 
-(defn- is-composit-rexpr [rexpr]
-  )
+(defn- is-composit-rexpr? [rexpr]
+  ;; meaning that there is some sub-rexprs here, in which case, we might want to constructed
+  (some (fn r [x] (or (rexpr? x)
+                      (and (seqable? x) (some r x))))
+        (get-arguments rexpr)))
 
 (defn- make-rexpr-type-in-jit [construct-func]
   (fn [& args]
@@ -312,20 +365,14 @@
     (if (is-constant? (:value val))
       `(quote ~(get-value (:value val))) ;; constant can get directly embedded, use quote in case this is a symbol or something that could possibly get evaled
       (let [v (*jit-get-variable* (:rexpr-var val))]
-        `(get-value ~variable)
-        ;(debug-repl "gv")
-        )
+        (cond (:local-variable-value v)
+              (:local-variable-value v) ;; the value of this is stored in a local variable, so we can just use that
 
-      ))
-  #_(if (is-constant? variable)
-    `(quote ~(get-value variable)) ;; if it is a constant, then we canjust embed
-                                   ;; it directly into the source code, quote in
-                                   ;; case it is a symbol, though that shouldn't
-                                   ;; happen
-
-    (let [v (*jit-get-variable* variable)]
-      (debug-repl "gv")
-      )))
+              (:local-variable v)
+              `(get-value ~(:local-variable v)) ;; this is a variable which contains the matched expression, so we have to use get-value
+              :else (do (debug-repl "???")
+                        (???)) ;; TODO: handle this somehow?
+              )))))
 
 (alter-meta! #'get-value assoc :dyna-jit-inline (fn [form]
                                                   (get-value-cljcode (second form))))
@@ -387,64 +434,70 @@
                                                                                             (when suc
                                                                                               (assoc rr :matching-vars matching))))
                                                                                         rewrites))))
-        ]
-    (if (empty? matching-rewrites)
-      rexpr ;; then no rewrwite apply to this expression, so we are just going to leave it as is
-      (let [picked-rewrite (first matching-rewrites)
-            kw-args (:kw-args picked-rewrite)]
-        (binding [*generate-namespace* (strict-get picked-rewrite :namespace)]
-          (cond ;; this should match dyna.rexpr/make-rewrite-func-body
-            (:check kw-args false)
-            (let []
-              (debug-repl "check rewrite")
-              (???))
+        ret
+        (if (empty? matching-rewrites)
+          rexpr ;; then no rewrwite apply to this expression, so we are just going to leave it as is
+          (let [picked-rewrite (first matching-rewrites)
+                kw-args (:kw-args picked-rewrite)]
+            (binding [*generate-namespace* (strict-get picked-rewrite :namespace)]
+              (cond ;; this should match dyna.rexpr/make-rewrite-func-body
+                (:check kw-args false)
+                (let []
+                  (debug-repl "check rewrite")
+                  (???))
 
-            (:assigns-variable kw-args false)
-            (let [assigned-variable (:assigns-variable kw-args)
-                  var-mapping (strict-get picked-rewrite :matching-vars)]
-              (binding [*local-symbols* (merge *local-symbols*
-                                               var-mapping)]
-                (let [compute-value-code (transform-cljcode-to-jit (:rewrite-body picked-rewrite))]
-                  (debug-repl "ww" false))
+                (:assigns-variable kw-args false)
+                (let [assigned-variable (:assigns-variable kw-args)
+                      var-mapping (strict-get picked-rewrite :matching-vars)
+                      saved-in-local (gensym 'compute-result)]
+                  (binding [*local-symbols* (merge *local-symbols*
+                                                   var-mapping)]
+                    (let [compute-value-code (transform-cljcode-to-jit (:rewrite-body picked-rewrite))
+                          assign-value-code (generate-cljcode-assign-value
+                                             (strict-get (strict-get var-mapping assigned-variable) :rexpr-var)
+                                             saved-in-local)]
+                      (add-to-generation! (fn [body]
+                                            ;; this needs to track that the variable is now assigned.  If something will have that it can
+                                            `(let [~saved-in-local ~compute-value-code]
+                                               ~assign-value-code
+                                               ~(body))))
+                                        ;(debug-repl "ww" false)
+                      (make-multiplicity 1))
+                    ))
+
+                (:assigns kw-args false)
+                (let []
+                  (debug-repl "assigns many")
+                  (???))
+
+                (:infers kw-args false)
+                (let []
+                  ;; not sure if want this in the JITted code?  It would have to
+                  ;; check the context of the outer constraints, though I suppose
+                  ;; that we could just make the context be the constraints which
+                  ;; are inside of the JITted block?
+                  (debug-repl "infers new rexprs")
+                  (???))
+
+                #_(let [var-mapping (strict-get picked-rewrite :matching-vars)
+                        assign-expr (strict-get kw-args :assignment-computes-expression)
+                        assign-var (strict-get kw-args :assignment-computes-var)
+                        assign-inputs (strict-get kw-args :assignment-requires-ground-vars)
+                        zzz (debug-repl)
+                        inputs-let-bindings (into [] (concat (for [v assign-inputs]
+                                                               [v (get-value-cljcode (strict-get (get var-mapping v) :rexpr-var))])))
+                        ]
+                    (debug-repl "assign rewrite")
+                    (???))
+
+                :else
+                (do
+                  (debug-repl "other rewrite")
+                  (???))
                 ))
-
-            (:assigns kw-args false)
-            (let []
-              (debug-repl "assigns many")
-              (???))
-
-            (:infers kw-args false)
-            (let []
-              ;; not sure if want this in the JITted code?  It would have to
-              ;; check the context of the outer constraints, though I suppose
-              ;; that we could just make the context be the constraints which
-              ;; are inside of the JITted block?
-              (debug-repl "infers new rexprs")
-              (???))
-
-            #_(let [var-mapping (strict-get picked-rewrite :matching-vars)
-                  assign-expr (strict-get kw-args :assignment-computes-expression)
-                  assign-var (strict-get kw-args :assignment-computes-var)
-                  assign-inputs (strict-get kw-args :assignment-requires-ground-vars)
-                  zzz (debug-repl)
-                  inputs-let-bindings (into [] (concat (for [v assign-inputs]
-                                                         [v (get-value-cljcode (strict-get (get var-mapping v) :rexpr-var))])))
-                  ]
-              (debug-repl "assign rewrite")
-              (???))
-
-            :else
-            (do
-              (debug-repl "other rewrite")
-              (???))
-            ))
-        )
-      )
-     (debug-repl "generic simplify"))
-
-
-
-  (???))
+            ))]
+    ;(debug-repl "generic simplify")
+    ret))
 
 (defn simplify-jit [rexpr]
   (debug-binding
@@ -454,17 +507,12 @@
    (let [jit-specific (get @rexpr-rewrites-during-jit-compilation (type rexpr) [])
          jit-res (first (remove nil? (for [f jit-specific]
                                        (f rexpr simplify-jit))))
-         res (if (nil? jit-res)
+         ret (if (nil? jit-res)
                (simplify-jit-generic rexpr simplify-jit)
                jit-res)]
-     (debug-repl)
-     )
-   #_(let [ff (get @rexpr-rewrites-during-jit-compilation-func (type rexpr))
-         zz (debug-repl)
-         ret ((get @rexpr-rewrites-during-jit-compilation-func (type rexpr) simplify-jit-generic) rexpr simplify-jit)]
-     (assert (not (nil? ret)))
-
-     ret)))
+     ;(debug-repl)
+     ret
+     )))
 
 (defn- simplify-jit-top [rexpr]
   (loop [r rexpr]
@@ -479,6 +527,7 @@
         kwargs (apply hash-map vargs)
         values (:values kwargs) ;; these are values which we should specalize into the rewrite
         example-values (:example-values kwargs) ;; these are example values for a varible
+        matched-variable-names (vec (repeatedly (count (:variable-order jinfo)) #(gensym 'mv)))
         arg-matchers (merge (:arg-matches kwargs)
                             (into {} (for [[var val] (merge example-values values)]
                                        ;; figure out what matching rules can be used for this value
@@ -487,12 +536,19 @@
                                         ;(into [] (map first (filter (fn [[name func]] (func val)) @rexpr-matchers)))
                                         ]))
                             ) ;; these are modes on the variables which can be matched
+        arg-local-variable-map (into {} (for [[k v] (:variable-name-mapping jinfo)]
+                                          [k (nth matched-variable-names ((zipmap (:variable-order jinfo) (range)) v))]))
         generate-new-result-state (:jit-result-state kwargs true) ;; the result state should also be a jitted R-expr unless it is a single R-expr expression
         compilation-unit {:simplify-mode :fast ;; will have the inference mode also run once it runs out of fast stuff???
                           } ;; TODO
         primitive-rexpr (:prim-rexpr jinfo)
         rexpr-args-set (into #{} (get-arguments rexpr))
+        generate-functions (transient [])
+        computed-variable-values (transient {})
         ]
+    ;(debug-repl)
+    (assert (not (some #(or (rexpr? %) (instance? RexprValue %)) (vals values))))
+    (assert (not (some #(or (rexpr? %) (instance? RexprValue %)) (vals example-values))))
     ;; the jit info should contain information about what the origional expression was that this was constructed from
     (assert (not (nil? jinfo)))
     (binding [*jit-current-compilation-unit* compilation-unit
@@ -500,43 +556,106 @@
                                    (if-not (contains? rexpr-args-set var)
                                      {:not-found true}
                                      (let [val (get values var)
-                                           matchers (get arg-matchers var [])]
-                                       (merge {:var-modes matchers}
-                                              (when-not (nil? val) {:value val})))))]
+                                           matchers (if (contains? computed-variable-values var)
+                                                      @ground-variable-matchers
+                                                      (get arg-matchers var []))]
+                                       (merge {:var-modes matchers
+                                               :local-variable-value (get computed-variable-values var) ;; the variable which contains the raw value (do not use get-value)
+                                               :local-variable (get arg-local-variable-map var)  ;; the variable which contains the matched variable expression (needs to use get-value)
+                                               :assign-func-cljcode (fn [value-expression]
+                                                                      (if (contains? computed-variable-values var)
+                                                                        `(if (not= ~(get computed-variable-values var) ~value-expression)
+                                                                           (throw (UnificationFailure.)))
+                                                                        (do
+                                                                          (assert (symbol? value-expression))
+                                                                          (assoc! computed-variable-values var value-expression)
+                                                                          nil)))}
+                                              (when-not (nil? val) {:value val})))))
+              *jit-generate-functions* generate-functions]
       (let [ret (simplify-jit-top primitive-rexpr)]
-        (debug-repl "rrs")
+        (assert (not (is-composit-rexpr? ret))) ;; TODO: this should get handled with it generating a new JITted R-expr type for this
+        (assert (= (make-multiplicity 1) ret)) ;; this is going to need to be converted into something which can
+        (if (= ret primitive-rexpr)
+          (do (debug-repl "unable to do anything given the provided modes")
+              (???)
+              nil)
+          (let [variable-values (persistent! computed-variable-values)
+                inner-code `(do
+                              ;; first we are going to assign to variables anything which has been computed
+                              ~@(for [[varname local-var] variable-values]
+                                  `(set-value! ~(arg-local-variable-map varname) ~local-var))
+                              ;; this will generate the R-expr which is the result from this expression.
+
+                              ;; for now just be simple as this will have to figure out if this should make a new jit expression or if it can just return something directly
+                              (make-multiplicity 1))
+                gf (persistent! generate-functions)
+                rewrite-code ((generate-cljcode gf) inner-code)
+                full-rewrite `(def-rewrite
+                                :jit-compiler-rewrite true ;; indicate that this was generated
+                                :run-in-jit false  ;; we do not want to jit code that was already jitted
+                                :match {:rexpr (~(:generated-name jinfo)
+                                                ~@(let [local-map (into {} (for [[k v] arg-local-variable-map] [v k]))]
+                                                    (for [match-name matched-variable-names
+                                                          :let [matcher (get arg-matchers (local-map match-name) [])]]
+                                                      (if (empty? matcher)
+                                                        match-name
+                                                        (do (assert (< (count matcher) 2))
+                                                            `(~(first matcher) ~match-name)))))
+                                                )}
+                                ~rewrite-code)
+                ]
+
+            ;(debug-repl "rrs")
+
+            full-rewrite))
 
         ;; if this is a complex R-expr, then we might want to make a new R-expr
         ;; type, or find something which corresponds with this R-expr.
 
-        ))))
+        )))
 
 
-;; (defn synthize-rexpr-construct-rule [rexpr]
-;;   ;;
-;;   )
+  ;; (defn synthize-rexpr-construct-rule [rexpr]
+  ;;   ;;
+  ;;   )
+)
 
 (defn synthize-rewrite-rule [rexpr & vargs]
   ;; Given that there are lots of expressions which are combined together, this
   ;; could find that there are multiple modes which could be constructed as a
   ;; result.  If something would find that there is osme expression which would
-  (apply synthize-rewrite-cljcode rexpr vargs)
-  )
+  (let [signature [rexpr vargs]]
+    (when-not (contains? @rexpr-rewrites-constructed signature)
+      (swap! rexpr-rewrites-constructed conj signature) ;; record that we are going to construct this rewrite
+      (let [rewrite-code (apply synthize-rewrite-cljcode rexpr vargs)]
+        (when rewrite-code
+          (eval `(do (ns dyna.rexpr-jit)
+                     ~rewrite-code)))))))
 
-
-;; (def-rewrite
-;;   :match (proj (:any A) (:rexpr R))
-;;   :jit-compiler-rewrite true
-
-;;   )
 
 (def-rewrite
   :match (proj (:any A) (:rexpr R))
   :run-at :jit-compiler
-  (let [prev-get *jit-get-variable*]
+  (let [prev-get *jit-get-variable*
+        assigned (volatile! nil)]
     (binding [*jit-get-variable* (fn [var]
                                    (if (= var A)
                                      ;; TODO: more matchers which can allow for it to be a a free variable
-                                     {:var-modes (get-matchers-for-value (make-variable 'some-free-variable-xxxx))}
+                                     {:var-modes (if (nil? @assigned)
+                                                   @free-variable-matchers
+                                                   @ground-variable-matchers)
+                                      :local-variable-value @assigned
+                                      :assign-func-cljcode (fn [value-expression]
+                                                             (if (nil? @assigned)
+                                                               (do (assert (symbol? value-expression))
+                                                                   (vreset! assigned value-expression)
+                                                                   nil)
+                                                               `(if (not= ~@assigned ~value-expression)
+                                                                  (throw (UnificationFailure.)))
+                                                               ))}
                                      (prev-get var)))]
-      (simplify R))))
+      (let [ret (simplify R)]
+        (when (and (not (nil? @assigned)) (not (is-multiplicity? ret)))
+          (debug-repl "projqq") ;; TODO: this needs to perform renaming of the variables such that it will reference the local variable name
+          (???))
+        ret))))
