@@ -538,7 +538,7 @@
 (defn check-argument-mult [x] (or (and (int? x) (>= x 0)) (= ##Inf x)))
 (defn check-argument-rexpr [x] (rexpr? x))
 (defn check-argument-rexpr-list [x] (and (seqable? x) (every? rexpr? x) (not (instance? clojure.lang.LazySeq x))))
-(defn check-argument-var [x] (or (is-variable? x) (is-constant? x))) ;; a variable or constant of a single value.  Might want to remove is-constant? from this
+(defn check-argument-var [x] (satisfies? RexprValue x)) ;; a variable or constant of a single value.  Might want to remove is-constant? from this
 (defn check-argument-var-list [x] (and (seqable? x) (every? check-argument-var x)))
 (defn check-argument-var-map [x] (and (map? x) (every? (fn [[a b]] (and (check-argument-var a)
                                                                         (check-argument-var b)))
@@ -736,6 +736,7 @@
     (make-proj (first vars)
                (make-proj-many (rest vars) R))))
 
+(intern 'dyna.rexpr-constructors 'make-proj-many make-proj-many)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

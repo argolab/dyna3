@@ -305,6 +305,8 @@
                              (let [match-requires (car match-expr)
                                    var-info (cond (is-constant? arg) {:value arg}
                                                   (is-variable? arg) (*jit-get-variable* arg)
+                                                  (instance? jit-local-variable-rexpr arg) {:var-mode @ground-variable-matchers
+                                                                                            :local-variable-value (.local-var-symbol ^jit-local-variable-rexpr arg)}
                                                   :else (do (debug-repl "todo") (???)))
                                    match-successful
                                    (cond
@@ -353,6 +355,31 @@
     ;; this will allow us to intercept which functions are called when it is
     ;; doing the construction
     (apply construct-func args)))
+
+(defn- make-cljcode-to-make-rexpr [r]
+  ;; construct clojure code which will construct the given R-expr
+  (cond (rexpr? r)
+        (let [rname (rexpr-name r)]
+          `(~(ns-resolve (find-ns 'dyna.rexpr-constructors) (symbol (str "make-" rname)))
+            ~@(doall (map make-cljcode-to-make-rexpr (get-arguments r)))))
+
+        (is-constant? r)
+        `(make-constant (quote ~(get-value r)))
+
+        (instance? jit-local-variable-rexpr r)
+        `(make-constant ~(.local-var-symbol ^jit-local-variable-rexpr r))
+
+        (is-variable? r)
+        (let [vinfo (*jit-get-variable* r)]
+          (if (:local-variable-value vinfo)
+            `(make-constant (quote ~(:local-variable-value vinfo)))
+            (do (assert (:local-variable vinfo))
+                (:local-variable vinfo))))
+
+        :else
+        (do (debug-repl "todo handle")
+            (???))
+        ))
 
 (declare simplify-jit)
 (def ^:dynamic *generate-namespace*)
@@ -573,13 +600,18 @@
                                               (when-not (nil? val) {:value val})))))
               *jit-generate-functions* generate-functions]
       (let [ret (simplify-jit-top primitive-rexpr)]
-        (assert (not (is-composit-rexpr? ret))) ;; TODO: this should get handled with it generating a new JITted R-expr type for this
-        (assert (= (make-multiplicity 1) ret)) ;; this is going to need to be converted into something which can
+        (when (is-composit-rexpr? ret)
+          (debug-repl "ww")
+          (???)) ;; TODO: this should get handled with it generating a new JITted R-expr type for this
+        ;;(assert (= (make-multiplicity 1) ret)) ;; this is going to need to be converted into something which can
+        (when (not= (make-multiplicity 1) ret)
+          (debug-repl "bb"))
         (if (= ret primitive-rexpr)
           (do (debug-repl "unable to do anything given the provided modes")
               (???)
               nil)
-          (let [variable-values (persistent! computed-variable-values)
+          (let [construct-rexpr-code (make-cljcode-to-make-rexpr ret)
+                variable-values (persistent! computed-variable-values)
                 inner-code `(do
                               ;; first we are going to assign to variables anything which has been computed
                               ~@(for [[varname local-var] variable-values]
@@ -587,7 +619,8 @@
                               ;; this will generate the R-expr which is the result from this expression.
 
                               ;; for now just be simple as this will have to figure out if this should make a new jit expression or if it can just return something directly
-                              (make-multiplicity 1))
+                              ;(make-multiplicity 1)
+                              ~construct-rexpr-code)
                 gf (persistent! generate-functions)
                 rewrite-code ((generate-cljcode gf) inner-code)
                 full-rewrite `(def-rewrite
@@ -604,21 +637,8 @@
                                                 )}
                                 ~rewrite-code)
                 ]
-
-            ;(debug-repl "rrs")
-
-            full-rewrite))
-
-        ;; if this is a complex R-expr, then we might want to make a new R-expr
-        ;; type, or find something which corresponds with this R-expr.
-
-        )))
-
-
-  ;; (defn synthize-rexpr-construct-rule [rexpr]
-  ;;   ;;
-  ;;   )
-)
+            (debug-repl "rrs")
+            full-rewrite))))))
 
 (defn synthize-rewrite-rule [rexpr & vargs]
   ;; Given that there are lots of expressions which are combined together, this
@@ -655,7 +675,16 @@
                                                                ))}
                                      (prev-get var)))]
       (let [ret (simplify R)]
-        (when (and (not (nil? @assigned)) (not (is-multiplicity? ret)))
-          (debug-repl "projqq") ;; TODO: this needs to perform renaming of the variables such that it will reference the local variable name
-          (???))
-        ret))))
+        (if-not (nil? @assigned)
+          (let [nr (remap-variables ret {A (jit-local-variable-rexpr. @assigned)})]
+            ;(debug-repl "projqq")
+            nr)
+          (make-proj A ret))
+        #_(if (and (not (nil? @assigned)) (not (is-multiplicity? ret)))
+          (let [nr ]
+            ;; the nr rexpr will have the variables replaced with a reference to
+            ;; which local variable contains the value.  This is going to have
+            ;; to get removed before the R-expr is returned
+            (debug-repl "projqq") ;; TODO: this needs to perform renaming of the variables such that it will reference the local variable name
+            nr)
+          ret)))))

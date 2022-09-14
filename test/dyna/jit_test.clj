@@ -42,3 +42,25 @@
       ;(debug-repl "res from jit") ;; this should have that the
       (is (= res (make-multiplicity 1)))
       (is (= (ctx-get-value ctx (make-variable 'd)) (* (+ 11 1) 7))))))
+
+(deftest basic-jit4
+  (let [rexpr (make-proj-many [(make-variable 'c) (make-variable 'e)]
+                              ;; a + b + d + f = g
+                              (make-conjunct [(make-add (make-variable 'a) (make-variable 'b) (make-variable 'c))
+                                              (make-add (make-variable 'c) (make-variable 'd) (make-variable 'e))
+                                              (make-add (make-variable 'e) (make-variable 'f) (make-variable 'g))]))
+        [jit-rexpr jit-type] (synthize-rexpr rexpr)]
+    (synthize-rewrite-rule jit-rexpr
+                           :arg-matches {(make-variable 'a) [:ground]
+                                         (make-variable 'b) [:ground]
+                                         (make-variable 'd) [:ground]
+                                         (make-variable 'f) [:free]
+                                         (make-variable 'g) [:free]})
+    (let [rr (make-conjunct [(make-unify (make-variable 'a) (make-constant 1))
+                             (make-unify (make-variable 'b) (make-constant 2))
+                             (make-unify (make-variable 'd) (make-constant 3))
+                             jit-rexpr])
+          ctx (context/make-empty-context rr)
+          res (context/bind-context-raw ctx (simplify rr))]
+      (debug-repl "res from jit")
+      (is (= (make-add (make-constant 6) (make-variable 'f) (make-variable 'g)) res)))))

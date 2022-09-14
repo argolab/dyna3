@@ -55,6 +55,7 @@
 
 
 
+;; should change this to an interface...
 (defprotocol RexprValue
   (get-value [this])
   (get-value-in-context [this ctx])
