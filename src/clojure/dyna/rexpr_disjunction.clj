@@ -60,6 +60,9 @@
                           (make-disjunct-op disjunction-variables
                                             (trie-map-values rexprs nil (fn [trie-path r]
                                                                           (remap-function r)))))
+  (remap-variables-func [this remap-function]
+                        (???) ;; TODO
+                        )
   )
 
 (defn- remap-variables-disjunct-op [this variable-renaming-map remap-fn]

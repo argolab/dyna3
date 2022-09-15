@@ -62,5 +62,27 @@
                              jit-rexpr])
           ctx (context/make-empty-context rr)
           res (context/bind-context-raw ctx (simplify rr))]
-      (debug-repl "res from jit")
+      ;(debug-repl "res from jit")
       (is (= (make-add (make-constant 6) (make-variable 'f) (make-variable 'g)) res)))))
+
+(deftest basic-jit5
+  (let [rexpr (make-proj-many [(make-variable 'c) (make-variable 'e)]
+                              ;; a + b + d + f = g
+                              (make-conjunct [(make-add (make-variable 'a) (make-variable 'b) (make-variable 'c))
+                                              (make-add (make-variable 'c) (make-variable 'd) (make-variable 'e))
+                                              (make-add (make-variable 'e) (make-variable 'f) (make-variable 'g))]))
+        [jit-rexpr jit-type] (synthize-rexpr rexpr)]
+    (synthize-rewrite-rule jit-rexpr
+                           :arg-matches {(make-variable 'a) [:ground]
+                                         (make-variable 'b) [:ground]
+                                         (make-variable 'd) [:free]
+                                         (make-variable 'f) [:free]
+                                         (make-variable 'g) [:free]})
+    (let [rr (make-conjunct [(make-unify (make-variable 'a) (make-constant 1))
+                             (make-unify (make-variable 'b) (make-constant 2))
+                             jit-rexpr])
+          ctx (context/make-empty-context rr)
+          res (context/bind-context-raw ctx (simplify rr))]
+      ;(debug-repl "res from jit")
+      (is (some #{(make-constant 3)} (get-arguments res))) ;; check one of the arguments represents the result of the computation
+      (is (.startsWith (str (rexpr-name res)) "jit-rexpr")))))

@@ -376,6 +376,9 @@
             (do (assert (:local-variable vinfo))
                 (:local-variable vinfo))))
 
+        (.startsWith (.getName ^Class (type r)) "java.lang.")
+        `(quote ~r) ;; this is going to be some constant or builtin expression, so just pass it through
+
         :else
         (do (debug-repl "todo handle")
             (???))
@@ -600,17 +603,30 @@
                                               (when-not (nil? val) {:value val})))))
               *jit-generate-functions* generate-functions]
       (let [ret (simplify-jit-top primitive-rexpr)]
-        (when (is-composit-rexpr? ret)
-          (debug-repl "ww")
-          (???)) ;; TODO: this should get handled with it generating a new JITted R-expr type for this
-        ;;(assert (= (make-multiplicity 1) ret)) ;; this is going to need to be converted into something which can
-        (when (not= (make-multiplicity 1) ret)
-          (debug-repl "bb"))
         (if (= ret primitive-rexpr)
           (do (debug-repl "unable to do anything given the provided modes")
               (???)
               nil)
-          (let [construct-rexpr-code (make-cljcode-to-make-rexpr ret)
+          (let [construct-rexpr-code (if (or (not (is-composit-rexpr? ret)) (not generate-new-result-state))
+                                       (make-cljcode-to-make-rexpr ret)
+                                       ;; then we have to construct some new state
+                                       (let [hidden-vars (transient {})
+                                             reth (remap-variables-func ret (fn [var]
+                                                                              (if (instance? jit-local-variable-rexpr var)
+                                                                                (if (contains? hidden-vars var)
+                                                                                  (get hidden-vars var)
+                                                                                  (let [v (make-variable (gensym 'jit-hidden-var))]
+                                                                                    (assoc! hidden-vars var v)
+                                                                                    v))
+                                                                                var)))
+                                             exposed (exposed-variables reth)
+                                             hidden-vars (persistent! hidden-vars)
+                                             [synth-rr new-rexpr-type] (synthize-rexpr reth)
+                                             synth-rr2 (remap-variables synth-rr (into {} (for [[k v] hidden-vars] [v k])))
+                                             cljcode (make-cljcode-to-make-rexpr synth-rr2)]
+                                         (assert (every? exposed (vals hidden-vars)))
+                                         ;(debug-repl "tt")
+                                         cljcode))
                 variable-values (persistent! computed-variable-values)
                 inner-code `(do
                               ;; first we are going to assign to variables anything which has been computed
@@ -637,7 +653,7 @@
                                                 )}
                                 ~rewrite-code)
                 ]
-            (debug-repl "rrs")
+            ;(debug-repl "rrs")
             full-rewrite))))))
 
 (defn synthize-rewrite-rule [rexpr & vargs]
@@ -679,12 +695,4 @@
           (let [nr (remap-variables ret {A (jit-local-variable-rexpr. @assigned)})]
             ;(debug-repl "projqq")
             nr)
-          (make-proj A ret))
-        #_(if (and (not (nil? @assigned)) (not (is-multiplicity? ret)))
-          (let [nr ]
-            ;; the nr rexpr will have the variables replaced with a reference to
-            ;; which local variable contains the value.  This is going to have
-            ;; to get removed before the R-expr is returned
-            (debug-repl "projqq") ;; TODO: this needs to perform renaming of the variables such that it will reference the local variable name
-            nr)
-          ret)))))
+          (make-proj A ret))))))

@@ -218,7 +218,7 @@
                                             :var `(get ~'variable-map ~(cdar v) ~(cdar v))
                                             :value `(get ~'variable-map ~(cdar v) ~(cdar v))
                                             :hidden-var `(get ~'variable-map ~(cdar v) ~(cdar v))
-                                            :var-list `(map #(get ~'variable-map % %) ~(cdar v))
+                                            :var-list `(into [] (map #(get ~'variable-map % %) ~(cdar v)))
                                             :var-map `(into {} (for [~'[kk vv] ~(cdar v)] [~'kk (get ~'variable-map ~'vv ~'vv)]))
                                             :var-set-map `(into #{} (for [~'s ~(cdar v)]
                                                                       (into {} (for [~'[kk vv] ~'s] [~'kk (get ~'variable-map ~'vv ~'vv)]))))
@@ -232,6 +232,33 @@
                   ;; there was some change, so we are going to need to create a new object with the new values
                   (~(symbol (str "make-" name)) ~@(for [v vargroup]
                                                     (symbol (str "new-" (cdar v)))))))))))
+         (~'remap-variables-func ~'[this remap-function]
+          (debug-binding
+           [*current-simplify-stack* (conj *current-simplify-stack* ~'this)]
+           (context/bind-no-context
+            (let ~(vec (apply concat (for [v vargroup]
+                                       [(symbol (str "new-" (cdar v)))
+                                        (case (car v)
+                                          :var `(~'remap-function ~(cdar v))
+                                          :value `(~'remap-function ~(cdar v))
+                                          :hidden-var `(~'remap-function ~(cdar v))
+                                          :var-list `(into [] (map ~'remap-function ~(cdar v)))
+                                          :var-map `(into {} (for [~'[kk vv] ~(cdar v)]
+                                                               [~'kk (~'remap-function ~'vv)]))
+                                          :var-set-map `(into #{} (for [~'s ~(cdar v)]
+                                                                    (into {} (for [~'[kk vv] ~'s]
+                                                                               [~'kk (~'remap-function ~'vv)]))))
+                                          :rexpr `(~'remap-variables-func ~(cdar v) ~'remap-function)
+                                          :rexpr-list `(vec (map #(~'remap-variables-func % ~'remap-function) ~(cdar v)))
+                                          (cdar v) ;; default to just keep it the same
+                                          )
+                                        ])))
+              (if (and ~@(for [v vargroup]
+                           `(= ~(cdar v) ~(symbol (str "new-" (cdar v))))))
+                ~'this ;; nothing has changed
+                (~(symbol (str "make-" name)) ~@(for [v vargroup]
+                                                  (symbol (str "new-" (cdar v))))))))))
+
          (~'rewrite-rexpr-children ~'[this remap-function]
           ~(when (some #{:prefix-trie} (map car vargroup))
              `(throw (RuntimeException. "using rewrite-rexpr-children on a R-expr with :prefix-trie type")))

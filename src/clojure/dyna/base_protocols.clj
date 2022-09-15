@@ -26,6 +26,7 @@
   (remap-variables [this variable-renaming-map])
   (rewrite-rexpr-children [this remap-function])
   (rewrite-rexpr-children-no-simp [this remap-function])
+  (remap-variables-func [this remap-function])
 
   ;; in the case of hidden variables, those re something which need to get added to the map when it recurses through
   (remap-variables-handle-hidden [this variable-renaming-map])
