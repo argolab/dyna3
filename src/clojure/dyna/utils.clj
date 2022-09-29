@@ -413,9 +413,9 @@
           (lazy-seq (apply zipseq-longest (map next seqs))))))
 
 (defn indexof [col pred]
-  (for [[idx val] (zipseq (range) col)]
-    (when (pred val)
-      idx)))
+  (first (for [[idx val] (zipseq (range) col)
+               :when (pred val)]
+           idx)))
 
 (defn strict-get [map key]
   (let [r (get map key :not-found-value)]
@@ -424,3 +424,9 @@
         (debug-repl "key not found")
         (throw (RuntimeException. (str "Key " key " not found in map"))))
       r)))
+
+(defn drop-nth [coll n]
+  (cond
+    (< n 0) coll
+    (= n 0) (rest coll)
+    :else (cons (first coll) (lazy-seq (drop-nth (rest coll) (- n 1))))))

@@ -187,6 +187,12 @@
   (assert (bound? #'*context*))
   (context. *context* *use-full-context* :memo-expr-conditional rexpr #{rexpr} {}))
 
+(defn make-nested-context-aggregator-op-outer [rexpr]
+  (???))
+
+(defn make-nested-context-aggregator-op-inner [rexpr]
+  (???))
+
 (defmethod print-method context [this ^java.io.Writer w]
   (.write w (.toString ^Object this)))
 

@@ -472,9 +472,16 @@
             (binding [*generate-namespace* (strict-get picked-rewrite :namespace)]
               (cond ;; this should match dyna.rexpr/make-rewrite-func-body
                 (:check kw-args false)
-                (let []
-                  (debug-repl "check rewrite")
-                  (???))
+                (let [var-mapping (strict-get picked-rewrite :matching-vars)]
+                  (binding [*local-symbols* (merge *local-symbols* var-mapping)]
+                    (let [check-code (transform-cljcode-to-jit (:check kw-args))]
+                      (add-to-generation! (fn [body]
+                                            `(if ~check-code
+                                               ~(body)
+                                               (throw (UnificationFailure.)))))
+                      (debug-repl "check rewrite")
+                      (make-multiplicity 1) ;; assume that the check is going to be successful, in which case it would become mult-1
+                      )))
 
                 (:assigns-variable kw-args false)
                 (let [assigned-variable (:assigns-variable kw-args)

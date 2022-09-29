@@ -170,8 +170,7 @@
   (if (instance? DynaTerm ast)
     (case [(.name ^DynaTerm ast) (.arity ^DynaTerm ast)]
       ["$escaped" 1] (fun (get ast 0))
-      (apply union (map #(recurse-through-escaped % fun) (.arguments ^DynaTerm ast)))
-      )
+      (apply union (map #(recurse-through-escaped % fun) (.arguments ^DynaTerm ast))))
     #{}))
 
 (defn- find-all-variables [ast]

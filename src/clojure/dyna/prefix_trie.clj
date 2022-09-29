@@ -213,11 +213,13 @@
         (PrefixTrie. arity contains-wildcard new-root))))
 
   (trie-update-collection [this key update-fn]
-    (assert (= (count key) arity))
+    (assert (and (= (count key) arity)))
     (PrefixTrie. arity
-                 (apply bit-or contains-wildcard (map (fn [[idx v]] (if (nil? v) (bit-shift-left 1 idx) 0))
-                                                      (zipmap (range) key)))
-                 (update-in root key update-fn)))
+                 (reduce bit-or contains-wildcard (map (fn [[idx v]] (if (nil? v) (bit-shift-left 1 idx) 0))
+                                                       (zipmap (range) key)))
+                 (if (> arity 0)
+                   (update-in root key update-fn)
+                   (update-fn root))))
 
   (trie-insert-val [this key val]
     (assert (= (count key) arity)) ;; there should be some function which remaps the key into what the filter is going to construct

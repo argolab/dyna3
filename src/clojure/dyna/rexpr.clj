@@ -836,6 +836,7 @@
                                       (symbol? (cdar a)))
                                    (let [var (if (= (cdar a) '_) (gensym 'do-not-reuse) (cdar a))
                                          checker (get @rexpr-matchers (car a) (car a))]
+                                     (assert (not (keyword? checker))) ;; this should have already been resolved
                                      [`(~checker ~var) var nil])
 
                                  ;; if we did not match one of the existing patterns, then this assumes that the inner part needs to get matched recursivly
