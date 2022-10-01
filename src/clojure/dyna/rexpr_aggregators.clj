@@ -188,12 +188,12 @@
              (let [[la va] (.arguments ^DynaTerm a)
                    [lb vb] (.arguments ^DynaTerm b)]
                (if (> lb la) b a)))
-  :identity (DynaTerm. "$colon_line_tracking" [-1 colon-identity-elem])  ;; this is going to have that
-  :check-input (fn [x]
+  :identity (DynaTerm. "$colon_line_tracking" [-1 colon-identity-elem])
+  :check-input (fn [x] ;; this is currently not used by anything
                  (and
                   (instance? DynaTerm x)
                   (= "$colon_line_tracking" (.name ^DynaTerm x))))
-  :add-to-in-rexpr (let [linevar (make-variable (gensym))
+  :add-to-in-rexpr (let [linevar (make-variable (gensym)) ;; this is currently not used by anything
                          valvar (make-variable (gensym))]
                      (fn [current-value incoming-variable]
                        (let [[line val] (.arguments ^DynaTerm current-value)]

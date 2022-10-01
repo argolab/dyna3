@@ -125,6 +125,8 @@
                                                          (ctx-add-rexpr! parent rx)))))
                                                  resulting-rexpr)
       (= context-kind :memo-expr-conditional) resulting-rexpr  ;; I suppose this will just reset after it runs
+      (= context-kind :aggregator-op-inner) resulting-rexpr
+      (= context-kind :aggregator-op-outer) resulting-rexpr ;; not sure what should happen in these cases, the variables which are the results should get saved
       :else (do
               (dyna-debug (debug-repl "context unknown kind"))
               (???))))  ;; todo: other kinds of contexts which are going
@@ -188,10 +190,10 @@
   (context. *context* *use-full-context* :memo-expr-conditional rexpr #{rexpr} {}))
 
 (defn make-nested-context-aggregator-op-outer [rexpr]
-  (???))
+  (context. *context* *use-full-context* :aggregator-op-outer rexpr #{rexpr} {}))
 
-(defn make-nested-context-aggregator-op-inner [rexpr]
-  (???))
+(defn make-nested-context-aggregator-op-inner [rexpr projected-vars incoming-var]
+  (context. *context* *use-full-context* :aggregator-op-inner rexpr #{rexpr} (into {incoming-var nil} (for [v projected-vars] [v nil]))))
 
 (defmethod print-method context [this ^java.io.Writer w]
   (.write w (.toString ^Object this)))

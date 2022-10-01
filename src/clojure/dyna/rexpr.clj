@@ -1013,7 +1013,16 @@
         ret `(let [iter-func# ~iter-func]
                (swap! rexpr-iterators-accessors (fn ~'[old]
                                                   (assoc ~'old ~functor-type (conj (get ~'old ~functor-type [])
-                                                                                   iter-func#)))))
+                                                                                   iter-func#))))
+               ;; this needs to save the code definition for finding an iterator
+               `(when-not (:can-jit kw-args true)
+                  ;; this will want to take the matcher name and the func-body for the expression
+                  ;; the matcher will want to identify the same expression values?
+
+                  ;; though there might not be that much stuff which will have custom iterator code?  I suppose that it should
+                  ;; just find what is possible with this
+                  )
+               )
         ]
     ret))
 

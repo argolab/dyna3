@@ -450,6 +450,7 @@
 ;; the contained variable should just be true.  In which case it will ensure that the value is contained inside of the range
 (def-user-term "range" 4 (make-range v0 v1 v2 v3 v4))
 (def-user-term "range" 3 (make-range v0 v1 (make-constant 1) v2 v3))
+(def-user-term "range" 2 (make-range (make-constant 0) v0 (make-constant 1) v1 v2))
 
 (def-rewrite
   :match (range (:ground Low) (:ground High) (:ground Step) (:ground Out) (:any Contained))

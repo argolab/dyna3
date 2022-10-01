@@ -2,7 +2,7 @@
   (:require [clojure.test :refer :all])
   (:require [dyna.utils :refer [debug-repl]])
   (:require [dyna.core])
-  (:require [dyna.base-protocols :refer [is-empty-rexpr? is-non-empty-rexpr?]])
+  (:require [dyna.base-protocols :refer [is-empty-rexpr? is-non-empty-rexpr? get-value-in-context]])
   (:require [dyna.rexpr :refer [make-disjunct make-multiplicity make-unify make-variable make-constant make-conjunct make-proj-many make-aggregator simplify]])
   (:require [dyna.rexpr-builtins :refer [make-times make-range]])
   (:require [dyna.rexpr-disjunction :refer [is-disjunct-op?]])
@@ -80,7 +80,29 @@ assert b = 22. %1 + 2*3 + 3 + 4*3.
       (is (is-aggregator-op-outer? r))
       (let [ctx (context/make-empty-context r)
             res (context/bind-context-raw ctx (simplify r))]
-        (debug-repl "drtest")
+        (is (= (get-value-in-context (make-variable 'result) ctx) (+ (* (reduce + (range  0 10)) 7)
+                                                                     (* (reduce + (range 20 30)) 13))))))))
 
+(deftest efficient-aggregator2
+  (binding [system/*use-optimized-rexprs* true]
+    (run-string "
+f(X) += V:range(X)*10.
+f(X) += V:range(X,100)*50.
 
-        ))))
+assert f(17) == 242060.
+")))
+
+(deftest efficient-aggregator3
+  (binding [system/*use-optimized-rexprs* true]
+    (run-string "
+
+% define a basic matrix
+a(0,0) = 1.
+a(0,1) = 2.
+a(1,0) = 0.
+a(1,1) = 1.
+
+b(X,Y) += a(X,Z) * a(Z,Y).
+
+print b(0,0).
+")))
