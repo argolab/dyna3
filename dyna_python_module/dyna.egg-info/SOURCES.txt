@@ -2,6 +2,7 @@ README.md
 setup.py
 dyna/__init__.py
 dyna/java_wrapper.py
+dyna/java_wrapper_v1.py
 dyna.egg-info/PKG-INFO
 dyna.egg-info/SOURCES.txt
 dyna.egg-info/dependency_links.txt

@@ -83,8 +83,8 @@ public final class DynaInterface {
     }
 
 
-    public void runString(String program) { run_string(program); }
-    public void runString(DynaSystem s, String program) { run_string(s, program); }
+    // public void runString(String program) { run_string(program); }
+    // public void runString(DynaSystem s, String program) { run_string(s, program); }
     public void run_string(String program) { run_string(null, program); }
     public void run_string(DynaSystem s, String program) { run_string(s, program, null); }
     public void run_string(DynaSystem s, String program, Object[] external_values) {
@@ -106,9 +106,14 @@ public final class DynaInterface {
         run_file_f.invoke(s == null ? null : s.system, filename);
     }
 
+    public Object run_query(String q) { return run_query(null, q); }
     public Object run_query(DynaSystem s, String query) {
         // this might come back as an R-expr, in which case I suppose that we should wrap it in something
-        Object r = run_query_f.invoke(s == null ? null : s.system, query);
+        return run_query(s, query, null);
+    }
+
+    public Object run_query(DynaSystem s, String query, Object[] external_values) {
+        Object r = run_query_f.invoke(s == null ? null : s.system, query, external_values);
         if(is_rexpr(r)) {
             return new DynaRexpr(r);
         }
@@ -143,7 +148,7 @@ public final class DynaInterface {
      * Define an external function which will be defined globally
      */
     public void define_external_function(String function_name, int function_arity, ExternalFunction func) {
-
+        assert(false);
     }
 
     public void define_external_function(String function_name, int function_arity, IFn func) {
@@ -191,7 +196,28 @@ public final class DynaInterface {
     Object create_dyna_sytem();
     */
 
-    public DynaSystem create_dyna_sytem() {
+    public String get_term_name(Object term) {
+        if(term instanceof DynaTerm) {
+            return ((DynaTerm)term).name;
+        }
+        return null;
+    }
+
+    public int get_term_arity(Object term) {
+        if(term instanceof DynaTerm) {
+            return ((DynaTerm)term).arity();
+        }
+        return -1;
+    }
+
+    public Object get_term_argument(Object term, int i) {
+        if(term instanceof DynaTerm) {
+            return ((DynaTerm)term).get(i);
+        }
+        return null;
+    }
+
+    public DynaSystem create_dyna_system() {
         return new DynaSystem(create_system_f.invoke());
     }
 
@@ -220,4 +246,6 @@ public final class DynaInterface {
         //clojure_get = Clojure.var("clojure.core", "get");
         clojure_keyword = Clojure.var("clojure.core", "keyword");
     }
+
+    public static void main(String[] args) {}
 }

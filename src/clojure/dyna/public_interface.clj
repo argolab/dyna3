@@ -3,10 +3,11 @@
 ;; that all interaction with the system will run through this interface
 
 (ns dyna.public-interface
+  (:require [dyna.core])
   (:require [dyna.utils :refer :all])
-  (:require [dyna.core :refer :all])
-  (:require [dyna.system :refer :all])
-  (:require [dyna.rexpr :refer :all])
+  (:require [dyna.system :as system])
+  (:require [dyna.base-protocols :refer [get-value-in-context is-empty-rexpr?]])
+  (:require [dyna.rexpr :refer [construct-rexpr make-variable]])
   (:require [dyna.ast-to-rexpr :refer [import-file-url
                                        eval-string]])
   (:import [dyna DynaInterface]))
@@ -15,7 +16,7 @@
 (defmacro maybe-sys [sys & body]
   `(if (nil? ~sys)
      (do ~@body)
-     (run-under-system ~sys ~@body)))
+     (system/run-under-system ~sys ~@body)))
 
 (defn run-string [sys prog external-values]
   (maybe-sys sys
@@ -28,43 +29,21 @@
              (import-file-url prog)))
 
 (defn run-query [sys query external-values]
-  (let [query-result (volatile! [])]
+  (let [query-result (volatile! {})]
     (maybe-sys sys
                (binding [system/parser-external-value (fn [index]
                                                         (get external-values index))
-                         system/query-output (fn [qr]
-                                               (vreset! query-result qr))]
-                 ;; the query needs to get run and the result will then be returned
-                 (???)))))
+                         system/query-output (fn [[dyna-code line-number] result-info]
+                                               (let [val (get-value-in-context (make-variable "$query_result_var") (:context result-info))]
+                                                 (vswap! query-result assoc line-number val)))]
+                 ;; any queries made when evaluating the string are going to be passed to the query-output function
+                 (eval-string query)
+                 ;; convert the results of the different queries to a java Object array
+                 (into-array Object (for [k (sort (keys @query-result))]
+                                      (get @query-result k)))))))
 
 (defn make-rexpr [name args] ;; name is a string, and args should be an array of arguments which are passed into the R-expr
   (apply construct-rexpr name args))
 
 (defn create-system []
-  (make-new-dyna-system))
-
-;; (defn get-backend-interface []
-;;   (reify dyna.DynaInterface
-;;     (run-string [system program]
-;;       (???))
-;;     (run-file [system filename]
-;;       (???))
-;;     (run-query [system query]
-;;       (???))
-;;     (make-rexpr [name args]
-;;       (???))
-;;     (make-variable [name]
-;;       (???))
-;;     (make-constant [value]
-;;       (???))
-;;     (simplify [system rexpr]
-;;       (???))
-;;     (get-term-name [^DynaTerm term]
-;;       (.name term))
-;;     (get-term-arity [^DynaTerm term]
-;;       (.arity term))
-;;     (get-term-argument [^DynaTerm term arg]
-;;       (get term arg))
-
-;;     (create-dyna-system []
-;;       (???))))
+  (system/make-new-dyna-system))
