@@ -11,7 +11,8 @@
   (:require [clojure.set :refer [difference]])
   (:import [dyna.rexpr proj-rexpr disjunct-rexpr aggregator-rexpr])
   (:import [dyna.rexpr_disjunction disjunct-op-rexpr])
-  (:import [dyna.prefix_trie PrefixTrie]))
+  (:import [dyna.prefix_trie PrefixTrie])
+  (:import [dyna UnificationFailure]))
 
 
 (def-base-rexpr aggregator-op-outer [:unchecked operator
@@ -57,10 +58,11 @@
                              (#(= % true) body-is-conjunctive) (:rexpr R))
           :check system/*use-optimized-rexprs*}
   :run-at :construction
-  (make-aggregator-op-outer (get @aggregators operator) result-variable
-                            (make-aggregator-op-inner incoming-variable
-                                                      []
-                                                      R)))
+  (let [inner (make-aggregator-op-inner incoming-variable
+                                                        []
+                                                        R)]
+    ;(debug-repl)
+    (make-aggregator-op-outer (get @aggregators operator) result-variable inner)))
 
 ;; if there is a project nested inside of the aggregator inner expression, then we are going pull the projection out and add it to the aggregator
 (def-rewrite
@@ -133,72 +135,75 @@
 (def-rewrite
   :match (aggregator-op-inner (:any incoming-variable) (:any-list projected-vars) (:rexpr Rbody))
   :run-at [:standard :inference]
-  (let [exposed (exposed-variables rexpr) ;; if all of the exposed are ground, then we should just go ahead and compute the value
-        ctx (context/make-nested-context-aggregator-op-inner Rbody projected-vars incoming-variable)
-        nR (context/bind-context ctx (simplify Rbody))]
+  (let [ctx (context/make-nested-context-aggregator-op-inner Rbody projected-vars incoming-variable)]
+    ;(debug-repl "oo2")
+    (context/bind-context-raw
+     ctx
+     (let [exposed (exposed-variables rexpr) ;; if all of the exposed are ground, then we should just go ahead and compute the value
+           nR (try (simplify Rbody)
+                   (catch UnificationFailure e (make-multiplicity 0)))]
 
-    ;(debug-repl "oo")
+       ;(debug-repl "oo")
 
-    (cond
-      (is-empty-rexpr? nR) (make-multiplicity 0)
-      (and (is-multiplicity? nR) (is-bound-in-context? incoming-variable ctx)) (let [ret (*aggregator-op-contribute-value* (get-value-in-context incoming-variable ctx) (:mult nR))]
-                                                                                 ;; this needs to just return the value from the expression
-                                                                                 (debug-repl "result is found")
-                                                                                 ret)
-      (every? is-ground? exposed)
-      (context/bind-context-raw
-       ctx
-       (let [iterators (find-iterators nR)
-             result-rexprs (volatile! nil)]
-         ;; will loop over assignments to all of the variables
-         (run-iterator
-          :iterators iterators
-          :bind-all true
-          :rexpr-in nR
-          :rexpr-result inner-r
-          :simplify simplify
+       (cond
+         (is-empty-rexpr? nR) (make-multiplicity 0)
+         (and (is-multiplicity? nR) (is-bound-in-context? incoming-variable ctx)) (let [ret (*aggregator-op-contribute-value* (get-value-in-context incoming-variable ctx) (:mult nR))]
+                                                                                    ;; this needs to just return the value from the expression
+                                                                                    ;(debug-repl "result is found")
+                                                                                    ret)
+         (every? is-ground? exposed)
+         (let [iterators (find-iterators nR)
+               result-rexprs (volatile! nil)]
+           ;; will loop over assignments to all of the variables
+           (run-iterator
+            :iterators iterators
+            :bind-all true
+            :rexpr-in nR
+            :rexpr-result inner-r
+            :simplify simplify
                                         ;:required [incoming-variable] ;; we still want to loop even if we can't directly assign this value
-          (do
-            ;; if this is not a multiplicity, then this expression has something that can not be handled
-            ;; in which case this will need to report an error, or return the R-expr while having that it can not be solved...
-            (if (is-multiplicity? inner-r)
-              (let [val (get-value incoming-variable)
-                    mult (:mult inner-r)]
-                (when-not (= mult 0)
-                  (let [rc (*aggregator-op-contribute-value* val mult)]
-                    (when-not (is-empty-rexpr? rc)
-                      ;; then we have to save the result of this R-expr, as it could not get processed for some reason
-                      (vswap! result-rexprs conj rc)))))
-              (let [new-incoming (if (is-bound? incoming-variable)
-                                   (make-constant (get-value incoming-variable))
-                                   incoming-variable)
-                    remapping-map (into {} (for [v (cons incoming-variable projected-vars)
-                                                 :when (is-bound? v)]
-                                             [v (make-constant (get-value v))]))
-                    new-projected (vec (filter #(not (is-bound? %)) projected-vars))
-                    new-body (remap-variables inner-r remapping-map)
-                    rc (make-aggregator-op-inner new-incoming new-projected new-body)]
-                ;(debug-repl "pp") ;; this needs to save the result, and remove any projections that are now fully resolved
-                (vswap! result-rexprs conj rc)
-               ))))
+            (do
+              ;; if this is not a multiplicity, then this expression has something that can not be handled
+              ;; in which case this will need to report an error, or return the R-expr while having that it can not be solved...
+              (if (is-multiplicity? inner-r)
+                (let [val (get-value incoming-variable)
+                      mult (:mult inner-r)]
+                  (when-not (= mult 0)
+                    (let [rc (*aggregator-op-contribute-value* val mult)]
+                      (when-not (is-empty-rexpr? rc)
+                        ;; then we have to save the result of this R-expr, as it could not get processed for some reason
+                        (vswap! result-rexprs conj rc)))))
+                (let [new-incoming (if (is-bound? incoming-variable)
+                                     (make-constant (get-value incoming-variable))
+                                     incoming-variable)
+                      remapping-map (into {} (for [v (cons incoming-variable projected-vars)
+                                                   :when (is-bound? v)]
+                                               [v (make-constant (get-value v))]))
+                      new-projected (vec (filter #(not (is-bound? %)) projected-vars))
+                      new-body (remap-variables inner-r remapping-map)
+                      rc (make-aggregator-op-inner new-incoming new-projected new-body)]
+                  ;(debug-repl "pp") ;; this needs to save the result, and remove any projections that are now fully resolved
+                  (vswap! result-rexprs conj rc)
+                  ))))
 
-         (if (empty? @result-rexprs)
-           ;; then everything has been processed, so there is no need for this to remain
-           (make-multiplicity 0)
-           ;; there exists some branches which could not be fully resolved, so this is going to remain
-           (make-disjunct (vec @result-rexprs)))))
+           (if (empty? @result-rexprs)
+             ;; then everything has been processed, so there is no need for this to remain
+             (make-multiplicity 0)
+             ;; there exists some branches which could not be fully resolved, so this is going to remain
+             (make-disjunct (vec @result-rexprs))))
 
-      :else (let [new-incoming (if (is-bound-in-context? incoming-variable ctx)
-                                 (make-constant (get-value-in-context incoming-variable ctx))
-                                 incoming-variable)
-                  remapping-map (into {} (for [v (cons incoming-variable projected-vars)
-                                               :when (is-bound-in-context? v ctx)]
-                                           [v (make-constant (get-value-in-context v ctx))]))
-                  new-projected (vec (filter #(not (is-bound-in-context? % ctx)) projected-vars))
-                  new-body (remap-variables nR remapping-map)
-                  ret (make-aggregator-op-inner new-incoming new-projected new-body)]
-              ;(debug-repl "aoi ret3")
-              ret))))
+         :else
+         (let [new-incoming (if (is-bound-in-context? incoming-variable ctx)
+                              (make-constant (get-value-in-context incoming-variable ctx))
+                              incoming-variable)
+               remapping-map (into {} (for [v (cons incoming-variable projected-vars)
+                                            :when (is-bound-in-context? v ctx)]
+                                        [v (make-constant (get-value-in-context v ctx))]))
+               new-projected (vec (filter #(not (is-bound-in-context? % ctx)) projected-vars))
+               new-body (remap-variables nR remapping-map)
+               ret (make-aggregator-op-inner new-incoming new-projected new-body)]
+                                        ;(debug-repl "aoi ret3")
+           ret))))))
 
 ;; these are only conjunctive, so if the body is zero, then the expression will also be zero
 (def-rewrite

@@ -1341,9 +1341,11 @@
             (not= (.arity ^DynaTerm out-val) (count arguments)))
       (make-multiplicity 0) ;; the types do not match, so this is nothing
       (let [conj-map (into [] (map (fn [a b] (make-unify a (make-constant b)))
-                                   arguments (.arguments ^DynaTerm out-val)))]
-        (make-conjunct [(make-unify dynabase (make-constant (.dynabase ^DynaTerm out-val)))
-                        (make-conjunct conj-map)])))))
+                                   arguments (.arguments ^DynaTerm out-val)))
+            ret (make-conjunct [(make-unify dynabase (make-constant (.dynabase ^DynaTerm out-val)))
+                                (make-conjunct conj-map)])]
+        ;(debug-repl "rr")
+        ret))))
 
 (def-rewrite
   :match {:rexpr (unify-structure (:any out) (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:any-list arguments))

@@ -8,7 +8,8 @@
   (:require [dyna.rexpr-constructors :refer [make-multiplicity]])
   (:require [dyna.utils :refer [debug-repl]])
   (:require [clojure.string :refer [trim]])
-  (:import [dyna DynaUserAssert]))
+  (:import [dyna DynaUserAssert DynaUserError])
+  (:import [org.antlr.v4.runtime InputMismatchException]))
 
 
 ;; there should be some REPL which is based off jline or something which allows
@@ -33,7 +34,10 @@
                            (let [res (proxy-super parse line cursor context)
                                  pres (try (binding [print-parser-errors false]
                                              (parse-string line :fragment-allowed false))
-                                           (catch RuntimeException e nil))]
+                                           (catch RuntimeException e nil)
+                                           ;(catch InputMismatchException e nil)
+                                           ;(catch StringIndexOutOfBoundsException e nil)
+                                           )]
                              (when (and (nil? pres) (not (is-command? line)))
                                ;; if the expression does not parse, then we are
                                ;; going to throw an exception so that the user
@@ -45,6 +49,7 @@
                                                (aset a 1 DefaultParser$Bracket/ROUND)
                                                (aset a 2 DefaultParser$Bracket/SQUARE)
                                                a))
+                 (.setQuoteChars p (char-array "\"")) ;; a single quote can stand alone on '{}
                  (.setEofOnUnclosedQuote p true)
                  p)
         line-reader (-> (LineReaderBuilder/builder)
@@ -82,6 +87,8 @@
                       (println "ok")
                       (println rexpr-result)))
                   (catch DynaUserAssert e
+                    (println (.getMessage e)))
+                  (catch DynaUserError e
                     (println (.getMessage e)))))
               (recur)))))
       (catch UserInterruptException err nil))))

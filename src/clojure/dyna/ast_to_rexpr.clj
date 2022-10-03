@@ -19,6 +19,7 @@
   (:import [java.io FileNotFoundException]))
 
 
+(def ^:dynamic print-parser-errors true)
 
 
 
@@ -410,12 +411,19 @@
                                            "load_clojure" (match-term arg1 ("load_clojure" cfile)
                                                                       (load cfile))
 
+                                           "$clojure" (match-term arg1 ("$clojure" clojure-string)
+                                                                  (let [clj-code (read-string clojure-string)]
+                                                                    (eval `(do
+                                                                             (ns dyna.evaluated-user-code)
+                                                                             ~clj-code))))
+
                                            "optimized_rexprs" (match-term arg1 ("optimized-rexprs" c)
                                                                           (alter-var-root system/*use-optimized-rexprs* (if c true false)))
 
                                            (do
                                              ;; in the case that this is invalid, we can raise an exception that should report the error to the user
-                                             (println (str "Compiler operation " (.name arg1) "not found"))
+                                             (when print-parser-errors
+                                               (println (str "Compiler operation " (.name arg1) "not found")))
                                              (throw (DynaUserError. (str "operator " (.name arg1) " not found"))))
                                            ;(???) ;; there should be some invalid parse expression or something in the case that this fails at this point
                                            )
@@ -724,7 +732,6 @@
             ;; we special case the ,/2 operator as this allows us to pass the info that the first expression will get unified with a constant true earlier
             ;; this should make some generation steps more efficient
             ["," 2]  (let [[a b] (.arguments ast)]
-                       ;;(println "A:" a "\nB:" b)
                        (make-conjunct [(convert-from-ast a
                                                          (make-constant true)
                                                          variable-name-mapping
@@ -844,8 +851,6 @@
 (defn get-parser-print-name [token]
   (.getDisplayName dyna.dyna_grammar2Lexer/VOCABULARY token))
 
-(def ^:dynamic print-parser-errors true)
-
 (def parse-error-handler
   (proxy [org.antlr.v4.runtime.DefaultErrorStrategy] []
     ;; (reportError [recognizer exception]
@@ -880,13 +885,21 @@
           (println "===================================================================================================="))))
     (reportUnwantedToken [recognizer]
       (when print-parser-errors
-        ;(debug-repl)
-        (println "=============> unwanted token")))
-    ))
+        (println "=============> unwanted token")))))
+
+(def lexer-error-handler
+  (proxy [org.antlr.v4.runtime.ConsoleErrorListener] []
+    (syntaxError [recognizer offendingSymbol line charPositionInLine msg e]
+      (when print-parser-errors
+        (proxy-super syntaxError recognizer offendingSymbol line charPositionInLine msg e))
+      (throw (RuntimeException. "syntax error" e)))))
+
 
 
 (defn run-parser [^CharStream stream & {:keys [fragment-allowed] :or {fragment-allowed false}}]
-  (let [lexer (dyna.dyna_grammar2Lexer. ^CharStream stream)
+  (let [lexer (doto (dyna.dyna_grammar2Lexer. ^CharStream stream)
+                (.removeErrorListeners)
+                (.addErrorListener lexer-error-handler))
         token-stream (UnbufferedTokenStream. lexer)
         parser (dyna.dyna_grammar2Parser. token-stream)]
     (comment
@@ -971,11 +984,13 @@
       ;; then we have to be the one to import this file
       (let [parse (parse-file url)]
         (if (nil? parse)
-          (println (str "WARNING: file " url " did not contain any dyna rules"))
+          (when print-parser-errors
+            (println (str "WARNING: file " url " did not contain any dyna rules")))
           (let [result (convert-from-ast parse (make-constant true) {} url)]
             (when-not (= result (make-multiplicity 1))
-              (println (str "failed to load file " url))
-              (aprint result)
+              (when print-parser-errors
+                (println (str "failed to load file " url))
+                (aprint result))
               ;(debug-repl "failed to load properly")
               (assert false))))))))
 

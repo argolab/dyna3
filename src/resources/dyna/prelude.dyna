@@ -45,9 +45,19 @@ random(Key) = random(Key, 0, 1).
 :- macro random/0.
 random = `(random(*)).
 
+:- macro random/2.
+random(Lower, Upper) = `(random(*, Lower, Upper)).
+
 :- make_system_term random/0.
+:- make_system_term random/2.
 :- make_system_term random/1.
 :- make_system_term random/3.
+
+% return the current random seed used by the system
+$random_seed = $clojure'{
+dyna.rexpr-builtins/random-seed
+}.
+:- make_system_term $random_seed/0.
 
 $null = &$null.
 :- make_system_term $null/0.

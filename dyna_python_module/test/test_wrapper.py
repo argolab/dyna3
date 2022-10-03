@@ -23,9 +23,12 @@ assert $0 == "world".
 ''', 'world')
 
 res = inst.query('''
+foo = 123.
 1 + 2?
+4?
 ''')
 assert res[0] == 3
+assert res[1] == 4
 
 res2 = inst.query('''
 1 + $0?
@@ -66,3 +69,11 @@ sum($0)?
 ''', [1,2,3])
 
 assert res6[0] == 6
+
+# test passing an opaque value through dyna
+class SomeTestClass: pass
+val = SomeTestClass()
+res7 = inst.query('''
+$0 ?
+''', val)
+assert res7[0] is val

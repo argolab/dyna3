@@ -62,7 +62,7 @@ class DynaTerm:
         return _interface.get_term_name(self)
     def __getitem__(self, i: int):
         assert isinstance(i, int)
-        return _interface.get_term_argument(self, i)
+        return cast_from_dyna(_interface.get_term_argument(self, i))
     def __repr__(self):
         return str(self)
 
@@ -72,28 +72,16 @@ def term(name, *args):
 
 __all__.append('term')
 
-def cast_to_dyna(x):
-    if isinstance(x, (str, int, bool, DynaTerm)):
-        return x
-    elif isinstance(x, (list, tuple)):
-        a = _jpype.JObject[:]([cast_to_dyna(v) for v in x])
-        v = _term_class.make_list(a)
-        return v
-    else:
-        # though this should just be some opaque type?  I suppose that there
-        # could be some class which wraps these values
-        raise TypeError(f'Do not know how to cast {type(x)} to Dyna')
-
-
-def cast_from_dyna(x):
-    if isinstance(x, _term_class):
-        l = x.list_to_array()
-        if l is not None:
-            return [cast_from_dyna(v) for v in l]
-    return x
-
-
-
+@_jpype.JImplements('dyna.OpaqueValue')
+class _OpaqueValue:
+    def __init__(self, wrapped):
+        self._wrapped = wrapped
+    def __eq__(self, other):
+        if isinstance(other, _OpaqueValue):
+            return self._wrapped == other._wrapped
+        return False
+    def __hash__(self):
+        return hash(self._wrapped)
 
 @_jpype.JImplements('dyna.ExternalFunction')
 class _ExternalFunctionWrapper:
@@ -102,6 +90,41 @@ class _ExternalFunctionWrapper:
     @_jpype.JOverride
     def call(self, args):
         return cast_to_dyna(self.__wrapped(*[cast_from_dyna(x) for x in args]))
+
+def cast_to_dyna(x):
+    if isinstance(x, (str, int, float, bool, _term_class, _jpype.JObject)):
+        return x
+    elif isinstance(x, (list, tuple)):
+        a = _jpype.JObject[:]([cast_to_dyna(v) for v in x])
+        v = _term_class.make_list(a)
+        return v
+    else:
+        return _OpaqueValue(x)
+
+_cast_map = {
+    _jpype.JClass('java.lang.Integer'): int,
+    _jpype.JClass('java.lang.Long'): int,
+    _jpype.JClass('java.lang.Short'): int,
+    _jpype.JClass('java.lang.Byte'): int,
+    _jpype.JClass('java.lang.Float'): float,
+    _jpype.JClass('java.lang.Double'): float,
+    _jpype.JClass('java.lang.Boolean'): bool,
+    _jpype.JClass('java.lang.Character'): str,
+    _jpype.JClass('java.lang.String'): str,
+}
+
+def cast_from_dyna(x):
+    if isinstance(x, _term_class):
+        l = x.list_to_array()
+        if l is not None:
+            return [cast_from_dyna(v) for v in l]
+        return x
+    elif isinstance(x, _OpaqueValue):
+        return x._wrapped
+    t = type(x)
+    if t in _cast_map:
+        return _cast_map[t](x)
+    return x
 
 class DynaInstance:
     def __init__(self):

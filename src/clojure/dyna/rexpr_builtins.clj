@@ -527,7 +527,7 @@
 ;; there is no way to define a range with 3 arguments, as it would use the same name here
 ;; that would have to be represented with whatever is some named mapped from a symbol to what is being created
 
-(def random-seed (Integer/valueOf (System/getProperty "dyna.random_seed" (str (rand-int 10000000)))))
+(def random-seed (Integer/valueOf (System/getProperty "dyna.random_seed" (str (rand-int (bit-shift-left 1 31))))))
 
 (defn generate-random [x]
   ;; this will generate a random int32 value

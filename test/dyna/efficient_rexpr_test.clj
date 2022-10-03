@@ -114,8 +114,8 @@ print b(0,0).
 sum([]) = 0.
 sum([X|Y]) = X+sum(Y).
 
-print sum([1,2,3,4]).
+%print sum([1,2,3,4]).
 
-%assert sum([1,2,3,4]) = 10.
+assert sum([1,2,3,4]) = 10.
 "))
   )
