@@ -434,7 +434,7 @@
                                                                       (DynaTerm. "$dynabase_access" [dynabase])
                                                                       (DynaTerm. "$constant" [DynaTerm/null_term]))])
                                                body)
-                                     dynabase-name (if-not (dnil? dynabase) (.name ^DynaTerm dynabase) DynaTerm/null_term)
+                                     ;dynabase-name (if-not (dnil? dynabase) (.name ^DynaTerm dynabase) DynaTerm/null_term)
                                      new-ast (DynaTerm. "$define_term_normalized"
                                                         [(.name ^DynaTerm head)
                                                          (.arity ^DynaTerm head)

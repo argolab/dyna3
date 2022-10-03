@@ -26,16 +26,16 @@ public final class DynaInterface {
     private static final IFn make_constant_f;
     private static final IFn make_rexpr_f;
     private static final IFn get_rexpr_name_f;
+    private static final IFn define_external_function_f;
     //private static final IFn clojure_get;
     private static final IFn clojure_keyword;
 
     /**
      * Wrap an instance of the DynaSystem.  There can be multiple dyna runtimes
      * instantiated at the same time.  These are created by the method
-     * `create_dyna_system` below.
+     * `create_dyna_system` below.  The internals of this are opaque
      */
     public static class DynaSystem {
-        // Wraps a
         final Object system;
         DynaSystem(Object v) { system = v; }
         public boolean equals(Object o) {
@@ -43,6 +43,9 @@ public final class DynaInterface {
         }
         public int hashCode() {
             return System.identityHashCode(system);
+        }
+        public String toString() {
+            return "DynaSystem@" + hashCode();
         }
     }
 
@@ -147,12 +150,12 @@ public final class DynaInterface {
     /**
      * Define an external function which will be defined globally
      */
-    public void define_external_function(String function_name, int function_arity, ExternalFunction func) {
-        assert(false);
+    public void define_external_function(DynaSystem sys, String function_name, int function_arity, ExternalFunction func) {
+        define_external_function_f.invoke(sys == null ? null : sys.system, function_name, function_arity, func);
     }
 
-    public void define_external_function(String function_name, int function_arity, IFn func) {
-        define_external_function(function_name, function_arity, new ExternalFunction () {
+    public void define_external_function(DynaSystem sys, String function_name, int function_arity, IFn func) {
+        define_external_function(sys, function_name, function_arity, new ExternalFunction () {
                 public Object call(Object... args) {
                     return func.applyTo(RT.seq(args));
                 }
@@ -243,6 +246,7 @@ public final class DynaInterface {
         make_constant_f = Clojure.var("dyna.rexpr", "make-constant");
         make_rexpr_f = Clojure.var("dyna.public-interface", "make-rexpr");
         get_rexpr_name_f = Clojure.var("dyna.base-protocols", "rexpr-name");
+        define_external_function_f = Clojure.var("dyna.public-interface", "define-external-function");
         //clojure_get = Clojure.var("clojure.core", "get");
         clojure_keyword = Clojure.var("clojure.core", "keyword");
     }

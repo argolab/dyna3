@@ -111,6 +111,6 @@ class DynaInstance:
 
     def define_function(self, name, arity, function):
         func = _ExternalFunctionWrapper(function)
-        self.__system.define_external_function(name, arity, func)
+        _interface.define_external_function(self.__system, name, arity, func)
 
 __all__.append('DynaInstance')

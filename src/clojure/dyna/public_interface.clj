@@ -6,11 +6,14 @@
   (:require [dyna.core])
   (:require [dyna.utils :refer :all])
   (:require [dyna.system :as system])
-  (:require [dyna.base-protocols :refer [get-value-in-context is-empty-rexpr?]])
-  (:require [dyna.rexpr :refer [construct-rexpr make-variable]])
+  (:require [dyna.base-protocols :refer [is-bound-in-context? get-value-in-context is-empty-rexpr?]])
+  (:require [dyna.rexpr :refer [construct-rexpr make-variable make-function-call]])
   (:require [dyna.ast-to-rexpr :refer [import-file-url
-                                       eval-string]])
-  (:import [dyna DynaInterface]))
+                                       eval-string
+                                       eval-ast
+                                       current-dir]])
+  (:require [dyna.user-defined-terms :refer [add-to-user-term]])
+  (:import [dyna DynaInterface ExternalFunction DynaTerm]))
 
 
 (defmacro maybe-sys [sys & body]
@@ -34,7 +37,11 @@
                (binding [system/parser-external-value (fn [index]
                                                         (get external-values index))
                          system/query-output (fn [[dyna-code line-number] result-info]
-                                               (let [val (get-value-in-context (make-variable "$query_result_var") (:context result-info))]
+                                               (let [ctx (:context result-info)
+                                                     qv (make-variable "$query_result_var")
+                                                     val (if (is-bound-in-context? qv ctx)
+                                                           (get-value-in-context qv ctx)
+                                                           (:rexpr result-info))]
                                                  (vswap! query-result assoc line-number val)))]
                  ;; any queries made when evaluating the string are going to be passed to the query-output function
                  (eval-string query)
@@ -47,3 +54,16 @@
 
 (defn create-system []
   (system/make-new-dyna-system))
+
+(defn define-external-function [sys ^String name arity ^ExternalFunction func]
+  (maybe-sys sys
+             (assert (and (string? name) (int? arity)))
+             (let [vars (vec (for [i (range arity)]
+                               (make-variable (str "$" i))))
+                   out (make-variable (str "$" arity))
+                   ff (fn [& args]
+                        (.call func (into-array Object args)))
+                   rexpr (make-function-call ff out vars)]
+
+               (add-to-user-term current-dir DynaTerm/null_term name arity rexpr)
+               (eval-ast (make-term ("$compiler_expression" ("make_system_term" ("/" name arity))))))))

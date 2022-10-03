@@ -1675,7 +1675,8 @@
 (def-rewrite
   :match (simple-function-call (:unchecked function) (:any result) (:ground-var-list arguments))
   :run-at [:standard :construction]
-  (make-unify result (make-constant (apply function (map get-value arguments)))))
+  :assigns-variable result
+  (apply function (map get-value arguments)))
 
 (defn make-function-call
   {:rexpr-constructor 'simple-function-call
