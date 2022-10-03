@@ -106,3 +106,16 @@ b(X,Y) += a(X,Z) * a(Z,Y).
 
 print b(0,0).
 ")))
+
+
+(deftest efficient-aggregator4
+  (binding [system/*use-optimized-rexprs* true]
+    (run-string "
+sum([]) = 0.
+sum([X|Y]) = X+sum(Y).
+
+print sum([1,2,3,4]).
+
+%assert sum([1,2,3,4]) = 10.
+"))
+  )

@@ -72,13 +72,36 @@ def term(name, *args):
 
 __all__.append('term')
 
+def cast_to_dyna(x):
+    if isinstance(x, (str, int, bool, DynaTerm)):
+        return x
+    elif isinstance(x, (list, tuple)):
+        a = _jpype.JObject[:]([cast_to_dyna(v) for v in x])
+        v = _term_class.make_list(a)
+        return v
+    else:
+        # though this should just be some opaque type?  I suppose that there
+        # could be some class which wraps these values
+        raise TypeError(f'Do not know how to cast {type(x)} to Dyna')
+
+
+def cast_from_dyna(x):
+    if isinstance(x, _term_class):
+        l = x.list_to_array()
+        if l is not None:
+            return [cast_from_dyna(v) for v in l]
+    return x
+
+
+
+
 @_jpype.JImplements('dyna.ExternalFunction')
 class _ExternalFunctionWrapper:
     def __init__(self, wrapped):
         self.__wrapped = wrapped
     @_jpype.JOverride
     def call(self, args):
-        return self.__wrapped(*list(args))
+        return cast_to_dyna(self.__wrapped(*[cast_from_dyna(x) for x in args]))
 
 class DynaInstance:
     def __init__(self):
@@ -88,7 +111,7 @@ class DynaInstance:
         if not query_args:
             _interface.run_string(self.__system, x)
         else:
-            args = _jpype.JObject[:](query_args)
+            args = _jpype.JObject[:]([cast_to_dyna(v) for v in query_args])
             _interface.run_string(self.__system, x, args)
 
     def run_file(self, f):
@@ -104,10 +127,12 @@ class DynaInstance:
 
     def run_query(self, x, *query_args):
         if not query_args:
-            return _interface.run_query(self.__system, x)
+            res = _interface.run_query(self.__system, x)
+            return [cast_from_dyna(v) for v in res]
         else:
-            args = _jpype.JObject[:](query_args)
-            return _interface.run_query(self.__system, x, args)
+            args = _jpype.JObject[:]([cast_to_dyna(v) for v in query_args])
+            res = _interface.run_query(self.__system, x, args)
+            return [cast_from_dyna(v) for v in res]
 
     def define_function(self, name, arity, function):
         func = _ExternalFunctionWrapper(function)

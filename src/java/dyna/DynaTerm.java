@@ -209,8 +209,7 @@ public final class DynaTerm implements ILookup {
         return ret;
     }
 
-    public Object list_to_vec() {
-        // this has to construct a clojure vector from a dyna linked list object
+    public Object[] list_to_array() {
         int count = 0;
         DynaTerm s = this;
         while(".".equals(s.name)) {
@@ -226,6 +225,13 @@ public final class DynaTerm implements ILookup {
             tmp[i] = s.get(0);
             s = (DynaTerm)s.get(1);
         }
+        return tmp;
+    }
+
+    public Object list_to_vec() {
+        // this has to construct a clojure vector from a dyna linked list object
+        Object[] tmp = list_to_array();
+        if(tmp == null) return null;
         // vec is going to alias java arrays?  So this should just keep a reference to the above array rather than copying it?
         return clojure_vec.invoke(tmp);
     }

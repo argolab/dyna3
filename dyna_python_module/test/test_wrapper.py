@@ -45,3 +45,24 @@ my_function($0, $1)?
 ''', 3, 4)
 
 assert res3[0] == my_function(3, 4)
+
+
+res4 = inst.query('''
+&foo(1,2,3) ?
+''')
+print(res4[0])
+
+
+res5 = inst.query('''
+[1,2,3,4] ?
+''')
+print(res5[0])
+assert type(res5[0]) is list
+
+res6 = inst.query('''
+sum([]) = 0.
+sum([X|Y]) = X+sum(Y).
+sum($0)?
+''', [1,2,3])
+
+assert res6[0] == 6

@@ -212,45 +212,60 @@
       (debug-repl "nil user term")
       (dyna-warning (str "Did not find method " (:name name) "/" (:arity name) " from file " (:source-file name))))
 
-    (when ut  ;; this should really be a warning or something in the case that it can't be found. Though we might also need to create some assumption that nothing is defined...
-      (let [;;rexprs (:rexprs ut)
-            ;;rexpr (combine-user-rexprs-bodies rexprs)
-            rexpr (user-rexpr-combined ut)
-            rewrite-user-call-depth (fn rucd [rexpr]
-                                      (dyna-assert (rexpr? rexpr))
-                                      (if (is-user-call? rexpr)
-                                        (let [[lname lvar-map lcall-depth] (get-arguments rexpr)
-                                              new-call (make-user-call lname lvar-map (+ call-depth lcall-depth 1)
-                                                                       #{})]
-                                          (when-not (rexpr? new-call)
-                                            (debug-repl "call fail rexpr"))
-                                          ;(debug-repl)
-                                          new-call)
-                                        (let [ret (rewrite-rexpr-children rexpr rucd)]
-                                          (when-not (rexpr? ret) (debug-repl "call fail rexpr"))
-                                          ret)))
-            variable-map-rr (context/bind-no-context
-                             (remap-variables-handle-hidden (rewrite-user-call-depth rexpr)
-                                                            var-map))]
 
-        (depend-on-assumption (:def-assumption ut))  ;; this should depend on the representational assumption or something.  Like there can be a composit R-expr, but getting optimized does not have to invalidate everything, so there can be a "soft" depend or something
-        (dyna-debug (let [exp-var (exposed-variables variable-map-rr)]
-                      (when-not (subset? exp-var (set (vals var-map)))
-                        (debug-repl "should not happen, extra exposed variables"))))
-        variable-map-rr))))
+    (let [existing-parent-args (get parent-call-arguments name #{})
+          local-map (into {} (for [[k v] var-map]
+                               [k (get-value v)]))
+          amapped (into #{} (for [s existing-parent-args]
+                              (into {} (for [[k v] s]
+                                         [k (get-value v)]))))]
+      ;; this should really be a warning or something in the case that it can't be found. Though we might also need to create some assumption that nothing is defined...
+      (when (and ut (not (contains? amapped local-map)))
+        (let [ ;;rexprs (:rexprs ut)
+              ;;rexpr (combine-user-rexprs-bodies rexprs)
+              new-parent-args (assoc parent-call-arguments name (conj (get parent-call-arguments name #{})
+                                                                      var-map))
+              rexpr (user-rexpr-combined ut)
+              rewrite-user-call-depth (fn rucd [rexpr]
+                                        (dyna-assert (rexpr? rexpr))
+                                        (if (is-user-call? rexpr)
+                                          (let [[lname lvar-map lcall-depth] (get-arguments rexpr)
+                                                new-call (make-user-call lname
+                                                                         lvar-map
+                                                                         (+ call-depth lcall-depth 1)
+                                                                         new-parent-args)]
+                                            (when-not (rexpr? new-call)
+                                              (debug-repl "call fail rexpr"))
+                                        ;(debug-repl)
+                                            new-call)
+                                          (let [ret (rewrite-rexpr-children rexpr rucd)]
+                                            (when-not (rexpr? ret) (debug-repl "call fail rexpr"))
+                                            ret)))
+              variable-map-rr (context/bind-no-context
+                               (remap-variables-handle-hidden (rewrite-user-call-depth rexpr)
+                                                              var-map))]
+
+          (depend-on-assumption (:def-assumption ut)) ;; this should depend on the representational assumption or something.  Like there can be a composit R-expr, but getting optimized does not have to invalidate everything, so there can be a "soft" depend or something
+          (dyna-debug (let [exp-var (exposed-variables variable-map-rr)]
+                        (when-not (subset? exp-var (set (vals var-map)))
+                          (debug-repl "should not happen, extra exposed variables"))))
+          variable-map-rr)))))
 
 
 ;; get a user defined function and turn it into something which can be called
 ;; not 100% sure that this should be included in this file.  Should maybe also
 ;; allow for there to be a textual representation that can be called into.  But
 ;; that is going to have to go through the parser first.
-(defn get-user-defined-function [term-name arity]
+#_(defn get-user-defined-function [term-name arity]
   (fn [& args]
     (assert (= arity (count args)))
     (let [result-var (make-variable 'Result)
-          rexpr (make-user-call term-name (merge (into {} (for [[k v] (zipseq (range) args)]
-                                                            [(make-variable (str "$" k)) (make-constant v)]))
-                                                 {(make-variable (str "$" arity)) result-var}))
+          rexpr (make-user-call term-name
+                                (merge (into {} (for [[k v] (zipseq (range) args)]
+                                                  [(make-variable (str "$" k)) (make-constant v)]))
+                                       {(make-variable (str "$" arity)) result-var})
+                                0
+                                {})
           ctx (context/make-empty-context rexpr)
           result-rexpr (context/bind-context-raw ctx (simplify-fully rexpr))]
       (assert (= (make-multiplicity 1) (result-rexpr)))

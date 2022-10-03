@@ -362,7 +362,7 @@
                                                                                 rexpr (make-user-call call-name
                                                                                                       (into {} (map #(let [x (make-variable (str "$" %))] [x x])
                                                                                                                     (range (+ arity 1))))
-                                                                                                      0 #{})
+                                                                                                      0 {})
                                                                                 ]
                                                                             (swap! system/globally-defined-user-term
                                                                                    assoc [name arity] rexpr)))
@@ -579,7 +579,7 @@
                                      (into {} (for [[i v] (zipseq (range) call-vals)]
                                                 [(make-variable (str "$" i)) v])))
                                     0 ;; the call depth
-                                    #{})  ;; the set of arguments which need to get avoid
+                                    {})  ;; the set of arguments which need to get avoid
                                    )
 
             ;; TODO: we shouldn't have to capure constant values into the
@@ -814,7 +814,7 @@
                               call-name
                               var-map
                               0 ;; call depth
-                              #{}
+                              {}
                               )
                   full-rexpr (if is-macro
                                (make-conjunct [call-rexpr

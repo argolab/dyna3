@@ -109,9 +109,14 @@
 
 
 (defn- convert-to-primitive-rexpr [rexpr]
-  (if (is-jit-placeholder? rexpr)
-    rexpr  ;; this is already a placeholder, so this just gets returned
-    (rewrite-rexpr-children-no-simp (primitive-rexpr rexpr) convert-to-primitive-rexpr)))
+  (cond
+    (is-jit-placeholder? rexpr) rexpr  ;; this is already a placeholder, so this just gets returned
+
+    (or (is-disjunct? rexpr) (is-disjunct-op? rexpr)) (???) ;; not handling disjuncts in the JIT atm.  These can be a disjunct over other compiled units
+
+    (is-user-call? rexpr) (???) ;; this is not going to be supported.  A user call can return "arbitrary code" which is not something that the JIT should ever handle
+
+    :else (rewrite-rexpr-children-no-simp (primitive-rexpr rexpr) convert-to-primitive-rexpr)))
 
 (defn- get-placeholder-rexprs [rexpr]
   (for [c (get-children rexpr)

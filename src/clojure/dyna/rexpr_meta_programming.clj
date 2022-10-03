@@ -133,7 +133,7 @@
          cname
          value-map
          0
-         #{})))))
+         {})))))
 
 
 ;; need to gather the conjunctive constraints first, otherwise this might not find the relevant parts of the expression

@@ -222,6 +222,10 @@
                                             :var-map `(into {} (for [~'[kk vv] ~(cdar v)] [~'kk (get ~'variable-map ~'vv ~'vv)]))
                                             :var-set-map `(into #{} (for [~'s ~(cdar v)]
                                                                       (into {} (for [~'[kk vv] ~'s] [~'kk (get ~'variable-map ~'vv ~'vv)]))))
+                                            :call-parent-map `(into {} (for [~'[nn ss] ~(cdar v)]
+                                                                         [~'nn (into #{} (for [~'ee ~'ss]
+                                                                                           (into {} (for [~'[kk vv] ~'ee]
+                                                                                                      [~'kk (get ~'variable-map ~'vv ~'vv)]))))]))
                                             :rexpr `(remap-variables ~(cdar v) ~'variable-map)
                                             :rexpr-list `(vec (map #(remap-variables % ~'variable-map) ~(cdar v)))
                                             (cdar v) ;; the default is that this is the same
@@ -248,6 +252,10 @@
                                           :var-set-map `(into #{} (for [~'s ~(cdar v)]
                                                                     (into {} (for [~'[kk vv] ~'s]
                                                                                [~'kk (~'remap-function ~'vv)]))))
+                                          :call-parent-map `(into {} (for [~'[nn ss] ~(cdar v)]
+                                                                       [~'nn (into #{} (for [~'ee ~'ss]
+                                                                                        (into {} (for [~'[kk vv] ~'ee]
+                                                                                                   [~'kk (~'remap-function ~'vv)]))))]))
                                           :rexpr `(~'remap-variables-func ~(cdar v) ~'remap-function)
                                           :rexpr-list `(vec (map #(~'remap-variables-func % ~'remap-function) ~(cdar v)))
                                           (cdar v) ;; default to just keep it the same
@@ -322,6 +330,10 @@
                                           :var-map `(into {} (for [~'[kk vv] ~(cdar v)] [~'kk (get ~'variable-map ~'vv ~'vv)]))
                                           :var-set-map `(into #{} (for [~'s ~(cdar v)]
                                                                     (into {} (for [~'[kk vv] ~'s] [~'kk (get ~'variable-map ~'vv ~'vv)]))))
+                                          :call-parent-map `(into {} (for [~'[nn ss] ~(cdar v)]
+                                                                       [~'nn (into #{} (for [~'ee ~'ss]
+                                                                                         (into {} (for [~'[kk vv] ~'ee]
+                                                                                                    [~'kk (get ~'variable-map ~'vv ~'vv)]))))]))
                                           :rexpr `(remap-variables-handle-hidden ~(cdar v) ~'variable-map)
                                           :rexpr-list `(vec (map #(remap-variables-handle-hidden % ~'variable-map) ~(cdar v)))
                                           (cdar v) ;; the default is that this is the same
@@ -571,6 +583,7 @@
                                                                         (check-argument-var b)))
                                                        x)))
 (defn check-argument-var-set-map [x] (and (set? x) (every? check-argument-var-map x)))
+(defn check-argument-call-parent-map [x] (and (map? x) (every? #(and (set? %) (every? check-argument-var-map %)) (vals x))))
 (defn check-argument-value [x] (satisfies? RexprValue x)) ;; something that has a get-value method (possibly a structure)  I think that this is not used anymore
 (defn check-argument-hidden-var [x] (check-argument-var x))
 (defn check-argument-str [x] (string? x))
@@ -726,15 +739,15 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-(def-base-rexpr user-call [:unchecked name  ;; the name for this call object.  Will include the name, arity and file for which this call is being performed from
+(def-base-rexpr user-call [:unchecked name ;; the name for this call object.  Will include the name, arity and file for which this call is being performed from
                            ;; :str name ;; the name for this call represented as a string
                            ;; :int arity  ;; the arity for this call
                            ;; :var from-file
                            :var-map args-map ;; the arguments which are present for this call
                            :unchecked call-depth
-                           :var-set-map args-parent-map ;; this needs to track which
+                           :call-parent-map args-parent-map ;; this needs to track which the values of
                            ]
-  ;(get-variables [this] (into #{} (vals args-map)))
+                                        ;(get-variables [this] (into #{} (vals args-map)))
   )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

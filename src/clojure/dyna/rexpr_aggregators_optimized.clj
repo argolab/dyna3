@@ -27,7 +27,12 @@
                                               (into #{incoming} projected))))
   (remap-variables [this variable-map]
                    ;; this is going to have to perform remapping of the body
-                   (???))
+                   (dyna-assert (not (some (into #{incoming} projected) (keys variable-map))))
+                   (if (empty? variable-map)
+                     this
+                     (make-aggregator-op-inner incoming projected
+                                               (remap-variables body
+                                                                (apply dissoc variable-map incoming projected)))))
 
   (remap-variables-handle-hidden [this variable-map]
                                  (let [new-hidden-names (into {} (for [v (cons incoming projected)]
@@ -132,7 +137,7 @@
         ctx (context/make-nested-context-aggregator-op-inner Rbody projected-vars incoming-variable)
         nR (context/bind-context ctx (simplify Rbody))]
 
-    (debug-repl "oo")
+    ;(debug-repl "oo")
 
     (cond
       (is-empty-rexpr? nR) (make-multiplicity 0)
@@ -173,7 +178,7 @@
                     new-projected (vec (filter #(not (is-bound? %)) projected-vars))
                     new-body (remap-variables inner-r remapping-map)
                     rc (make-aggregator-op-inner new-incoming new-projected new-body)]
-                (debug-repl "pp") ;; this needs to save the result, and remove any projections that are now fully resolved
+                ;(debug-repl "pp") ;; this needs to save the result, and remove any projections that are now fully resolved
                 (vswap! result-rexprs conj rc)
                ))))
 
@@ -192,7 +197,7 @@
                   new-projected (vec (filter #(not (is-bound-in-context? % ctx)) projected-vars))
                   new-body (remap-variables nR remapping-map)
                   ret (make-aggregator-op-inner new-incoming new-projected new-body)]
-              (debug-repl "aoi ret3")
+              ;(debug-repl "aoi ret3")
               ret))))
 
 ;; these are only conjunctive, so if the body is zero, then the expression will also be zero
