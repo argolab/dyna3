@@ -107,11 +107,8 @@ Variable
 MergedAggregator
     : [&*\-+:|] '='
     | [a-z][a-z&*\-+:|]* '=' {
-    // there needs to be some method which checks if something is defined as an aggregator
-    // that can then conditionally enable this lexer rule
-    //("max=".equals(getText()) || "min=".equals(getText()) || "prob+=".equals(getText()))
-    aggregator_defined(getText())
-}?
+    // this checks that the aggregator name is defined in rexpr_aggregators.clj and will conditionally enable this lexer rule
+        aggregator_defined(getText())}?
     ;
 
 junk2: ;
@@ -575,7 +572,8 @@ expressionDynabaseAccess returns[DynaTerm rterm]
     : a=expressionRoot {$rterm=$a.rterm;}
       ('.' m=methodCall {
                 if($rterm.name.equals("\$quote") || $rterm.name.equals("\$inline_function")) {
-                    assert(false); /// should be a syntax error
+                    throw new RuntimeException("syntax error");
+                    //assert(false); /// should be a syntax error
                 }
                 if($rterm.name.equals("\$quote1")) {
                     // this is something like `&f(5).foo` which should be converted into `f(5).foo[]`
@@ -589,7 +587,8 @@ expressionDynabaseAccess returns[DynaTerm rterm]
         })*
       ('.' bracketTerm {
         if($rterm.name.equals("\$quote") || $rterm.name.equals("\$quote1") || $rterm.name.equals("\$dynabase_quote1")) {
-            assert(false); // should be a syntax error
+            throw new RuntimeException("syntax error");
+            //assert(false); // should be a syntax error
         }
         $rterm = DynaTerm.create("\$dynbase_quote1", $rterm, DynaTerm.create_arr($bracketTerm.name, $bracketTerm.args)); })?
     ;
@@ -615,7 +614,10 @@ locals [DynaTerm add_arg=null]
                || $rterm.name.equals("\$escaped") || $rterm.name.equals("\$inline_function") || $rterm.name.equals("\$dynabase_quote1")
                || $rterm.name.equals("\$dynabase_create") || $rterm.name.equals("\$map_empty") || $rterm.name.equals("\$map_element")
                || $rterm.name.equals("\$nil") || $rterm.name.equals("\$cons"))
-               assert(false); // this should return a syntax error rather than an assert(false)
+               {
+               throw new RuntimeException("syntax error");
+               //assert(false); // this should return a syntax error rather than an assert(false)
+               }
             if($rterm.name.equals("\$dynabase_call")) {
                 // have to put the argument onto the dynabase call element,
                 $rterm = DynaTerm.create($rterm.name, $rterm.get(0), ((DynaTerm)$rterm.get(1)).extend_args($add_arg));

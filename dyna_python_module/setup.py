@@ -11,5 +11,5 @@ setup(name='dyna',
       install_requires=[
           'JPype1>=1.3.0',  # java wrapper for calling the JVM
       ],
-      package_data = {'dyna': ['dyna*.jar']}
+      package_data = {'dyna': ['*.jar']}
      )

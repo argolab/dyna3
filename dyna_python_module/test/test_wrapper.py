@@ -77,3 +77,13 @@ res7 = inst.query('''
 $0 ?
 ''', val)
 assert res7[0] is val
+
+
+inst.run('''
+testclass = $0.
+''', val)
+
+res8 = inst.query('''
+testclass?
+''')
+assert res8[0] is val

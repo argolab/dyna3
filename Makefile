@@ -55,8 +55,8 @@ $(TARGET): $(JAR_WITH_PYTHON_INSTALLER) standalone-header.sh
 	cat standalone-header.sh $(JAR_WITH_PYTHON_INSTALLER) > $(TARGET)
 	chmod +x $(TARGET)
 
-test_python: $(JAR_TARGET)
-	cd python_module && python test_wrapper.py
+test-python: $(JAR_TARGET)
+	python dyna_python_module/test/test_wrapper.py
 
 
 # example to run a single test

@@ -13,7 +13,7 @@ def _configure_jvm():
 
 
     if not _os.path.exists(jar):
-        import ipdb; ipdb.set_trace()
+        #import ipdb; ipdb.set_trace()
         raise ImportError('Unable to find the dyna implmentation "dyna.jar"')
 
     # add the dyna jar to the classpath

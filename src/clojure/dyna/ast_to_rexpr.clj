@@ -413,9 +413,10 @@
 
                                            "$clojure" (match-term arg1 ("$clojure" clojure-string)
                                                                   (let [clj-code (read-string clojure-string)]
-                                                                    (eval `(do
-                                                                             (ns dyna.evaluated-user-code)
-                                                                             ~clj-code))))
+                                                                    (binding [*ns* (create-ns 'dyna.evaluated-user-code)]
+                                                                      (require '[clojure.core :refer :all])
+                                                                      (require '[dyna.core :refer :all])
+                                                                      (eval clj-code))))
 
                                            "optimized_rexprs" (match-term arg1 ("optimized-rexprs" c)
                                                                           (alter-var-root system/*use-optimized-rexprs* (if c true false)))

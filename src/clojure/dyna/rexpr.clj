@@ -1522,9 +1522,10 @@
       (debug-repl "proj var not in body")
       nil)))
 
+;; TODO: this rewrite should be cleaned up, there is a lot of "debugging junk" contained in it
 (def-rewrite
   :match (proj (:variable A) (:rexpr R))
-  :run-at [:standard :inference]
+  :run-at [:standard]
 
   (let [ctx (context/make-nested-context-proj rexpr [A])
         vv (volatile! nil)
@@ -1550,6 +1551,31 @@
                       (debug-repl "gg9")))
         ;(when (<= (count (exposed-variables nR)) 1)  (debug-repl "proj??"))
         (make-proj A nR)))))
+
+(def-rewrite
+  :match (proj (:variable A) (:rexpr R))
+  :run-at :inference
+  (let [ctx (context/make-nested-context-proj rexpr [A])
+        nR (context/bind-context ctx (simplify R))
+        new-A-rep (if (ctx-is-bound? ctx A)
+                    (make-constant (ctx-get-value ctx A))
+                    ;; look for a unify expression which can be used to simplify the expression by combining stuff together
+                    (let [found (volatile! nil)]
+                      (context/scan-through-context-by-variable
+                       ctx A found-rexpr
+                       (when (is-unify? found-rexpr)
+                         (vreset! found found-rexpr)))
+                      (when-not (nil? @found)
+                        (if (= A (:a @found))
+                          (:b @found) ;; select the other variable from the unify expression
+                          (:a @found)))))]
+    (if (nil? new-A-rep)
+      (do
+        (dyna-assert (or (is-empty-rexpr? nR) (contains? (exposed-variables nR) A)))
+        (make-proj A nR))
+      (do
+        ;(debug-repl "proj33")
+        (remap-variables nR {A new-A-rep})))))
 
 (def-rewrite
   :match (proj (:ground A) (:rexpr R))

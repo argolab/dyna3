@@ -48,21 +48,22 @@ help() {
     echo "     --csv-export [term name] [file name]"
     echo "     --time                Time the different parts of the runtime report when the program exits"
     echo "     --fast-math           Do not check the math for overflow"
+    echo "     --random-seed=42      Set a random seed"
     echo ""
     echo "Usage: $self [args] [file to start]"
     echo ""
-    #echo "To install python package for dyna: $self install-python"
+    echo "To install the Python package for Dyna do: $self install-python"
 }
 
 install_python() {
     set -x
     t=`mktemp -d`
-    #trap "rm -rf $t" EXIT
+    trap "rm -rf $t" EXIT
 
     unzip -qq $self "dyna_python_module/*" -d $t 2>/dev/null
-    cp $self $t/dyna_python_module/dyna.jar
+    cp $self $t/dyna_python_module/dyna/dyna.jar
     pushd $t/dyna_python_module > /dev/null
-    #python -m pip install .
+    python -m pip install .
     popd > /dev/null
 }
 

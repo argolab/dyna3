@@ -38,7 +38,11 @@
   :antlr-dest-dir "target/gen-src"
 
   :profiles {:uberjar {:main dyna.DynaMain
-                       ;:aot [dyna.core] ;; this makes it start faster but run slower....
+                       ;; clojure only requires java 8, and we shouldn't need any of the "newer" features ourselves also
+                       ;; so this should make this work with any version released after 1.8 (march 2014)
+                       :javac-options ["-source" "1.8" "-target" "1.8"]
+
+                                        ;:aot [dyna.core] ;; this makes it start faster but run slower....
                        }}
   :main dyna.core
 

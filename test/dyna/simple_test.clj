@@ -375,15 +375,13 @@ foo(X,Y) = X + Y.
 assert F=&foo(1), F(2) = 3.
 ")
 
-(comment
- (str-test call-indirect2 "
+(str-test call-indirect2 "
 foo(1, 2).
 
 r(Z) := Z. % used to make sure we don't unify \"backwards\"
 
 assert F=&foo(X), F(Y), r(X) = 1.
-
-"))
+")
 
 
 (comment

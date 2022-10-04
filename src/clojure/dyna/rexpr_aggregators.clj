@@ -15,6 +15,7 @@
 (def aggregators (atom {}))
 
 (defn is-aggregator-defined? [^String name]
+  ;; this method is called by dyna.ParserUtils
   (contains? @aggregators name))
 
 (defn def-aggregator [name & args]

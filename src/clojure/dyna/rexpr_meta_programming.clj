@@ -136,12 +136,22 @@
          {})))))
 
 
-;; need to gather the conjunctive constraints first, otherwise this might not find the relevant parts of the expression
-(comment
-  (def-rewrite
-    :match {:rexpr (indirect-user-call (:free call-ref) (:any-list arguments) (:any result))
-            :context (unify-structure call-ref (:unchecked file-name) (:ground dynabase) (:unchecked name-str) (:any-list arguments))}
-    :run-at :inference
-    (do
-      (debug-repl "idr2")
-      (???))))
+;; this looks a conjunctive constraints that we might not have yet evaluated yet to identify what function is going to be called
+(def-rewrite
+  :match {:rexpr (indirect-user-call (:free call-ref) (:any-list arguments) (:any result))
+          :context (unify-structure foo (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:any-list arguments2))
+          }
+  :run-at :inference
+  (let [args (concat arguments2 arguments)
+        has-dynabase (not (and (is-ground? dynabase) (dnil? (get-value dynabase))))
+        call-name (if has-dynabase
+                    {:name name-str
+                     :arity (count args)}
+                    {:name name-str
+                     :arity (count args)
+                     :source-file file-name})
+        value-map (merge (into {} (for [[i v] (zipseq (range) args)]
+                                    [(make-variable (str "$" i)) v]))
+                         (when has-dynabase {(make-variable "$self") dynabase})
+                         {(make-variable (str "$" (count args))) result})]
+    (make-user-call call-name value-map 0 {})))
