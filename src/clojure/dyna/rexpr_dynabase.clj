@@ -110,12 +110,14 @@
                                          (make-unify var (make-constant val)))
                                        args (first arr))))
             ;; this needs to have some disjunct over all of the different values that this can take on.  In this case, this would
-            (make-disjunct
-             (vec (map (fn [ae]
-                         (make-conjunct (vec (map
-                                              (fn [var val] (make-no-simp-unify var (make-constant val)))
-                                              args ae))))
-                       arr)))))))))
+            (let [ret (make-disjunct
+                       (vec (map (fn [ae]
+                                   (make-conjunct (vec (map
+                                                        (fn [var val] (make-no-simp-unify var (make-constant val)))
+                                                        args ae))))
+                                 arr)))]
+              ;(debug-repl "db")
+              ret)))))))
 
 
 ;; TODO: this depends on the assumption that there are no children dynabases.  As a given rule has to match in multiple places

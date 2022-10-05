@@ -85,22 +85,30 @@
           :check system/*use-optimized-rexprs*}
   :run-at :construction
   (let [incoming-idx (indexof disjunction-variables #{incoming})
-        other-vars (drop-nth disjunction-variables incoming-idx)
-        resulting-trie (volatile! (PrefixTrie. (if (nil? incoming-idx)
-                                                 (count disjunction-variables) ;; if the incoming variable is not contained (likely a constant), then we are not going to move it out
-                                                 (- (count disjunction-variables) 1)) 0 nil))]
+        pjv (into (if (is-variable? incoming) #{incoming} #{}) projected-vars)
+        new-trie-vars (for [[idx var] (zipseq (range) disjunction-variables)
+                            :when (not (pjv var))]
+                        [idx var])
+        save-proj-vars (for [[idx var] (zipseq (range) disjunction-variables)
+                             :when (pjv var)]
+                         [idx var])
+        resulting-trie (volatile! (PrefixTrie. (count new-trie-vars) 0 nil))]
     (doseq [[var-binding children] (trie/trie-get-values-collection trie-Rs nil)]
       (let [income-val (if (nil? incoming-idx)
                          (get-value incoming)
                          (nth var-binding incoming-idx))
             income-var (if (nil? income-val) incoming (make-constant income-val))
-            other-binding (vec (drop-nth var-binding incoming-idx))
+            trie-binding (vec (map #(nth var-binding (first %)) new-trie-vars))
+            pvb (vec (for [[idx var] save-proj-vars
+                           :let [bnd (nth var-binding idx)]
+                           :when (not (nil? bnd))]
+                       (make-no-simp-unify var (make-constant bnd))))
             new-children (vec (for [c children]
-                                (make-aggregator-op-inner income-var projected-vars c)))]
-        (vswap! resulting-trie trie/trie-update-collection other-binding
+                                (make-aggregator-op-inner income-var projected-vars (make-conjunct (conj pvb c)))))]
+        (vswap! resulting-trie trie/trie-update-collection trie-binding
                 (fn [col]
                   (concat col new-children)))))
-    (let [ret (make-disjunct-op other-vars @resulting-trie)]
+    (let [ret (make-disjunct-op (vec (map second new-trie-vars)) @resulting-trie)]
       ;(debug-repl "optimized aggregator disjunction trie")
       ret)))
 
