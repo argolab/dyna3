@@ -207,7 +207,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-jvm_args+="-Xmx$memory -Dclojure.compiler.direct-linking=true -Ddyna.print_rewrites_performed=$debug_mode -Ddyna.debug=$debug_mode -Ddyna.trace_rexpr_construction=$debug_mode"
+jvm_args+="-Xmx$memory -Dclojure.compiler.direct-linking=true -Ddyna.print_rewrites_performed=$debug_mode -Ddyna.debug=$debug_mode -Ddyna.trace_rexpr_construction=$debug_mode -Ddyna.debug_repl=$debug_mode"
 
 if [ -z "$dyna_args" ]; then
     welcome_message

@@ -33,7 +33,7 @@
 
 (defn exit-system []
   ;; there should be something for when the system is going to be destroyed.
-  ;; this can run stuff like
+  ;; this can run stuff like saving the files?
   )
 
 

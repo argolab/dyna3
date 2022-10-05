@@ -22,7 +22,7 @@ def _configure_jvm():
     memory = _os.environ.get('DYNA_MEMORY', '2g')  # the amount of memory that the backend should allocate
 
     # start the JVM and pass configuration flags
-    _jpype.startJVM(None, *f'-Xmx{memory} -Dclojure.compiler.direct-linking=true -Ddyna.print_rewrites_performed=false -Ddyna.debug=false -Ddyna.trace_rexpr_construction=false'.split())
+    _jpype.startJVM(None, *f'-Xmx{memory} -Dclojure.compiler.direct-linking=true -Ddyna.print_rewrites_performed=false -Ddyna.debug=false -Ddyna.trace_rexpr_construction=false -Ddyna.debug_repl=false'.split())
 
 _configure_jvm()
 
