@@ -175,7 +175,8 @@ assert_fail X=[1], Y=[], list_copy(X, Y).
 assert_fail X=[1,2,3,4], Y=[1,2,3], list_copy(X, Y).
 
 rr(X) := Y for list_copy(X, Y).
-assert rr([1,2,3]) = [1,2,3].
+%assert rr([1,2,3]) = [1,2,3].
+print rr([1,2,3]).
 ")
 
 (str-test partition-list-test "

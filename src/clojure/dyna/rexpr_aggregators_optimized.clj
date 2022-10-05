@@ -105,28 +105,67 @@
   :run-at :construction
   (make-multiplicity 0))
 
+(defn- convert-to-trie-mul1 [cnt trie]
+  (if (= cnt 0)
+    {trie (make-multiplicity 1)}
+    (into {} (for [[k v] trie]
+               [k (convert-to-trie-mul1 (- cnt 1) v)]))))
+
+(defn- convert-to-trie-agg [cnt trie]
+  (if (= cnt 0)
+    (make-aggregator-op-inner (make-constant trie) [] (make-multiplicity 1))
+    (into {} (for [[k v] trie]
+               [k (convert-to-trie-agg (- cnt 1) v)]))))
+
 (def-rewrite
   :match (aggregator-op-outer (:unchecked operator) (:any result-variable) (:rexpr Rbody))
   :run-at [:standard :inference]
-  (let [exp-vars (exposed-variables Rbody)
-        accumulator (volatile! nil)
+  (let [accumulator (volatile! nil)
+        exposed-vars (vec (exposed-variables Rbody))
         ctx (context/make-nested-context-aggregator-op-outer Rbody)]
     (context/bind-context ctx
      (binding [*aggregator-op-contribute-value* (fn [value mult]
                                                   (assert (= mult 1))
-                                                  (if (nil? @accumulator)
+                                                  (let [kvals (vec (map get-value exposed-vars))]
+                                                    (vswap! accumulator update-in kvals (fn [old]
+                                                                                          (if (nil? old)
+                                                                                            value
+                                                                                            ((:combine operator) old value)))))
+
+                                                  #_(if (nil? @accumulator)
                                                     (vreset! accumulator value) ;; we should be able to just store this value, though we are going to need to check what the binding are to the variables in this case... if there is some result, then it should have that
                                                     (vswap! accumulator (:combine operator) value))
                                                   (make-multiplicity 0))]
        (let [ret (simplify Rbody)]
          (if (is-empty-rexpr? ret)
            (if (nil? @accumulator)
-             (make-multiplicity 0) ;; did not find any contributions
-             (make-unify result-variable (make-constant ((:lower-value operator identity) @accumulator))))
+             (make-multiplicity 0)
+             (do
+               ;; this needs to identify any values contained in the accumulator trie and turn those into some disjunct or return the single value
+               ;; there should be no aggregator remaining in this case, as it will have that all of the values will have already gotten resolved
+               (if (empty? exposed-vars)
+                 (make-unify result-variable (make-constant ((:lower-value operator identity) (get @accumulator nil)))) ;; if there are no keys, it will be stored like {nil value} by update-in
+                 (make-conjunct
+                  (loop [ret []
+                         ev exposed-vars
+                         trie @accumulator]
+                    (if (empty? ev) ;; then we got to the end of the list
+                      (conj ret (make-unify result-variable (make-constant ((:lower-value operator identity) trie))))
+                      (if (= (count trie) 1)
+                        (recur (conj ret (make-unify (first ev) (make-constant (first (keys trie)))))
+                               (rest ev)
+                               (first (vals trie)))
+                        (conj ret (make-disjunct-op ev (PrefixTrie. (+ 1 (count ev)) 0 (convert-to-trie-mul1 (count ev) trie)))))))))))
            (if (nil? @accumulator)
              (make-aggregator-op-outer operator result-variable ret)
-             (make-aggregator-op-outer operator result-variable (make-disjunct [(make-aggregator-op-inner (make-constant @accumulator) [] (make-multiplicity 1)) ;; store the value so far
-                                                                                ret])))))))))
+             (let [accum-vals (if (empty? exposed-vars)
+                                (make-aggregator-op-inner (make-constant (get @accumulator nil)) [] (make-multiplicity 1))
+                                (make-disjunct-op exposed-vars
+                                                  (PrefixTrie. (count exposed-vars) 0 (convert-to-trie-agg (count exposed-vars) @accumulator))))]
+               (???) ;; this is going to have to maek the trie, the trie will have to have the result of aggregation contained in
+               ;; the aggregator-op-inner.
+               (make-aggregator-op-outer operator result-variable (make-disjunct [accum-vals
+                                                                                  ret]))))))))))
 
 ;; in the case that the disjunct is lifted out, it would be possible that
 ;; something which does not contain the proejcted vars and does not contain the
@@ -177,7 +216,7 @@
                                      (make-constant (get-value incoming-variable))
                                      incoming-variable)
                       remapping-map (into {} (for [v (cons incoming-variable projected-vars)
-                                                   :when (is-bound? v)]
+                                                   :when (and (not (is-constant? v)) (is-bound? v))]
                                                [v (make-constant (get-value v))]))
                       new-projected (vec (filter #(not (is-bound? %)) projected-vars))
                       new-body (remap-variables inner-r remapping-map)
@@ -197,7 +236,7 @@
                               (make-constant (get-value-in-context incoming-variable ctx))
                               incoming-variable)
                remapping-map (into {} (for [v (cons incoming-variable projected-vars)
-                                            :when (is-bound-in-context? v ctx)]
+                                            :when (and (not (is-constant? v)) (is-bound-in-context? v ctx))]
                                         [v (make-constant (get-value-in-context v ctx))]))
                new-projected (vec (filter #(not (is-bound-in-context? % ctx)) projected-vars))
                new-body (remap-variables nR remapping-map)
