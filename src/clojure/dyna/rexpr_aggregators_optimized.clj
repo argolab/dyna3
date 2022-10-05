@@ -86,9 +86,13 @@
   :run-at :construction
   (let [incoming-idx (indexof disjunction-variables #{incoming})
         other-vars (drop-nth disjunction-variables incoming-idx)
-        resulting-trie (volatile! (PrefixTrie. (- (count disjunction-variables) 1) 0 nil))]
+        resulting-trie (volatile! (PrefixTrie. (if (nil? incoming-idx)
+                                                 (count disjunction-variables) ;; if the incoming variable is not contained (likely a constant), then we are not going to move it out
+                                                 (- (count disjunction-variables) 1)) 0 nil))]
     (doseq [[var-binding children] (trie/trie-get-values-collection trie-Rs nil)]
-      (let [income-val (nth var-binding incoming-idx)
+      (let [income-val (if (nil? incoming-idx)
+                         (get-value incoming)
+                         (nth var-binding incoming-idx))
             income-var (if (nil? income-val) incoming (make-constant income-val))
             other-binding (vec (drop-nth var-binding incoming-idx))
             new-children (vec (for [c children]
@@ -107,13 +111,13 @@
 
 (defn- convert-to-trie-mul1 [cnt trie]
   (if (= cnt 0)
-    {trie (make-multiplicity 1)}
+    {trie [(make-multiplicity 1)]}
     (into {} (for [[k v] trie]
                [k (convert-to-trie-mul1 (- cnt 1) v)]))))
 
 (defn- convert-to-trie-agg [cnt trie]
   (if (= cnt 0)
-    (make-aggregator-op-inner (make-constant trie) [] (make-multiplicity 1))
+    [(make-aggregator-op-inner (make-constant trie) [] (make-multiplicity 1))]
     (into {} (for [[k v] trie]
                [k (convert-to-trie-agg (- cnt 1) v)]))))
 
@@ -131,10 +135,7 @@
                                                                                           (if (nil? old)
                                                                                             value
                                                                                             ((:combine operator) old value)))))
-
-                                                  #_(if (nil? @accumulator)
-                                                    (vreset! accumulator value) ;; we should be able to just store this value, though we are going to need to check what the binding are to the variables in this case... if there is some result, then it should have that
-                                                    (vswap! accumulator (:combine operator) value))
+                                                  ;; this will return mult 0, as we are saving the values directly rather than having this come back through the R-expr
                                                   (make-multiplicity 0))]
        (let [ret (simplify Rbody)]
          (if (is-empty-rexpr? ret)
@@ -151,18 +152,19 @@
                          trie @accumulator]
                     (if (empty? ev) ;; then we got to the end of the list
                       (conj ret (make-unify result-variable (make-constant ((:lower-value operator identity) trie))))
-                      (if (= (count trie) 1)
+                      (if (and (= (count trie) 1) (not (nil? (first (keys trie)))))
                         (recur (conj ret (make-unify (first ev) (make-constant (first (keys trie)))))
                                (rest ev)
                                (first (vals trie)))
-                        (conj ret (make-disjunct-op ev (PrefixTrie. (+ 1 (count ev)) 0 (convert-to-trie-mul1 (count ev) trie)))))))))))
+                        (conj ret (make-disjunct-op (conj (vec ev) result-variable) (PrefixTrie. (+ 1 (count ev)) 0 (convert-to-trie-mul1 (count ev) trie)))))))))))
            (if (nil? @accumulator)
              (make-aggregator-op-outer operator result-variable ret)
              (let [accum-vals (if (empty? exposed-vars)
                                 (make-aggregator-op-inner (make-constant (get @accumulator nil)) [] (make-multiplicity 1))
                                 (make-disjunct-op exposed-vars
                                                   (PrefixTrie. (count exposed-vars) 0 (convert-to-trie-agg (count exposed-vars) @accumulator))))]
-               (???) ;; this is going to have to maek the trie, the trie will have to have the result of aggregation contained in
+               ;(debug-repl)
+               ;(???) ;; this is going to have to maek the trie, the trie will have to have the result of aggregation contained in
                ;; the aggregator-op-inner.
                (make-aggregator-op-outer operator result-variable (make-disjunct [accum-vals
                                                                                   ret]))))))))))

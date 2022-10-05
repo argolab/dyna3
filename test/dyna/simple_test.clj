@@ -241,10 +241,6 @@ assert f1(3) = 4.
 assert f2(3) = 6.
 ")
 
-#_(str-test error-macro "
-print $error(\"test\").
-")
-
 (str-test lessthan-construct  "
 a := 1.
 a := 0 for A < A.
@@ -327,7 +323,9 @@ f(X) = new X { z += 1. }.
 
 a = f(f(f(new {}))).
 
-assert a.z = 3.
+print a.z.
+
+%assert a.z = 3.
 ")
 
 (str-test dynabase-indirect "

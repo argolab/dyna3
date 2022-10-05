@@ -430,6 +430,6 @@
 
 (defn drop-nth [coll n]
   (cond
-    (< n 0) coll
+    (or (nil? n) (< n 0)) coll
     (= n 0) (rest coll)
     :else (cons (first coll) (lazy-seq (drop-nth (rest coll) (- n 1))))))
