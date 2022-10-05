@@ -229,6 +229,7 @@
           (DynaTerm. "$constant" [(DynaTerm. (.name ast) DynaTerm/null_term source-file (vec (map #(get % 0) arguments)))]) ;; if this does not have nested structure, then can optimize and just use a constant structure
           (DynaTerm. "$quote1" [(DynaTerm. (.name ast) DynaTerm/null_term source-file arguments)]))))))
 
+(def ^{:private true :dynamic true} *do-not-use-with-key* false)
 
 (defn convert-from-ast [^DynaTerm ast out-variable variable-name-mapping source-file]
   ;; convert from the ast into an R-expr which can then be evaluated
@@ -264,7 +265,8 @@
                       ;; this is something else which is getting called.  This means that we have to recurse into the structure and add the arguments
                       (let [ret-var (make-intermediate-var)]
                         (conj! other-conjunctive-rexprs
-                               (convert-from-ast a ret-var variable-name-mapping source-file))
+                               (binding [*do-not-use-with-key* false]
+                                 (convert-from-ast a ret-var variable-name-mapping source-file)))
                         ret-var)))
         get-arg-values (fn [args]
                          ;; map from a list of arguments to their values represented as variables in R-exprs
@@ -360,11 +362,12 @@
                                                                           (let [call-name {:name name
                                                                                            :arity arity
                                                                                            :source-file source-file}
-                                                                                rexpr (make-user-call call-name
+                                                                                rexpr (make-no-simp-user-call call-name
                                                                                                       (into {} (map #(let [x (make-variable (str "$" %))] [x x])
                                                                                                                     (range (+ arity 1))))
                                                                                                       0 {})
                                                                                 ]
+                                                                            (when (is-multiplicity? rexpr) (debug-repl))
                                                                             (swap! system/globally-defined-user-term
                                                                                    assoc [name arity] rexpr)))
 
@@ -586,7 +589,9 @@
                                      {(make-variable "$self") dynabase-val
                                       (make-variable (str "$" arity)) out-variable}
                                      (into {} (for [[i v] (zipseq (range) call-vals)]
-                                                [(make-variable (str "$" i)) v])))
+                                                [(make-variable (str "$" i)) v]))
+                                     (when *do-not-use-with-key*
+                                       {(make-variable "$do_not_use_with_key") (make-constant true)}))
                                     0 ;; the call depth
                                     {})  ;; the set of arguments which need to get avoid
                                    )
@@ -726,9 +731,28 @@
                                      out-variable
                                      (make-constant (system/parser-external-value value-index))))
 
-            ["$arg" 1] (let [[expression] (.arguments ast)]
-                         (debug-repl "TODO: getting value from with_key")
-                         (???))
+            ["$with_key" 2] (let [[expression-value with-key-expression] (.arguments ast)
+                                  has-dynabase (not (and (is-constant? (get variable-name-mapping "$self"))
+                                                         (dnil? (:value (get variable-name-mapping "$self") :not-found))))
+                                  call-name (if has-dynabase
+                                              {:name (:value (get variable-name-mapping "$functor_name"))
+                                               :arity (:value (get variable-name-mapping "$functor_arity"))}
+                                              {:name (:value (get variable-name-mapping "$functor_name"))
+                                               :arity (:value (get variable-name-mapping "$functor_arity"))
+                                               :source-file source-file})
+                                  rterm (make-term ("$quote1" ("$with_key" expression-value with-key-expression)))]
+                              ;; this needs to mark a functor as using with-key.  This will let the aggregator wrap the result in $value to unpack it
+                              (update-user-term! call-name (fn [x] (assoc x :has-with-key true)))
+                              (convert-from-ast rterm out-variable variable-name-mapping source-file)
+                              ;(debug-repl "TODO: getting value from with_key")
+                              ;(???)
+                              )
+
+            ["$call_without_with_key" 1] (let [[rterm] (.arguments ast)]
+                                           ;; generate a call expression which marks that it should not use with-key
+                                           (binding [*do-not-use-with-key* true]
+                                             (convert-from-ast rterm out-variable variable-name-mapping source-file)))
+
 
             ;; we special case the ,/2 operator as this allows us to pass the info that the first expression will get unified with a constant true earlier
             ;; this should make some generation steps more efficient
@@ -794,6 +818,9 @@
                                  ]
                              ret)
 
+            ["$syntax_error" 1] (let [[message] (.arguments ast)]
+                                  (throw (RuntimeException. (str "Syntax Error: " message))))
+
             ;; call without any qualification on it.  Just generate the user term
             (let [arity (.arity ast)
                   call-name {:name (.name ast) ;; the name, arity and file name.  This makes the file work as a hard local scope for the function
@@ -817,7 +844,15 @@
                               (make-intermediate-var)
                               out-variable)
                   var-map (merge {(make-variable (str "$" arity)) local-out}
-                                 (zipmap (map #(make-variable (str "$" %)) (range)) call-vals))
+                                 (zipmap (map #(make-variable (str "$" %)) (range)) call-vals)
+                                 (when *do-not-use-with-key*
+                                   {(make-variable "$do_not_use_with_key") (make-constant true)})
+                                 #_(when is-macro
+                                   ;; only variables that match $[0-9]+ are exposed... so will pass these with large values
+                                   {(make-variable "$1000000") (make-constant (str source-file))
+                                    (make-variable "$1000001") (get variable-name-mapping "$functor_name" (make-constant "REPL"))
+                                    (make-variable "$1000002") (get variable-name-mapping "$functor_arity" (make-constant 0))
+                                    (make-variable "$1000003") (make-constant (DynaTerm/make_list (keys variable-name-mapping)))}))
                   call-rexpr (make-user-call
                               call-name
                               var-map

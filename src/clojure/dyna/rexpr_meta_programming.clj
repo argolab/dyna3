@@ -87,7 +87,7 @@
 
 (defn- arg-list [var remains cb]
   (if (empty? remains)
-    (make-conjunct [(make-unify var DynaTerm/null_term)
+    (make-conjunct [(make-unify var (make-constant DynaTerm/null_term))
                     cb])
     (let [new-var (make-variable (gensym))]
       (make-proj new-var (make-conjunct [(make-unify-structure var nil (make-constant DynaTerm/null_term)
@@ -102,7 +102,8 @@
     (if-not (and (string? name-val)
                  (int? arity-val))
       (make-multiplicity 0)
-      (let [arg-vars (vec (map #(make-variable (gensym)) (range arity-val)))]
+      (let [arg-vars (vec (for [_ (range arity-val)]
+                            (make-variable (gensym))))]
         (arg-list arguments arg-vars (make-unify-structure struct
                                                            nil
                                                            dynabase

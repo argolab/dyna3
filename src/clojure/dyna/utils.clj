@@ -106,6 +106,9 @@
      :prompt #(print prompt "=> ")
      :eval (partial eval-with-locals all-bindings))))
 
+(if (= (System/getProperty "dyna.debug_repl" "true") "false")
+  (defn- debug-repl-fn [prompt local-bindings ^Throwable traceback print-bindings]))
+
 
 (defmacro debug-repl
   "Starts a REPL with the local bindings available."

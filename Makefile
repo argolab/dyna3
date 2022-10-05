@@ -52,7 +52,8 @@ $(JAR_WITH_PYTHON_INSTALLER): $(JAR_TARGET) $(wildcard dyna_python_module/**/*.p
 	jar -uf $(JAR_WITH_PYTHON_INSTALLER) dyna_python_module
 
 $(TARGET): $(JAR_WITH_PYTHON_INSTALLER) standalone-header.sh
-	cat standalone-header.sh $(JAR_WITH_PYTHON_INSTALLER) > $(TARGET)
+	cat standalone-header.sh | sed "s/VERSION_STRING/$(shell git describe --always --long --dirty --abbrev=12 ; date)/" > $(TARGET)
+	cat $(JAR_WITH_PYTHON_INSTALLER) >> $(TARGET)
 	chmod +x $(TARGET)
 
 test-python: $(JAR_TARGET)

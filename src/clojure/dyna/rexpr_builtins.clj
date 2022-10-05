@@ -605,8 +605,8 @@
 
 ;; (def-user-term "$make_with_key" 2 (make-multiplicity 1))  ;; TODO: should construct some structured term
 
-(def-user-term "$value" 1 (make-multiplicity 1)) ;; TODO: should return the value for some pair which might have the withkey construct
-(def-user-term "$arg" 1 (make-multiplicity 1)) ;; TODO: should return the argument which is associated with the withkey construct
+;; (def-user-term "$value" 1 (make-multiplicity 1)) ;; TODO: should return the value for some pair which might have the withkey construct
+;; (def-user-term "$arg" 1 (make-multiplicity 1)) ;; TODO: should return the argument which is associated with the withkey construct
 
 
 ;; operators for handling an array.  An array in Dyna is just a linked list of cells with the name ".".  This is akin to prolog

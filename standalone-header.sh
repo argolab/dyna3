@@ -1,6 +1,7 @@
 #!/bin/bash
 
 self="$0"
+version="VERSION_STRING"
 
 welcome_message() {
 echo "                _____   __     __  _   _                                     "
@@ -49,22 +50,21 @@ help() {
     echo "     --time                Time the different parts of the runtime report when the program exits"
     echo "     --fast-math           Do not check the math for overflow"
     echo "     --random-seed=42      Set a random seed"
+    echo "     --version             Print out version"
     echo ""
     echo "Usage: $self [args] [file to start]"
     echo ""
-    echo "To install the Python package for Dyna do: $self install-python"
+    echo "To install the Python package for Dyna run: $self install-python"
 }
 
 install_python() {
-    set -x
     t=`mktemp -d`
     trap "rm -rf $t" EXIT
+    set -x
 
     unzip -qq $self "dyna_python_module/*" -d $t 2>/dev/null
     cp $self $t/dyna_python_module/dyna/dyna.jar
-    pushd $t/dyna_python_module > /dev/null
-    python -m pip install .
-    popd > /dev/null
+    python -m pip install $t/dyna_python_module
 }
 
 # set dyna to use a different java runtime
@@ -100,6 +100,10 @@ while [ $# -gt 0 ]; do
             ;;
         --help)
             help
+            exit 1
+            ;;
+        --version)
+            echo "Version: $version"
             exit 1
             ;;
         -agentlib*|-D*|-XX*)
@@ -169,7 +173,7 @@ while [ $# -gt 0 ]; do
             python -c 'import sys; print("Python prefix:", sys.prefix)'
             echo '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~'
             echo ''
-            echo "Install Dyna into the current Python environment."
+            echo "Install Dyna into the current Python environment?"
             read -p "Are you sure? (y/N) " -n 1 -r
             echo
             if [[ $REPLY =~ ^[yY]$ ]]; then

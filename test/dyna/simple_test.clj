@@ -240,6 +240,9 @@ assert f1(3) = 4.
 assert f2(3) = 6.
 ")
 
+#_(str-test error-macro "
+print $error(\"test\").
+")
 
 (str-test lessthan-construct  "
 a := 1.
@@ -359,14 +362,14 @@ r(&foo(X)) = X.
 assert $reflect(S, \"foo\", [77]), r(S) = 77.
 ")
 
-(comment
-  (str-test reflect3 "
+(str-test reflect3 "
 r(X) := 0.
 r(&foo(X,Y,Z)) := 1.
 
-assert $reflect(S, $nil, \"baz\", 2, Arr), r(S) = 0.  % this should be able to resolve this using the name and arity
-
-"))
+% this should be able to resolve this using the name and arity
+% this is not a great test, the resulting baz term will have variables which are not unified with anything, so there is an R-expr which remains \"unused\"
+assert_fail $reflect(S, $nil, \"baz\", 2, Arr), r(S) = 1.
+")
 
 
 (str-test call-indirect1 "
@@ -384,13 +387,13 @@ assert F=&foo(X), F(Y), r(X) = 1.
 ")
 
 
-(comment
-  (str-test with-key "
+(str-test with-key "
 f([]) max= 123 arg 456.
 
-assert $arg(f([])) = 456.
 assert f([]) = 123.
-"))
+
+assert $arg(f([])) = 456.
+")
 
 (str-test ref-self-term "
 f(X) = *.

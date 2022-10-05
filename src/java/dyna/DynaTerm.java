@@ -77,6 +77,9 @@ public final class DynaTerm implements ILookup {
             //     return b.toString();
             // }
         }
+        // if(",".equals(name) && arguments != null && arity() == 2) {
+        //     return get(0) + ", " + get(1);
+        // }
         // there is no way to tell the difference between $nil and [] as those are the same expression.
         // I suppose that we could make the end of a list represented as something else?  Like use `[]` as the name of the list term or something
         // in which case it would

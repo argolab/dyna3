@@ -78,3 +78,43 @@ $term = `(&$term(`(&$variable("$functor_name")), `(&$variable("$functor_arity"))
 $union_type(A, B, Value) |= A(Value).
 $union_type(A, B, Value) |= B(Value).
 :- make_system_term $union_type/3.
+
+% this isn't going to work, as this might indirect through multiple calls before it gets to final call.  In which case these extra variable names are going to get lost...
+% I Suppose that there could be some extra variable like $meta or $call_from which could track this additional information?  Though not sure what the value would be.  In most cases
+% it would probably just have that it would be null or not contain anything useful.
+
+% :- macro $caller_file/0.
+% :- macro $caller_name/0.
+% :- macro $caller_arity/0.
+% :- macro $caller_variables/0.
+% $caller_file = &$variable("$1000000").   % these values should match in ast_to_rexpr.clj
+% $caller_name = &$variable("$1000001").
+% $caller_arity = &$variable("$1000002").
+% $caller_variables = &$variable("$1000003").
+% :- make_system_term $caller_file/0.
+% :- make_system_term $caller_name/0.
+% :- make_system_term $caller_arity/0.
+% :- make_system_term $caller_variables/0.
+
+:- macro $error/1.
+%$error(Msg) = `(&$error(str(`(&$constant(str($caller_file, ": ", $caller_name, "/", $caller_arity, "   "))), `Msg))).
+$error(Msg) = `(&$error(`Msg)).
+:- make_system_term $error/1.
+
+
+
+$get_key(X) := &$error("with_key not found on expression").
+$get_key(&$with_key(R, K)) := K.
+
+:- macro $arg/1.
+$arg(X) := `($get_key($call_without_with_key(`X))).
+$arg(&$variable(_)) := &$syntax_error("$arg can not be used on a variable, it must be used on the call directly, e.g. $arg(foo(1,2,3))").
+$arg(&$constant(_)) := &$syntax_error("$arg can not be used on a constant").
+:- make_system_term $arg/1.
+
+
+% is is possible that this could get used somewhere that $with_key isn't present (e.g. if with_key was used on a dynabase which shared the name with something else).
+% In this case, we have to handle that something might not unify with this expression.
+$value(X) := X.
+$value(&$with_key(R, K)) := R.
+:- make_system_term $value/1.

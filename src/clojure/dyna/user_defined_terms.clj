@@ -29,6 +29,8 @@
   {:def-assumption (make-assumption) ;; the assumption for the definition
    :optimized-rexpr-assumption (make-invalid-assumption) ;; if the optimized R-expr changes, this assumption needs to be invalidated
 
+   :has-with-key false ;; if $with_key wraps the results of the term, in which case $value needs to be added to it when accessing the result
+
    :is-not-memoized-null (make-assumption) ;; if there is a memo table which _must_ be read, then this assumption should be made invalid
    :is-memoized-null (make-invalid-assumption)
 
@@ -221,9 +223,7 @@
                                          [k (get-value v)]))))]
       ;; this should really be a warning or something in the case that it can't be found. Though we might also need to create some assumption that nothing is defined...
       (when (and ut (not (contains? amapped local-map)))
-        (let [ ;;rexprs (:rexprs ut)
-              ;;rexpr (combine-user-rexprs-bodies rexprs)
-              new-parent-args (assoc parent-call-arguments name (conj (get parent-call-arguments name #{})
+        (let [new-parent-args (assoc parent-call-arguments name (conj (get parent-call-arguments name #{})
                                                                       var-map))
               rexpr (user-rexpr-combined ut)
               rewrite-user-call-depth (fn rucd [rexpr]
@@ -236,20 +236,34 @@
                                                                          new-parent-args)]
                                             (when-not (rexpr? new-call)
                                               (debug-repl "call fail rexpr"))
-                                        ;(debug-repl)
                                             new-call)
                                           (let [ret (rewrite-rexpr-children rexpr rucd)]
                                             (when-not (rexpr? ret) (debug-repl "call fail rexpr"))
                                             ret)))
+              [new-var-map with-key-var] (if (and (:has-with-key ut) (not (contains? var-map (make-variable "$do_not_use_with_key"))))
+                                           (let [wkv (make-variable (gensym 'with-key-var))]
+                                             [(assoc var-map (make-variable (str "$" (:arity name))) wkv) wkv])
+                                            [var-map nil])
               variable-map-rr (context/bind-no-context
                                (remap-variables-handle-hidden (rewrite-user-call-depth rexpr)
-                                                              var-map))]
+                                                              new-var-map))]
 
           (depend-on-assumption (:def-assumption ut)) ;; this should depend on the representational assumption or something.  Like there can be a composit R-expr, but getting optimized does not have to invalidate everything, so there can be a "soft" depend or something
           (dyna-debug (let [exp-var (exposed-variables variable-map-rr)]
-                        (when-not (subset? exp-var (set (vals var-map)))
+                        (when-not (subset? exp-var (set (vals new-var-map)))
                           (debug-repl "should not happen, extra exposed variables"))))
-          variable-map-rr)))))
+          (if-not (nil? with-key-var)
+            (let [result-var (get var-map (make-variable (str "$" (:arity name))))
+                  value-call (make-user-call {:name "$value" :arity 1}
+                                             {(make-variable "$0") with-key-var
+                                              (make-variable "$1") result-var}
+                                             0
+                                             {})
+                  ret (make-proj with-key-var
+                                 (make-conjunct [variable-map-rr
+                                                 value-call]))]
+              ret)
+            variable-map-rr))))))
 
 
 ;; get a user defined function and turn it into something which can be called

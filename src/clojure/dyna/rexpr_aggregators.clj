@@ -96,8 +96,9 @@
 
 (defn- get-aggregated-value [v]
   (if (and (instance? DynaTerm v)
-           (= (.name ^DynaTerm v) "$with_key_pair"))
-    (get (.arguments ^DynaTerm v) 1)
+           (= (.name ^DynaTerm v) "$with_key"))
+    ;; the value will be first, and the key associated with the value is second
+    (get (.arguments ^DynaTerm v) 0)
     v))
 
 
