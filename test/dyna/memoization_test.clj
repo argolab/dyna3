@@ -1,4 +1,5 @@
 (ns dyna.memoization-test
+  (:require [dyna.core])
   (:require [dyna.simple-test :refer [str-test]]))
 
 

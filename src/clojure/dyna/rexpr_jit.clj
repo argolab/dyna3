@@ -2,7 +2,9 @@
   (:require [dyna.utils :refer :all])
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.base-protocols :refer :all])
-  (:require [dyna.rexpr-constructors])
+  (:require [dyna.rexpr-disjunction]) ;; make sure is loaded first
+  (:require [dyna.rexpr-aggregators-optimized])
+  (:require [dyna.rexpr-constructors :refer [is-disjunct-op?]])
   (:import [dyna.rexpr proj-rexpr]))
 
 ;; this is going to want to cache the R-expr when there are no arguments which are "variables"

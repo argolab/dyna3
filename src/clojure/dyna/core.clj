@@ -17,7 +17,7 @@
   (:require [dyna.memoization])
   (:require [dyna.rexpr-disjunction])
   (:require [dyna.rexpr-aggregators-optimized])
-  ;(:require [dyna.rexpr-jit])
+ ; (:require [dyna.rexpr-jit])
   (:require [dyna.ast-to-rexpr :refer [parse-string
                                        import-file-url
                                        eval-string

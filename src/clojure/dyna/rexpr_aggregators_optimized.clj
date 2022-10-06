@@ -67,10 +67,25 @@
 ;; if there is a project nested inside of the aggregator inner expression, then we are going pull the projection out and add it to the aggregator
 (def-rewrite
   :match {:rexpr (aggregator-op-inner (:any incoming) (:variable-list projected-vars) (proj (:variable hid-var) (:rexpr R)))
-          :check (and system/*use-optimized-rexprs*
+          :check (and system/*use-optimized-rexprs* ;; this check should not be necessary here....
                       (not (some #{hid-var} projected-vars)))}
   :run-at :construction
   (make-aggregator-op-inner incoming (conj projected-vars hid-var) R))
+
+(def-rewrite
+  :match {:rexpr (aggregator-op-inner (:any incoming) (:variable-list projected-vars) (conjunct (:rexpr-list Rs)))}
+  :run-at :construction
+  (let [exposed (exposed-variables rexpr)
+        pvs (into #{incoming} projected-vars)
+        pr (first (filter #(and (is-proj? %) (not (pvs (:var %))) (not (exposed %))) Rs))]
+    (if pr
+      (make-aggregator-op-inner incoming
+                                (conj projected-vars (:var pr))
+                                (make-conjunct (vec (for [r Rs]
+                                                      (if (identical? r pr)
+                                                        (:body r)
+                                                        r)))))
+      nil)))
 
 ;; we want to lift the disjunction out of the aggregation, as we can handle the disjunctions before there are
 (def-rewrite
@@ -170,12 +185,13 @@
              (let [accum-vals (if (empty? exposed-vars)
                                 (make-aggregator-op-inner (make-constant (get @accumulator nil)) [] (make-multiplicity 1))
                                 (make-disjunct-op exposed-vars
-                                                  (PrefixTrie. (count exposed-vars) 0 (convert-to-trie-agg (count exposed-vars) @accumulator))))]
-               ;(debug-repl)
+                                                  (PrefixTrie. (count exposed-vars) 0 (convert-to-trie-agg (count exposed-vars) @accumulator))))
+                   rr (make-aggregator-op-outer operator result-variable (make-disjunct [accum-vals
+                                                                                         ret]))]
+               (debug-repl "lll")
                ;(???) ;; this is going to have to maek the trie, the trie will have to have the result of aggregation contained in
                ;; the aggregator-op-inner.
-               (make-aggregator-op-outer operator result-variable (make-disjunct [accum-vals
-                                                                                  ret]))))))))))
+               rr))))))))
 
 ;; in the case that the disjunct is lifted out, it would be possible that
 ;; something which does not contain the proejcted vars and does not contain the

@@ -5,11 +5,10 @@
   (:require [dyna.utils :refer :all])
   (:require [dyna.base-protocols :refer :all])
   (:require [dyna.rexpr :refer :all])
-  ;(:require [dyna.rewrites :refer [def-rewrite]])
   (:require [clojure.set :refer [union]])
   (:require [dyna.user-defined-terms :refer [def-user-term]])
-  (:import [dyna DynaTerm DIterable DIterator DIteratorInstance])
-  )
+  (:require [dyna.context :as context])
+  (:import [dyna DynaTerm DIterable DIterator DIteratorInstance]))
 
 ;(in-ns 'dyna.rexpr)
 
@@ -625,8 +624,8 @@
 
 (def-base-rexpr map-element-access [:var Key
                                     :var Value
-                                    :var previous_map
-                                    :var resulting_map]
+                                    :var previous-map
+                                    :var resulting-map]
   (is-constraint? [this] true))
 
 (def-user-term "$map_empty" 0 (make-unify v0 (make-constant (DynaMap. {})))) ;; return an empty map value
@@ -634,9 +633,9 @@
 ;(def-user-term "$map_merge" 2) ;; take two maps and combine them together
 
 (def-rewrite
-  :match (map-element-access (:ground Key) (:any Value) (:any previous_map) (:ground resulting_map))
+  :match (map-element-access (:ground Key) (:any Value) (:any previous-map) (:ground resulting-map))
   ;; read a value out of the map
-  (let [pm (get-value resulting_map)]
+  (let [pm (get-value resulting-map)]
     (if (not (instance? DynaMap pm))
       (make-multiplicity 0)
       (let [m (.map-elements ^DynaMap pm)
@@ -646,25 +645,37 @@
           (make-multiplicity 0)
           (make-conjunct [(make-unify Value (make-constant r))
                           ;; remove the key from the map
-                          (make-unify previous_map (make-constant (DynaMap. (dissoc m k))))]))))))
+                          (make-unify previous-map (make-constant (DynaMap. (dissoc m k))))]))))))
 
 (def-rewrite
-  :match (map-element-access (:ground Key) (:ground Value) (:ground previous_map) (:any resulting_map))
+  :match (map-element-access (:ground Key) (:ground Value) (:ground previous-map) (:any resulting-map))
   ;; put a value into the map
-  (let [pm (get-value previous_map)]
+  (let [pm (get-value previous-map)]
     (if (not (instance? DynaMap pm))
       (make-multiplicity 0)
       (let [m (.map-elements ^DynaMap pm)
             k (get-value Key)
             v (get-value Value)
             r (assoc m k v)]
-        (make-unify resulting_map (make-constant (DynaMap. r)))))))
+        (make-unify resulting-map (make-constant (DynaMap. r)))))))
+
+(comment
+  (def-rewrite
+    :match (map-element-access (:ground Key) (:any Value) (:any previous-map) (:any resulting-map))
+    :run-at :inference
+    (let [ctx (context/get-context)
+          did-consider (transient #{resulting-map})
+          can-consider-vars (transient #{resulting-map})]
+      ;; this will need to look through all of the resulting variables to see if there is any other variable
+      ;; which matches ground key.  This will generate new unify rexprs which should allow values to "flow" through the map access
+
+      )))
 
 ;; TODO: there should be some operator which is able to do a many element access
 ;; on the map.  This would allow for it to find that there are
 
 ;; (def-rewrite
-;;   :match {:rexpr (map-element-access (:ground Key) (:any Value) (:any previous_map) (:ground resulting_map))
+;;   :match {:rexpr (map-element-access (:ground Key) (:any Value) (:any previous-map) (:ground resulting_map))
 ;;           :context }
 ;;   )
 
