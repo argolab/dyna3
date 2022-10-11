@@ -632,6 +632,9 @@
 (def-user-term "$map_element" 3 (make-map-element-access v0 v1 v2 v3))
 ;(def-user-term "$map_merge" 2) ;; take two maps and combine them together
 
+;; there should be some way to isnert a value into a map overriding, but this will have that
+;(def-user-term "$map_insert" )
+
 (def-rewrite
   :match (map-element-access (:ground Key) (:any Value) (:any previous-map) (:ground resulting-map))
   ;; read a value out of the map
@@ -650,6 +653,7 @@
 (def-rewrite
   :match (map-element-access (:ground Key) (:ground Value) (:ground previous-map) (:any resulting-map))
   ;; put a value into the map
+  ;; if the value already exists in the map, it will have to be mult 0, otherwise it would not be consistent with multiple modes
   (let [pm (get-value previous-map)]
     (if (not (instance? DynaMap pm))
       (make-multiplicity 0)
@@ -664,7 +668,7 @@
     :match (map-element-access (:ground Key) (:any Value) (:any previous-map) (:any resulting-map))
     :run-at :inference
     (let [ctx (context/get-context)
-          did-consider (transient #{resulting-map})
+          did-consider (transient #{previous-map})  ;; the key should not be contained in the previous map, so there is no point
           can-consider-vars (transient #{resulting-map})]
       ;; this will need to look through all of the resulting variables to see if there is any other variable
       ;; which matches ground key.  This will generate new unify rexprs which should allow values to "flow" through the map access

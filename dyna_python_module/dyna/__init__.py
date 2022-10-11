@@ -3,7 +3,7 @@ The Dyna programming language Python API.
 """
 
 import inspect
-from .java_wrapper import DynaInstance, term as DynaTerm
+from .java_wrapper import DynaInstance, DynaTerm
 
 
 class Dyna:

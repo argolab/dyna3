@@ -48,9 +48,9 @@
     ([value mult]
      ;; return a dummy expression in the case that there is nothing that is able
      ;; to take the value, this can hold the value until there is something else
-     (make-aggregator-op-inner (make-constant value) [] (make-multiplicity mult)))
+     (make-aggregator-op-inner (make-constant value) [] (make-multiplicity mult)))))
     ;([value] (r value 1))
-    ))
+
 
 
 (def-rewrite
@@ -132,6 +132,15 @@
   :run-at :construction
   (make-multiplicity 0))
 
+(def-rewrite
+  :match {:rexpr (aggregator-op-inner (:any incoming) (:any-list projected-vars) (:rexpr R))
+          :check (not (or (is-constant? incoming) (some #{incoming} (exposed-variables R))))}
+  :is-check-rewrite true
+  :run-at :construction
+  (do
+    (debug-repl "bad agg op inner")
+    (???)))
+
 (defn- convert-to-trie-mul1 [cnt trie]
   (if (= cnt 0)
     {trie [(make-multiplicity 1)]}
@@ -149,49 +158,52 @@
   :run-at [:standard :inference]
   (let [accumulator (volatile! nil)
         exposed-vars (vec (exposed-variables Rbody))
-        ctx (context/make-nested-context-aggregator-op-outer Rbody)]
-    (context/bind-context ctx
-     (binding [*aggregator-op-contribute-value* (fn [value mult]
-                                                  (assert (= mult 1))
-                                                  (let [kvals (vec (map get-value exposed-vars))]
-                                                    (vswap! accumulator update-in kvals (fn [old]
-                                                                                          (if (nil? old)
-                                                                                            value
-                                                                                            ((:combine operator) old value)))))
-                                                  ;; this will return mult 0, as we are saving the values directly rather than having this come back through the R-expr
-                                                  (make-multiplicity 0))]
-       (let [ret (simplify Rbody)]
-         (if (is-empty-rexpr? ret)
-           (if (nil? @accumulator)
-             (make-multiplicity 0)
-             (do
-               ;; this needs to identify any values contained in the accumulator trie and turn those into some disjunct or return the single value
-               ;; there should be no aggregator remaining in this case, as it will have that all of the values will have already gotten resolved
-               (if (empty? exposed-vars)
-                 (make-unify result-variable (make-constant ((:lower-value operator identity) (get @accumulator nil)))) ;; if there are no keys, it will be stored like {nil value} by update-in
-                 (make-conjunct
-                  (loop [ret []
-                         ev exposed-vars
-                         trie @accumulator]
-                    (if (empty? ev) ;; then we got to the end of the list
-                      (conj ret (make-unify result-variable (make-constant ((:lower-value operator identity) trie))))
-                      (if (and (= (count trie) 1) (not (nil? (first (keys trie)))))
-                        (recur (conj ret (make-unify (first ev) (make-constant (first (keys trie)))))
-                               (rest ev)
-                               (first (vals trie)))
-                        (conj ret (make-disjunct-op (conj (vec ev) result-variable) (PrefixTrie. (+ 1 (count ev)) 0 (convert-to-trie-mul1 (count ev) trie)))))))))))
-           (if (nil? @accumulator)
-             (make-aggregator-op-outer operator result-variable ret)
-             (let [accum-vals (if (empty? exposed-vars)
-                                (make-aggregator-op-inner (make-constant (get @accumulator nil)) [] (make-multiplicity 1))
-                                (make-disjunct-op exposed-vars
-                                                  (PrefixTrie. (count exposed-vars) 0 (convert-to-trie-agg (count exposed-vars) @accumulator))))
-                   rr (make-aggregator-op-outer operator result-variable (make-disjunct [accum-vals
-                                                                                         ret]))]
-               (debug-repl "lll")
-               ;(???) ;; this is going to have to maek the trie, the trie will have to have the result of aggregation contained in
-               ;; the aggregator-op-inner.
-               rr))))))))
+        ctx (context/make-nested-context-aggregator-op-outer Rbody)
+        contrib-func (fn [value mult]
+                       (assert (= mult 1))
+                       (dyna-assert (not (nil? value)))
+                       (let [kvals (vec (map get-value exposed-vars))]
+                         (vswap! accumulator update-in kvals (fn [old]
+                                                               (if (nil? old)
+                                                                 value
+                                                                 ((:combine operator) old value)))))
+                       ;; this will return mult 0, as we are saving the values directly rather than having this come back through the R-expr
+                       (make-multiplicity 0))]
+    (binding [*aggregator-op-contribute-value* contrib-func]
+      (let [ret (context/bind-context ctx (try (simplify Rbody)
+                                               (catch UnificationFailure e (make-multiplicity 0))))]
+        (if (is-empty-rexpr? ret)
+          (if (nil? @accumulator)
+            (make-multiplicity 0)
+            (do
+              ;; this needs to identify any values contained in the accumulator trie and turn those into some disjunct or return the single value
+              ;; there should be no aggregator remaining in this case, as it will have that all of the values will have already gotten resolved
+              (if (empty? exposed-vars)
+                (make-unify result-variable (make-constant ((:lower-value operator identity) (get @accumulator nil)))) ;; if there are no keys, it will be stored like {nil value} by update-in
+                (make-conjunct
+                 (loop [ret []
+                        ev exposed-vars
+                        trie @accumulator]
+                   (if (empty? ev) ;; then we got to the end of the list
+                     (conj ret (make-unify result-variable (make-constant ((:lower-value operator identity) trie))))
+                     (if (and (= (count trie) 1) (not (nil? (first (keys trie)))))
+                       (recur (conj ret (make-unify (first ev) (make-constant (first (keys trie)))))
+                              (rest ev)
+                              (first (vals trie)))
+                       (conj ret (make-disjunct-op (conj (vec ev) result-variable) (PrefixTrie. (+ 1 (count ev)) 0 (convert-to-trie-mul1 (count ev) trie)))))))))))
+          (if (nil? @accumulator)
+            (make-aggregator-op-outer operator result-variable ret)
+            (let [accum-vals (if (empty? exposed-vars)
+                               (make-aggregator-op-inner (make-constant (get @accumulator nil)) [] (make-multiplicity 1))
+                               (make-disjunct-op exposed-vars
+                                                 (PrefixTrie. (count exposed-vars) 0 (convert-to-trie-agg (count exposed-vars) @accumulator))))
+                  ;; this will merge the tries due to rewrites on the disjunction construction
+                  rr (make-aggregator-op-outer operator result-variable (make-disjunct [accum-vals
+                                                                                        ret]))]
+              ;(debug-repl "lll")
+                                        ;(???) ;; this is going to have to maek the trie, the trie will have to have the result of aggregation contained in
+              ;; the aggregator-op-inner.
+              rr)))))))
 
 ;; in the case that the disjunct is lifted out, it would be possible that
 ;; something which does not contain the proejcted vars and does not contain the
@@ -212,10 +224,13 @@
 
        (cond
          (is-empty-rexpr? nR) (make-multiplicity 0)
-         (and (is-multiplicity? nR) (is-bound-in-context? incoming-variable ctx)) (let [ret (*aggregator-op-contribute-value* (get-value-in-context incoming-variable ctx) (:mult nR))]
-                                                                                    ;; this needs to just return the value from the expression
-                                                                                    ;(debug-repl "result is found")
-                                                                                    ret)
+         (and (is-multiplicity? nR) (is-bound-in-context? incoming-variable ctx))
+         (let [ret (*aggregator-op-contribute-value* (get-value-in-context incoming-variable ctx) (:mult nR))]
+           ;; this needs to just return the value from the expression
+                                        ;(debug-repl "result is found")
+           ret)
+
+
          (every? is-ground? exposed)
          (let [iterators (find-iterators nR)
                result-rexprs (volatile! nil)]
@@ -234,6 +249,7 @@
                 (let [val (get-value incoming-variable)
                       mult (:mult inner-r)]
                   (when-not (= mult 0)
+                    (dyna-assert (not (nil? val)))
                     (let [rc (*aggregator-op-contribute-value* val mult)]
                       (when-not (is-empty-rexpr? rc)
                         ;; then we have to save the result of this R-expr, as it could not get processed for some reason
@@ -248,8 +264,8 @@
                       new-body (remap-variables inner-r remapping-map)
                       rc (make-aggregator-op-inner new-incoming new-projected new-body)]
                   ;(debug-repl "pp") ;; this needs to save the result, and remove any projections that are now fully resolved
-                  (vswap! result-rexprs conj rc)
-                  ))))
+                  (vswap! result-rexprs conj rc)))))
+
 
            (if (empty? @result-rexprs)
              ;; then everything has been processed, so there is no need for this to remain

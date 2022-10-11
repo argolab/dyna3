@@ -54,7 +54,7 @@
           (throw (UnificationFailure. "Value does not match")))
         ;; then depending on the kind of context this is, we might have different behavior of
         ;; setting the value of the variable.
-        (if (or (contains? #{:root :disjunct :aggregator :if-expr-coditional :memo-expr-conditional} context-kind)
+        (if (or (contains? #{:root :disjunct :aggregator :if-expr-coditional :memo-expr-conditional :aggregator-op-outer} context-kind)
                 (and (contains? #{:aggregator-conjunctive :proj :aggregator-op-inner} context-kind)
                      (contains? value-map variable)))
           ;; then we set the value locally
@@ -126,7 +126,10 @@
                                                  resulting-rexpr)
       (= context-kind :memo-expr-conditional) resulting-rexpr  ;; I suppose this will just reset after it runs
       (= context-kind :aggregator-op-inner) resulting-rexpr
-      (= context-kind :aggregator-op-outer) resulting-rexpr ;; not sure what should happen in these cases, the variables which are the results should get saved
+      (= context-kind :aggregator-op-outer) (if (empty? value-map)
+                                              resulting-rexpr
+                                              (make-conjunct [(make-variable-assignment-conjunct value-map)
+                                                              resulting-rexpr]))
       :else (do
               (dyna-debug (debug-repl "context unknown kind"))
               (???))))  ;; todo: other kinds of contexts which are going
@@ -190,7 +193,14 @@
   (context. *context* *use-full-context* :memo-expr-conditional rexpr #{rexpr} {}))
 
 (defn make-nested-context-aggregator-op-outer [rexpr]
-  (context. *context* *use-full-context* :aggregator-op-outer rexpr #{rexpr} {}))
+  (let [c *context*]
+    (context. c *use-full-context* :aggregator-op-outer rexpr #{rexpr}
+              {}
+              #_(into {} (for [v exposed-vars
+                             :when (not (is-bound-in-context? v c))]
+                         ;; the aggregator needs to control when a variable binding is exposed
+                         ;; this means that it needs to "catch" the assignments to any variables done by the inner expression
+                         [v nil])))))
 
 (defn make-nested-context-aggregator-op-inner [rexpr projected-vars incoming-var]
   (context. *context* *use-full-context* :aggregator-op-inner rexpr #{rexpr} (into {incoming-var nil} (for [v projected-vars] [v nil]))))

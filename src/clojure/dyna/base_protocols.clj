@@ -1,6 +1,6 @@
 (ns dyna.base-protocols
   (:require [dyna.utils :refer [import-interface-methods]])
-  (:import [dyna DIterable DIterator DIteratorInstance]))
+  (:import [dyna DIterable DIterator DIteratorInstance Dynabase]))
 
 ;; this file defines the base protocols (interfaces) which are referenced
 ;; throughout the rest of the project in different files.  The implementations
@@ -92,10 +92,10 @@
 
 
 
-(defrecord Dynabase [access-map]
-  Object
-  (toString [this]
-    (str "(Dynabase " access-map ")")))
+;; (defrecord Dynabase [access-map]
+;;   Object
+;;   (toString [this]
+;;     (str "(Dynabase " access-map ")")))
 
 (def undefined-dynabase (Dynabase. nil))
 

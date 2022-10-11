@@ -121,8 +121,8 @@
                                               (compute-with-assumption
                                                (simplify-top (make-conjunct [cond Rorig]))))]
         (when-not (deep-equals orig-result memo)
-          (debug-delay-ntimes 0
-                        (debug-repl "refresh"))
+          #_(debug-delay-ntimes 0
+                              (debug-repl "refresh"))
           #_(let [vv (simplify-top orig-result)]
             (debug-repl "tables not equal"))
           ;; then we need to save the memo in to the table, and signal that an event happened

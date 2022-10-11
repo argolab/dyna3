@@ -87,3 +87,13 @@ res8 = inst.query('''
 testclass?
 ''')
 assert res8[0] is val
+
+
+res9 = inst.query('''
+% create a dynabase and return a handle which allows us to call methods on the dynabase from python
+{
+db_t1(X,Y) = 3 * X + Y + $0.
+} ?
+''', 7)
+
+assert res9[0].db_t1(3,4) == 3*3 + 4 + 7

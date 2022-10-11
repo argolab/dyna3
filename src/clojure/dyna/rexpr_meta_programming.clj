@@ -3,8 +3,8 @@
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.user-defined-terms :refer [def-user-term]])
   (:require [dyna.base-protocols :refer :all])
-  (:import [dyna DynaTerm])
-  (:import [dyna.base_protocols Dynabase])
+  (:import [dyna DynaTerm Dynabase])
+  ;(:import [dyna.base_protocols Dynabase])
   (:import [dyna.rexpr unify-structure-rexpr]))
 
 (def-base-rexpr indirect-user-call [:var indirect-user-var

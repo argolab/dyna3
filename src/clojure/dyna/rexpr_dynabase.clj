@@ -1,14 +1,14 @@
 (ns dyna.rexpr-dynabase
   (:require [dyna.utils :refer :all])
   (:require [dyna.base-protocols :refer :all])
-  (:import  [dyna.base_protocols Dynabase])
+  ;(:import  [dyna.base_protocols Dynabase])
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.user-defined-terms :refer [def-user-term]])
   (:require [dyna.assumptions :refer [make-assumption is-valid? depend-on-assumption invalidate!]])
   (:require [dyna.system :as system])
   (:require [dyna.rexpr-builtins :refer [def-builtin-rexpr]])
   (:require [clojure.set :refer [subset?]])
-  (:import [dyna DynaTerm]))
+  (:import [dyna DynaTerm Dynabase]))
 
 ;; R-exprs which represent construction of dynabases
 ;; dynabases are a prototype styled inheritiance system for dyna
@@ -58,7 +58,7 @@
         metadata (get @system/dynabase-metadata name)
         ret (cond (dnil? parent-val) (let [db (Dynabase. {name (list args)})]
                                        (make-unify dynabase (make-constant db)))
-                  (instance? Dynabase parent-val) (let [parent-obj (.access-map ^Dynabase parent-val)
+                  (instance? Dynabase parent-val) (let [parent-obj (.access_map ^Dynabase parent-val)
                                                         dbm (assoc parent-obj name (conj (get parent-obj name ()) args))
                                                         db (Dynabase. dbm)]
                                                     (when (contains? parent-obj name) ;; meaning that the same class appears more than once
@@ -80,14 +80,14 @@
   ;; it pulls arguments out which don't make much since?
   (let [^Dynabase dbase (get-value dynabase)]
     (if-not (and (instance? Dynabase dbase)
-                 (contains? (.access-map dbase) name))
+                 (contains? (.access_map dbase) name))
       (make-multiplicity 0)
-      (let [selfs (get (.access-map dbase) name)
+      (let [selfs (get (.access_map dbase) name)
             self-val (first selfs)
             new-map (if (> 1 (count selfs))
-                      (assoc (.access-map dbase) name
+                      (assoc (.access_map dbase) name
                              (cdr selfs))
-                      (dissoc (.access-map dbase) name))]
+                      (dissoc (.access_map dbase) name))]
         (make-conjunct [(make-unify parent-dynabase (make-constant (if (empty? new-map)
                                                                      DynaTerm/null_term
                                                                      (Dynabase. new-map))))
@@ -99,7 +99,7 @@
   (let [pv (get-value dynabase)]
     (if (not (instance? Dynabase pv))
       (make-multiplicity 0)
-      (let [m (.access-map ^Dynabase pv)
+      (let [m (.access_map ^Dynabase pv)
             arr (get m name)]
         (if (nil? arr)
           (make-multiplicity 0)
@@ -215,8 +215,8 @@
 
 (defn is-dynabase-subset [^Dynabase A ^Dynabase B]
   ;; check that A is a subset of B
-  (let [am (.access-map A)
-        bm (.access-map B)]
+  (let [am (.access_map A)
+        bm (.access_map B)]
     (and (subset? (keys am) (keys bm))
          (every? (fn [[k v]]
                    (subset? v (get bm k)))
