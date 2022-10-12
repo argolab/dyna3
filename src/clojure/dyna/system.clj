@@ -83,6 +83,13 @@
    :query-output println
    :system-is-inited (atom false)})
 
+#_(defn copy-dyna-system [system]
+  ;; this should check that the agenda is empty? Or will have that we need to copy the agenda
+  (merge (into {} (for [[k v] system]
+                    (if (instance? clojure.lang.Atom v)
+                      [k (atom @v)]
+                      [k v])))
+         {:work-agenda (DynaAgenda. ^DynaAgenda (:work-agenda system))}))
 
 
 (defmacro run-under-system [system & args]

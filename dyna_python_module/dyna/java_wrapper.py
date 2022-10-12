@@ -67,6 +67,7 @@ for _name in {'unify', 'conjunct', 'disjunct', 'multiplicity', 'proj',
 #         return str(self)
 
 class DynaTerm:
+    __slots__ = ('_system', '_term')
     def __init__(self, name, *args):
         if name is not None:
             # make term with no reference instance
@@ -100,6 +101,7 @@ def _cast_term_from_dyna(system, term):
 __all__.append('DynaTerm')
 
 class Dynabase:
+    __slots__ = ('_system', '_dynabase')
     def __init__(self, system, dynabase):
         self._system = system
         self._dynabase = dynabase
@@ -109,12 +111,13 @@ class Dynabase:
             query_str = '$0.'+name+'(' + ','.join([f'${i+1}' for i in range(len(args))]) +') ?'
             q = self._system.run_query(
                 query_str, self._dynabase, *args)
-            return q[0]
+            if q:
+                return q[0]
         func.__name__ = name
         return func
 
     def __str__(self):
-        return 'Dynabase@'+hash(self._dynabase)  # the internal representation of these is gross
+        return f'Dynabase@{hash(self._dynabase)}'  # the internal representation of these is gross
     def __repr__(self):
         return str(self)
 

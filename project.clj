@@ -19,6 +19,7 @@
                  [org.clojure/tools.analyzer.jvm "0.7.3"]
                  [instaparse "1.4.12"]
 
+                 [org.clojure/data.csv "1.0.1"]
                  ;[reply "0.5.1"]
                  ]
   :repl-options {:init-ns dyna.core}

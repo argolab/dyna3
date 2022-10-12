@@ -1,7 +1,7 @@
 (ns dyna.repl
   (:import [org.jline.terminal TerminalBuilder])
   (:import [org.jline.reader.impl DefaultParser DefaultParser$Bracket])
-  (:import [org.jline.reader LineReader LineReader$Option LineReaderBuilder EOFError UserInterruptException])
+  (:import [org.jline.reader LineReader LineReader$Option LineReaderBuilder EOFError UserInterruptException EndOfFileException])
 
   (:require [dyna.ast-to-rexpr :refer [eval-string print-parser-errors parse-string]])
   (:require [dyna.system :as system])
@@ -91,4 +91,5 @@
                   (catch DynaUserError e
                     (println (.getMessage e)))))
               (recur)))))
-      (catch UserInterruptException err nil))))
+      (catch UserInterruptException err nil)
+      (catch EndOfFileException err nil))))

@@ -403,10 +403,10 @@
                                                                                            :source-file source-file}]
                                                                             (print-memo-table call-name)))
 
-                                           "import_csv" (let [[term-name term-arity file-name] (.arguments ^DynaTerm (get arg1 0))]
-                                                          ;; import some CSV file as a term
-                                                          ;; this could get represented as a R-expr?  In which case it would not be represented
-                                                          (???))
+                                           ;; "import_csv" (let [[term-name term-arity file-name] (.arguments ^DynaTerm (get arg1 0))]
+                                           ;;                ;; import some CSV file as a term
+                                           ;;                ;; this could get represented as a R-expr?  In which case it would not be represented
+                                           ;;                (???))
                                            "export_csv" (???) ;; export a CSV file for a term after the program is done running
 
                                            "run_agenda" (system/run-agenda)
@@ -424,11 +424,37 @@
                                            "optimized_rexprs" (match-term arg1 ("optimized-rexprs" c)
                                                                           (alter-var-root system/*use-optimized-rexprs* (if c true false)))
 
-                                           (do
+                                           (let [arity (.arity arg1)
+                                                 call-name {:name (str "$pragma_" (.name arg1))
+                                                            :arity arity
+                                                            :source-file (or (.from_file ast) source-file)}
+                                                 user-term (get-user-term call-name)]
+                                             (when-not (:is-macro user-term false)
+                                               (throw (DynaUserError. (str "pragma " (.name arg1) "/" arity " not found"))))
+
+                                             (let [call-vals (map make-constant (.arguments arg1))
+                                                   macro-out (make-intermediate-var)
+                                                   var-map (merge {(make-variable (str "$" arity)) macro-out}
+                                                                  (zipmap (map #(make-variable (str "$" %)) (range)) call-vals))
+                                                   ret (make-conjunct [(make-user-call
+                                                                        call-name
+                                                                        var-map
+                                                                        0 {})
+                                                                       (make-eval-from-ast out-variable
+                                                                                           macro-out
+                                                                                           variable-name-mapping
+                                                                                           source-file)])]
+                                               (assert (empty? variable-name-mapping))
+                                               (let [rr (simplify-top ret)]
+                                                 (assert (= (make-multiplicity 1) rr))
+                                                 #_(debug-repl "compiler expression macro")
+                                                 rr)))
+
+                                           #_(do
                                              ;; in the case that this is invalid, we can raise an exception that should report the error to the user
                                              (when print-parser-errors
                                                (println (str "Compiler operation " (.name arg1) "not found")))
-                                             (throw (DynaUserError. (str "operator " (.name arg1) " not found"))))
+                                             )
                                            ;(???) ;; there should be some invalid parse expression or something in the case that this fails at this point
                                            )
                                          (make-unify out-variable (make-constant true)) ;; just return that we processed this correctly?  I suppose that in
@@ -799,21 +825,40 @@
             ["$file" 0] (make-unify out-variable (make-constant source-file))
 
             ;; TODO: this should better support stuff like require and using, where it would lift the require statements outside of the function
-            ["$clojure" 1] (let [[clojure-string] (.arguments ast)
+            ["$clojure" 1] (let [[clojure-const-str] (.arguments ast)]
+                             (when (not= (.name ^DynaTerm clojure-const-str) "$constant")
+                               (throw (RuntimeException. "Syntax error, $clojure only works on constant strings")))
+                             (let [clojure-str (get clojure-const-str 0)
+                                   arguments (vec (filter #(re-matches #"[\$a-zA-Z][\$a-zA-Z0-9\-\_]*" %) (keys variable-name-mapping)))
+                                   arguments-symbols (vec (map symbol arguments))
+                                   arguments-vars (vec (map variable-name-mapping arguments))
+                                   clojure-sl (read-string clojure-str)
+                                   func (binding [*ns* (create-ns 'dyna.evaluated-user-code)]
+                                          (require '[clojure.core :refer :all])
+                                          (require '[dyna.core :refer :all])
+                                          (eval `(fn ~arguments-symbols
+                                                   ~clojure-sl)))
+                                   ret (make-function-call func out-variable arguments-vars)]
+                               ret))
+
+
+            #_(let [[clojure-string] (.arguments ast)
+
                                  string-val (get-value clojure-string)
+                                 zzz (debug-repl)
                                         ;clojure-ast (read-string clojure-string)
                                  arguments (vec (filter #(re-matches #"[\$a-zA-Z][\$a-zA-Z0-9\-\_]*" %) (keys variable-name-mapping)))
                                  arguments-symbols (vec (map symbol arguments))
                                  arguments-vars (vec (map variable-name-mapping arguments))
-                                 clojure-fn (if (is-constant? string-val)
-                                              (eval `(fn ~arguments-symbols
-                                                       ~(read-string (dyna.base-protocols/get-value string-val))))
-                                              (do (???) ;; require the string is a constant for now to make this simpler
-                                                ;; (eval `(fn ~(conj arguments-symbols '$$clojure-eval-string)
-                                                ;;            (eval-with-locals {~@(flatten (for [a arguments-symbols]
-                                                ;;                                            [`(quote ~a) a]))}
-                                                  ;;                              (read-string ~'$$clojure-eval-string))))
-                                                  ))
+                                 clojure-str (read-string (dyna.base-protocols/get-value string-val))
+                                 clojure-fn (eval `(fn ~arguments-symbols
+                                                     ~clojure-str))
+                                 #_(do (???) ;; require the string is a constant for now to make this simpler
+                                     ;; (eval `(fn ~(conj arguments-symbols '$$clojure-eval-string)
+                                     ;;            (eval-with-locals {~@(flatten (for [a arguments-symbols]
+                                     ;;                                            [`(quote ~a) a]))}
+                                     ;;                              (read-string ~'$$clojure-eval-string))))
+                                     )
                                  ret (make-function-call clojure-fn out-variable arguments-vars)
                                  ]
                              ret)

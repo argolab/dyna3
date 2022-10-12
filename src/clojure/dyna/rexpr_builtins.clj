@@ -8,7 +8,7 @@
   (:require [clojure.set :refer [union]])
   (:require [dyna.user-defined-terms :refer [def-user-term]])
   (:require [dyna.context :as context])
-  (:import [dyna DynaTerm DIterable DIterator DIteratorInstance]))
+  (:import [dyna DynaTerm DIterable DIterator DIteratorInstance UnificationFailure]))
 
 ;(in-ns 'dyna.rexpr)
 
@@ -628,8 +628,12 @@
                                     :var resulting-map]
   (is-constraint? [this] true))
 
+(def-base-rexpr map-list-keys [:var Map
+                               :var KeyList])
+
 (def-user-term "$map_empty" 0 (make-unify v0 (make-constant (DynaMap. {})))) ;; return an empty map value
 (def-user-term "$map_element" 3 (make-map-element-access v0 v1 v2 v3))
+(def-user-term "$map_keys" 1 (make-map-list-keys v0 v1))
 ;(def-user-term "$map_merge" 2) ;; take two maps and combine them together
 
 ;; there should be some way to isnert a value into a map overriding, but this will have that
@@ -662,6 +666,26 @@
             v (get-value Value)
             r (assoc m k v)]
         (make-unify resulting-map (make-constant (DynaMap. r)))))))
+
+(def-rewrite
+  :match (map-list-keys (:ground Map) (:free KeyList))
+  :assigns-variable KeyList
+  (let [pm (get-value Map)]
+    (when-not (instance? DynaMap pm)
+      (throw (UnificationFailure. "not a map")))
+    (DynaTerm/make_list (keys (.map-elements ^DynaMap pm)))))
+
+(def-rewrite
+  :match (map-list-keys (:ground Map) (:ground KeyList))
+  :check true ;; this checks that the sets (represented as a list) are equal
+  (let [pm (get-value Map)
+        kl (get-value KeyList)]
+    (if-not (and (instance? DynaMap pm)
+                   (instance? DynaTerm kl))
+      false
+      (let [l (.list_to_vec ^DynaTerm kl)]
+        (if (nil? l) false
+            (= (into #{} l) (into #{} (keys (.map-elements ^DynaMap pm)))))))))
 
 (comment
   (def-rewrite

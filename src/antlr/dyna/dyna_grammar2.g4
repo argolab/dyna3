@@ -753,22 +753,26 @@ locals [ArrayList<Object> args]
     : 'import'  {$args = new ArrayList<>();}
         (m=methodId Comma  {$args.add($m.rterm);})*
          m=methodId Comma? {$args.add($m.rterm);}
-      'from' name=primitive {
-         $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create("import", DynaTerm.make_list($args), $name.v));
+      'from' name=stringConst {
+         $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create("import", DynaTerm.make_list($args), $name.t));
       }
-    | 'from' name=primitive
+    | 'from' name=stringConst
       'import' {$args = new ArrayList<>();}
         (m=methodId Comma  {$args.add($m.rterm);})*
          m=methodId Comma? {$args.add($m.rterm);}
       {
-         $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create("import", DynaTerm.make_list($args), $name.v));
+         $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create("import", DynaTerm.make_list($args), $name.t));
       }
-    | 'import' name=primitive {
-         $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create("import", $name.v));
+    | 'import' name=stringConst {
+         $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create("import", $name.t));
        }
+    // TODO: there is some redudancy in the way that expressions could be
+    // encoded by this.  But the encodings are going to generate _different_
+    // ASTs
     | a=atom p=compilerExpressionParams {$rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create_arr($a.t, $p.args));}
     | a=atom b=atom p=compilerExpressionParams {$rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create($a.t, DynaTerm.create_arr($b.t, $p.args)));}
     | a=atom m=methodId { $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create($a.t, $m.rterm)); }
+    | e=expression {$rterm=DynaTerm.create("\$compiler_expression", $e.rterm);}
 ;
 
 methodId returns [DynaTerm rterm]

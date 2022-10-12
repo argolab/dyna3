@@ -170,6 +170,7 @@ while [ $# -gt 0 ]; do
             echo '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~'
             echo 'Python environment:'
             python -m site
+            echo ''
             python -c 'import sys; print("Python prefix:", sys.prefix)'
             echo '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~'
             echo ''

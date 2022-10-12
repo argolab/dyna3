@@ -87,13 +87,13 @@ public final class DynaTerm implements ILookup {
         if(arguments != null) {
             int count = arity();
             if(count > 0) {
-                b.append("(");
+                b.append("["); // going to use the square bracket to print these as that is the syntax for writing this without &x(1,2,3) == x[1,2,3]
                 for(int i = 0; i < count; i++) {
                     if(i != 0) b.append(", ");
                     Object o = get(i);
                     b.append(o == null ? "null" : o.toString());
                 }
-                b.append(")");
+                b.append("]");
             }
         }
         return b.toString();
@@ -218,6 +218,7 @@ public final class DynaTerm implements ILookup {
         final int cnt = ((java.lang.Number)clojure_count.invoke(arr)).intValue();
         for(int i = cnt - 1; i >= 0; i--) {
             ret = DynaTerm.create(".", clojure_nth.invoke(arr, i), ret);
+            ret.hashCode(); // make sure the cache is set before it creates something that is very deep
         }
         return ret;
     }

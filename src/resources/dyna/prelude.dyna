@@ -118,3 +118,51 @@ $arg(&$constant(_)) := &$syntax_error("$arg can not be used on a constant").
 $value(X) := X.
 $value(&$with_key(R, K)) := R.
 :- make_system_term $value/1.
+
+
+
+map_to_list_rec(Map, []) = [].
+map_to_list_rec(Map, [K|Rest]) = [V | map_to_list_rec(Map, Rest)] for Map = {K -> V | _}.
+$map_values(Map) = map_to_list_rec(Map, $map_keys(Map)).
+:- make_system_term $map_values/1.
+
+
+
+
+
+
+:- $clojure'{
+  (require 'clojure.data.csv)
+  (require 'clojure.java.io)
+}.
+$read_csv(FileName) = $clojure'{
+(with-open [reader (clojure.java.io/reader FileName)]
+  (dyna.DynaTerm/make_list (map (fn [x] (dyna.DynaTerm/make_list x)) (clojure.data.csv/read-csv reader))))
+}.
+:- make_system_term $read_csv/1.
+
+
+enusre_list_length([X|Rest], Length) := [X| ensure_list_length(Rest, Length-1)].
+ensure_list_length([], L) := [$nil | ensure_list_length([], L-1)] for L > 0.
+ensure_list_length(_, 0) := [].
+
+define_term_from_csv(Name, Arity, []) =
+  $constant[true].  % the base case
+define_term_from_csv(Name, Arity, [Row|Rest]) =
+  Args = ensure_list_length(Row, Arity),
+  $reflect(Head, Name, Args),
+  ','[$define_term[Head, $nil, ":-", $constant[true]],
+      define_term_from_csv(Name, Arity, Rest)].
+
+
+% use this like :- import_csv(foo/3, "baz.csv").
+:- macro $pragma_import_csv/1.
+$pragma_import_csv('/'[TermId, $constant[TermArity]], $constant[FileName]) =
+  $reflect(TermId, TermName, 0),
+  FileData = $read_csv(FileName),
+  define_term_from_csv(TermName, TermArity, FileData).
+:- make_system_term $pragma_import_csv/2.
+
+% the compiler pragmas might look better if it was like `:- import_csv foo/3
+% "baz.csv".` But this is going to require that it somehow split on spaces
+% between different expressions.

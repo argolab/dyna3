@@ -10,6 +10,12 @@ public class DynaAgenda {
 
     public DynaAgenda() {}
 
+    // public DynaAgenda(DynaAgenda to_copy) {
+    //     queue = new PriorityQueue<>(to_copy.queue);
+    //     work_processed = to_copy.work_processed;
+    //     time_processing = to_copy.time_processing;
+    // }
+
     public void push_work(IDynaAgendaWork work) {
         queue.add(work);
     }
