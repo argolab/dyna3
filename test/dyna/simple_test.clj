@@ -248,6 +248,12 @@ a := 0 for A < A.
 assert a = 1.
 ")
 
+(str-test lessthan-vals "
+b := 1.
+b := 0 for X < 3, X > 5.
+
+assert b = 1.
+")
 
 (str-test map-type "
 m = {\"A\" -> 123, \"B\" -> 456}.

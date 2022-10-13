@@ -129,8 +129,7 @@
 
   (v2 ((upcast-big-int +' +) v0 v1))  ;; assign some value to a variable using the existing variables
   (v1 ((upcast-big-int -' -) v2 v0))
-  (v0 ((upcast-big-int -' -) v2 v1))
-  )
+  (v0 ((upcast-big-int -' -) v2 v1)))
 
 (def-user-term "+" 2 (make-add v0 v1 v2))
 (def-user-term "-" 2 (make-add v2 v1 v0))
@@ -569,24 +568,25 @@
 
 (def-user-term "string" 1 (make-is-string v0 v1))
 
-(def-base-rexpr unify-with-return [:var A :var B :var Return]
-  (is-constraint? [this] true))
+(comment
+  (def-base-rexpr unify-with-return [:var A :var B :var Return]
+    (is-constraint? [this] true))
 
-(def-rewrite
-  :match (unify-with-return (:ground A) (:ground B) (:free Return))
-  :run-at [:standard :construction]
-  (make-unify Return (make-constant (= (get-value A) (get-value B)))))
+  (def-rewrite
+    :match (unify-with-return (:ground A) (:ground B) (:free Return))
+    :run-at [:standard :construction]
+    (make-unify Return (make-constant (= (get-value A) (get-value B)))))
 
-(def-rewrite
-  :match (unify-with-return (:any A) (:any B) (is-true? Return))
-  :run-at :construction
-  (make-unify A B))
+  (def-rewrite
+    :match (unify-with-return (:any A) (:any B) (is-true? Return))
+    :run-at :construction
+    (make-unify A B))
 
-(def-rewrite
-  :match (unify-with-return (:any A) (:any B) (:ground Return))
-  :run-at [:standard :construction]
-  (when (= (get-value Return) true)
-    (make-unify A B)))
+  (def-rewrite
+    :match (unify-with-return (:any A) (:any B) (:ground Return))
+    :run-at [:standard :construction]
+    (when (= (get-value Return) true)
+      (make-unify A B))))
 
 ;; this should check if the arguments are the same variable, in which case this
 ;; can just unify the result with true?  but if there is an expression like
@@ -599,7 +599,10 @@
 ;; identify the return value as true so it will not identify which of the
 ;; expressions
 
-(def-user-term "$unify" 2 (make-unify-with-return v0 v1 v2))
+;(def-user-term "$unify" 2 (make-unify-with-return v0 v1 v2))
+
+(def-user-term "$unify" 2 (make-conjunct [(make-unify v0 v1)
+                                          (make-unify v2 (make-constant true))]))
 
 
 ;; (def-user-term "$make_with_key" 2 (make-multiplicity 1))  ;; TODO: should construct some structured term
@@ -738,10 +741,24 @@
                                   (make-conjunct [(make-no-simp-unify MatchedResult (make-constant (car match)))
                                                   (make-conjunct (doall (map #(make-no-simp-unify %1 (make-constant %2))
                                                                              Args (cdr match))))])))))))))
-
-
 ;; (doseq [i (range 0 50)]
 ;;   (let [vars (map #(symbol (str "v" %)) (range 3 (+ i 4)))]
 ;;     (eval `(def-user-term "$regex_match" ~(+ i 3)
 ;;              (make-conjunct (make-unify ~(last vars) (make-constant true))
 ;;                             (make-regex-matcher v0 v1 v2 ~(vec (drop-last vars))))))))
+
+(def-builtin-rexpr is-int 2
+  (:allground (= v1 (int? v0)))
+  (v1 (int? v0)))
+
+(def-builtin-rexpr is-float 2
+  (:allground (= v1 (float? v0)))
+  (v1 (float? v0)))
+
+(def-builtin-rexpr is-number 2
+  (:allground (= v1 (number? v0)))
+  (v1 (number? v0)))
+
+(def-user-term "int" 1 (make-is-int v0 v1))
+(def-user-term "float" 1 (make-is-float v0 v1))
+(def-user-term "number" 1 (make-is-number v0 v1))
