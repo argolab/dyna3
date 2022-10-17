@@ -220,11 +220,11 @@
                                                  (PrefixTrie. (count exposed-vars) 0 (convert-to-trie-agg (count exposed-vars) @accumulator))))
                   ;; this will merge the tries due to rewrites on the disjunction construction
                   rr (make-aggregator-op-outer operator result-variable (make-disjunct [accum-vals
-                                                                                        ret]))]
-              ;(debug-repl "lll")
-                                        ;(???) ;; this is going to have to maek the trie, the trie will have to have the result of aggregation contained in
-              ;; the aggregator-op-inner.
-              rr)))))))
+                                                                                        ret]))
+                  rr2 (if (and (= simplify simplify-inference) (:add-to-out-rexpr operator) (empty? exposed-vars) (not (nil? (get @accumulator nil))))
+                        (make-conjunct [rr ((:add-to-out-rexpr operator) (get @accumulator nil) result-variable)])
+                        rr)]
+              rr2)))))))
 
 ;; in the case that the disjunct is lifted out, it would be possible that
 ;; something which does not contain the proejcted vars and does not contain the

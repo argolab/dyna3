@@ -48,3 +48,15 @@ m(1) max= 1.  % if this branch matches, then it can figure out that the other br
 
 assert m(1) = 1.
 ")
+
+(str-test alpha-beta-prune "
+foo(X) = foo(X). % we can not figure out the value of this because it keeps recursing
+
+maxs max= foo(X).
+maxs max= 1.  % we can figure out that the value of this is at least 1
+
+mins min= 0.
+mins min= maxs.  % this is going to be greater than the known 0 value
+
+assert mins = 0.
+")
