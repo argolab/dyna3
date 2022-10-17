@@ -60,3 +60,22 @@ mins min= maxs.  % this is going to be greater than the known 0 value
 
 assert mins = 0.
 ")
+
+
+(str-test saturated-or "
+foo(X) = foo(X).
+
+f |= foo(123).
+f |= true.
+
+assert f = true.
+")
+
+(str-test saturated-any "
+foo(X) = foo(X).
+
+f ?= foo(123).
+f ?= 1.
+
+assert f = 1.
+")

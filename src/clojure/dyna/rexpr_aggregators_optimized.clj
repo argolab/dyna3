@@ -59,6 +59,11 @@
   (fn [incoming-variable]
     (make-multiplicity 1)))
 
+(def ^{:private true :dynamic true} *aggregator-op-saturated*
+  ;; if the current bindings to variables are sautrated, meaning that the
+  ;; contributed values are done, then we can avoid continuing to process other stuff
+  (fn [] false))
+
 
 (def-rewrite
   :match {:rexpr (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable)
@@ -68,7 +73,6 @@
   (let [inner (make-aggregator-op-inner incoming-variable
                                                         []
                                                         R)]
-    ;(debug-repl)
     (make-aggregator-op-outer (get @aggregators operator) result-variable inner)))
 
 ;; if there is a project nested inside of the aggregator inner expression, then we are going pull the projection out and add it to the aggregator
@@ -148,11 +152,12 @@
     (debug-repl "bad agg op inner")
     (???)))
 
-(defn- convert-to-trie-mul1 [cnt trie]
+(defn- convert-to-trie-mul1 [cnt trie lower-value]
   (if (= cnt 0)
-    {trie [(make-multiplicity 1)]}
+    (try {(lower-value trie) [(make-multiplicity 1)]}
+         (catch UnificationFailure err {})) ;; if there is a unification failure by lower, then this is just empty
     (into {} (for [[k v] trie]
-               [k (convert-to-trie-mul1 (- cnt 1) v)]))))
+               [k (convert-to-trie-mul1 (- cnt 1) v lower-value)]))))
 
 (defn- convert-to-trie-agg [cnt trie]
   (if (= cnt 0)
@@ -188,9 +193,23 @@
                   (ati cur-val incoming-variable)
                   (make-multiplicity 1)))))
           (fn [incoming-variable] ;; there is no additional constriants which can be added, so return mult 1
-            (make-multiplicity 1)))]
+            (make-multiplicity 1)))
+        check-saturated-func
+        (if (:saturate operator)
+          (let [sf (:saturate operator)]
+            (fn []
+              (let [kvals (vec (map get-value exposed-vars))
+                   cur-val (if (empty? exposed-vars)
+                              (get @accumulator nil)
+                              (get-in @accumulator kvals))]
+                ;; it is not just the current value, but if there is a "more general" version of the bindings (something with nil)
+                ;; that also would cause saturate to be true, then this can be done
+                (when-not (nil? cur-val)
+                  (sf cur-val)))))
+          (fn [] false))]
     (binding [*aggregator-op-contribute-value* contrib-func
-              *aggregator-op-additional-constraints* additional-constraint-func]
+              *aggregator-op-additional-constraints* additional-constraint-func
+              *aggregator-op-saturated* check-saturated-func]
       (let [ret (context/bind-context ctx (try (simplify Rbody)
                                                (catch UnificationFailure e (make-multiplicity 0))))]
         (if (is-empty-rexpr? ret)
@@ -211,7 +230,7 @@
                        (recur (conj ret (make-unify (first ev) (make-constant (first (keys trie)))))
                               (rest ev)
                               (first (vals trie)))
-                       (conj ret (make-disjunct-op (conj (vec ev) result-variable) (PrefixTrie. (+ 1 (count ev)) 0 (convert-to-trie-mul1 (count ev) trie)))))))))))
+                       (conj ret (make-disjunct-op (conj (vec ev) result-variable) (PrefixTrie. (+ 1 (count ev)) 0 (convert-to-trie-mul1 (count ev) trie (:lower-value operator identity))))))))))))
           (if (nil? @accumulator)
             (make-aggregator-op-outer operator result-variable ret)
             (let [accum-vals (if (empty? exposed-vars)
@@ -234,15 +253,11 @@
   :match (aggregator-op-inner (:any incoming-variable) (:any-list projected-vars) (:rexpr Rbody))
   :run-at [:standard :inference]
   (let [ctx (context/make-nested-context-aggregator-op-inner Rbody projected-vars incoming-variable)]
-    ;(debug-repl "oo2")
     (context/bind-context-raw
      ctx
      (let [exposed (exposed-variables rexpr) ;; if all of the exposed are ground, then we should just go ahead and compute the value
            nR (try (simplify Rbody)
                    (catch UnificationFailure e (make-multiplicity 0)))]
-
-       ;(debug-repl "oo")
-
        (cond
          (is-empty-rexpr? nR) (make-multiplicity 0)
 
@@ -276,20 +291,21 @@
                       (when-not (is-empty-rexpr? rc)
                         ;; then we have to save the result of this R-expr, as it could not get processed for some reason
                         (vswap! result-rexprs conj rc)))))
-                (let [new-incoming (if (is-bound? incoming-variable)
-                                     (make-constant (get-value incoming-variable))
-                                     incoming-variable)
-                      remapping-map (into {} (for [v (cons incoming-variable projected-vars)
-                                                   :when (and (not (is-constant? v)) (is-bound? v))]
-                                               [v (make-constant (get-value v))]))
-                      new-projected (vec (filter #(not (is-bound? %)) projected-vars))
-                      new-body (remap-variables inner-r remapping-map)
-                      other-constraints (*aggregator-op-additional-constraints* new-incoming)
-                      rc (make-aggregator-op-inner new-incoming new-projected
-                                                   (if (not= (make-multiplicity 1) other-constraints)
-                                                     (make-conjunct [new-body other-constraints])
-                                                     new-body))]
-                  (vswap! result-rexprs conj rc)))))
+                (when-not (*aggregator-op-saturated*)
+                  (let [new-incoming (if (is-bound? incoming-variable)
+                                       (make-constant (get-value incoming-variable))
+                                       incoming-variable)
+                        remapping-map (into {} (for [v (cons incoming-variable projected-vars)
+                                                     :when (and (not (is-constant? v)) (is-bound? v))]
+                                                 [v (make-constant (get-value v))]))
+                        new-projected (vec (filter #(not (is-bound? %)) projected-vars))
+                        new-body (remap-variables inner-r remapping-map)
+                        other-constraints (*aggregator-op-additional-constraints* new-incoming)
+                        rc (make-aggregator-op-inner new-incoming new-projected
+                                                     (if (not= (make-multiplicity 1) other-constraints)
+                                                       (make-conjunct [new-body other-constraints])
+                                                       new-body))]
+                    (vswap! result-rexprs conj rc))))))
 
 
            (if (empty? @result-rexprs)

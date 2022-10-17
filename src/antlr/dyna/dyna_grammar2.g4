@@ -102,8 +102,8 @@ Variable
 
 // going to change this to only match the aggregators which are actually defined
 MergedAggregator
-    : [&*\-+:|] '='
-    | [a-z][a-z&*\-+:|]* '=' {
+    : [&*\-+:|?] '='
+    | [a-z][a-z&*\-+:|?]* '=' {
     // this checks that the aggregator name is defined in rexpr_aggregators.clj and will conditionally enable this lexer rule
         aggregator_defined(getText())}?
     ;

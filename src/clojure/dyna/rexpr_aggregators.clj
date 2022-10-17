@@ -117,10 +117,21 @@
   :identity ##-Inf
   :allows-with-key true
   ;; this will let us add expressions to the R-expr so that this can eleminate branches which are not useful
-  :add-to-in-rexpr (fn [current-value incoming-variable]  ;; this would mean that there needs to be some optional stuff for these, or some way in which assumptions can be tracked for these branches.  We don't want to store these expressions in the case that
-                     (make-lessthan-eq (make-constant current-value) incoming-variable (make-constant true)))
+  :add-to-in-rexpr
+  (let [valvar (make-variable (gensym))
+        keyvar (make-variable (gensym))]
+    (fn [current-value incoming-variable]
+      ;; in the case that there is a $with_key, this needs to check the value that is assigned to the variable instead of the resulting expression
+      (if (and (instance? DynaTerm current-value) (= (.name ^DynaTerm current-value) "$with_key"))
+        (make-proj-many [valvar keyvar]
+                        (make-conjunct [(make-unify-structure incoming-variable
+                                                              nil (make-constant DynaTerm/null_term)
+                                                              "$with_key"
+                                                              [valvar keyvar])
+                                        (make-lessthan-eq (make-constant (get-aggregated-value current-value)) valvar (make-constant true))]))
+        (make-lessthan-eq (make-constant current-value) incoming-variable (make-constant true)))))
   :add-to-out-rexpr (fn [current-value result-variable]
-                      (make-lessthan-eq (make-constant current-value) result-variable (make-constant true)))
+                      (make-lessthan-eq (make-constant (get-aggregated-value current-value)) result-variable (make-constant true)))
   :rexpr-binary-op make-max
   :many-items (fn [val mul] val))
 
@@ -132,8 +143,21 @@
   :allows-with-key true
   ;; this add-to-rexpr will have to know if with-key is included in the expression.
   ;; this would mean that it somehow removes the unification in the case
-  :add-to-in-rexpr (fn [current-value incoming-variable]
-                     (make-lessthan-eq incoming-variable (make-constant current-value) (make-constant true)))
+  :add-to-in-rexpr
+  (let [valvar (make-variable (gensym))
+        keyvar (make-variable (gensym))]
+    (fn [current-value incoming-variable]
+      (if (and (instance? DynaTerm current-value) (= (.name ^DynaTerm current-value) "$with_key"))
+        ;; handle if there is a $with_key present
+        ;; this isn't 100% right, as could have a rule which will only have with_key on some of the values, and nothing on others.
+        ;; in which case this will cause it to attempt to unify and get eleminated as a result
+        (make-proj-many [valvar keyvar]
+                        (make-conjunct [(make-unify-structure incoming-variable
+                                                              nil (make-constant DynaTerm/null_term)
+                                                              "$with_key"
+                                                              [valvar keyvar])
+                                        (make-lessthan-eq incoming-variable (make-constant current-value) (make-constant true))]))
+        (make-lessthan-eq incoming-variable (make-constant current-value) (make-constant true)))))
   ;; adding some information to the result of the expression would allow for
   ;; this to indicate that the resulting value will at least be greater than
   ;; what the current expression is.  having some lessthan expression added on
@@ -141,7 +165,7 @@
   ;; strategy These lessthan expressions should then be able to combine together
   ;; to eleminate branches
   :add-to-out-rexpr (fn [current-value result-variable]
-                      (make-lessthan-eq result-variable (make-constant current-value) (make-constant true)))
+                      (make-lessthan-eq result-variable (make-constant (get-aggregated-value current-value)) (make-constant true)))
   :rexpr-binary-op make-min
   :many-items (fn [val mul] val))
 
@@ -155,26 +179,20 @@
                       (make-unify result-variable (make-constant true)))
   :many-items (fn [val mul] val))
 
-(comment
-  ;; this aggregator is already going to have that the incoming variable is unified with the expression which corresponds with
+(def-aggregator "|="
+  :identity false
+  :combine (fn [a b] (or a b))
+  :saturate #(= true %)
+  :many-items (fn [val mult] val)
+  :combine-mult (fn [a b mult] (or a b)))
 
-  (def-aggregator "|="
-    :combine (fn [a b] (or a b))
-    :saturate #(= true %)
-    :add-to-rexpr (fn [current-value incoming-variable]
-                    (if (= current-value false)
-                      (make-unify incoming-variable (make-constant true))))
-    :rexpr-binary-op make-lor)
-
-  (def-aggregator "&="
-    :combine (fn [a b] (and a b))
-    :saturate #(= false %)
-    :add-to-rexpr (fn [current-value incoming-variable]
-                    (if (= current-value true)
-                      ;; then this could add some unify the result with false as that is the only thing which can change the value of this expression
-                      ;; but could that causes this expression to run something that wouldn't have run otherwise?
-                      (make-unify incoming-variable (make-constant false))))
-    :rexpr-binary-op make-land))
+(comment)
+(def-aggregator "&="
+  :identity true
+  :combine (fn [a b] (and a b))
+  :saturate #(= false %)
+  :many-items (fn [val mult] val)
+  :combine-mult (fn [a b mult] (and a b)))
 
 ;; a global counter which is used for all := across the entire program in the
 ;; case of nested dynabases, this will not necessarily allow for overriding a
@@ -207,7 +225,7 @@
                                                          ;; if we only allow for 1 value per line, then this could be lessthan rather than lessthan-eq
                                                          (make-lessthan-eq (make-constant line) linevar (make-constant true))])))))
   :add-to-out-rexpr (fn [current-value result-variable]
-                      (make-not-equals result-variable (make-constant colon-identity-elem)))
+                      (make-not-equals result-variable (make-constant colon-identity-elem) (make-constant true)))
   :lower-value (fn [x]
                  (assert (= "$colon_line_tracking" (.name ^DynaTerm x)))
                  (let [[la va] (.arguments ^DynaTerm x)]
@@ -223,15 +241,18 @@
   ;;   :check-input (partial instance? DynaMap)
   ;;   )
 
-
-(comment
+(let [ident (Object.)]
   (def-aggregator "?="
-    :combine (fn [a b] a) ;; we just have to choose something
-    :saturate (fn [x] true)))  ;; this saturates once it gets something, so we can
-    ;; just ignore whatever value is selected, we don't
-    ;; have to keep running this value.  Having this as a
-    ;; function means that we can make this do whatever
-    ;; we want with the representation
+    :identity ident
+    :combine (fn [a b] a) ;; this just picks something
+    :saturate (fn [x] true)  ;; once there is a value, this is going to mark it as saturated meaning that it is done and can stop processing
+    :lower-value (fn [x]
+                   (if (identical? x ident)
+                     (throw (UnificationFailure. "No contributions on aggregator"))
+                     x))))
+
+
+
 
 (def-rewrite
   :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable)

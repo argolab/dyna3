@@ -421,8 +421,11 @@
                                                                       (require '[dyna.core :refer :all])
                                                                       (eval clj-code))))
 
-                                           "optimized_rexprs" (match-term arg1 ("optimized-rexprs" c)
+                                           "optimized_rexprs" (match-term arg1 ("optimized_rexprs" c)
                                                                           (alter-var-root system/*use-optimized-rexprs* (if c true false)))
+
+                                           "set_recursion_limit" (match-term arg1 ("set_recursion_limit" l)
+                                                                             (reset! system/user-recursion-limit (int l)))
 
                                            (let [arity (.arity arg1)
                                                  call-name {:name (str "$pragma_" (.name arg1))
