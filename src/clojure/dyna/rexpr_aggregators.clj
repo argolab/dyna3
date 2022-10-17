@@ -117,10 +117,10 @@
   :identity ##-Inf
   :allows-with-key true
   ;; this will let us add expressions to the R-expr so that this can eleminate branches which are not useful
-  :add-to-rexpr-incoming (fn [current-value incoming-variable]  ;; this would mean that there needs to be some optional stuff for these, or some way in which assumptions can be tracked for these branches.  We don't want to store these expressions in the case that
-                           (make-lessthan-eq (make-constant current-value) incoming-variable))
-  :add-to-rexpr-result (fn [current-value result-variable]
-                         (make-lessthan-eq (make-constant current-value) result-variable))
+  :add-to-in-rexpr (fn [current-value incoming-variable]  ;; this would mean that there needs to be some optional stuff for these, or some way in which assumptions can be tracked for these branches.  We don't want to store these expressions in the case that
+                     (make-lessthan-eq (make-constant current-value) incoming-variable (make-constant true)))
+  :add-to-out-rexpr (fn [current-value result-variable]
+                      (make-lessthan-eq (make-constant current-value) result-variable (make-constant true)))
   :rexpr-binary-op make-max
   :many-items (fn [val mul] val))
 
@@ -132,16 +132,16 @@
   :allows-with-key true
   ;; this add-to-rexpr will have to know if with-key is included in the expression.
   ;; this would mean that it somehow removes the unification in the case
-  :add-to-rexpr-incoming (fn [current-value incoming-variable]
-                           (make-lessthan-eq incoming-variable (make-constant current-value)))
+  :add-to-in-rexpr (fn [current-value incoming-variable]
+                     (make-lessthan-eq incoming-variable (make-constant current-value) (make-constant true)))
   ;; adding some information to the result of the expression would allow for
   ;; this to indicate that the resulting value will at least be greater than
   ;; what the current expression is.  having some lessthan expression added on
   ;; the result side will allow for this to replicate alpha-beta pruning as a
   ;; strategy These lessthan expressions should then be able to combine together
   ;; to eleminate branches
-  :add-to-rexpr-result (fn [current-value result-variable]
-                         (make-lessthan-eq result-variable (make-constant current-value)))
+  :add-to-out-rexpr (fn [current-value result-variable]
+                      (make-lessthan-eq result-variable (make-constant current-value) (make-constant true)))
   :rexpr-binary-op make-min
   :many-items (fn [val mul] val))
 
@@ -199,9 +199,13 @@
                          valvar (make-variable (gensym))]
                      (fn [current-value incoming-variable]
                        (let [[line val] (.arguments ^DynaTerm current-value)]
-                         (make-proj-many [linevar valvar] (make-conjunct [(make-unify-structure incoming-variable (make-constant nil)
-                                                                                                "$colon_line_tracking" [linevar valvar])
-                                                                          (make-lessthan-eq (make-constant line) linevar)])))))
+                         (make-proj-many [linevar valvar]
+                                         (make-conjunct [(make-unify-structure incoming-variable
+                                                                               nil ;; no file name
+                                                                               (make-constant DynaTerm/null_term) ;; no dynabase
+                                                                               "$colon_line_tracking" [linevar valvar])
+                                                         ;; if we only allow for 1 value per line, then this could be lessthan rather than lessthan-eq
+                                                         (make-lessthan-eq (make-constant line) linevar (make-constant true))])))))
   :add-to-out-rexpr (fn [current-value result-variable]
                       (make-not-equals result-variable (make-constant colon-identity-elem)))
   :lower-value (fn [x]
@@ -402,7 +406,18 @@
                             (make-unify result-variable (make-constant ((:lower-value aop identity) @current-value))))
                           ;; there is something that is not processed yet, so we are going to
                           ;; have to construct an aggregator to wrap the remaining expressions
-                          (let [remain-disjunct (make-disjunct (persistent! unfinished-rexprs))
+                          (let [unfinished-rexpr-vec (persistent! unfinished-rexprs)
+                                zzzz (debug-repl)
+                                unfinished-rexpr-vec2 (if (and (:add-to-in-rexpr aop) (not= @current-value (:identity aop)))
+                                                        (let [af (:add-to-in-rexpr aop)
+                                                              ur (for [u unfinished-rexpr-vec]
+                                                                   (make-conjunct [u (af @current-value incoming-variable)]))]
+                                                          ;(debug-repl "add something to the in side")
+                                                          (vec ur)
+                                                          ;(???)
+                                                          )
+                                                        unfinished-rexpr-vec)
+                                remain-disjunct (make-disjunct unfinished-rexpr-vec2)
                                 body (if @is-empty-value
                                        remain-disjunct
                                        (make-disjunct [(make-no-simp-unify incoming-variable (make-constant @current-value))

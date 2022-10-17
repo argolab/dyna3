@@ -31,3 +31,20 @@ assert a = 3.
 a += X for X >= 0, X < 10, int(X).
 
 assert a = 45.")
+
+
+(str-test agg-elem-branch-colon "
+fact(N) := fact(N-1) * N.
+fact(0) := 1.  % if this branch matches, then we can stop processing the other branch which recurses
+
+assert fact(5) = 120.
+")
+
+
+(str-test agg-elem-branch-max "
+rec_forever(X) = rec_forever(X).
+m(X) max= 0 for rec_forever(X).
+m(1) max= 1.  % if this branch matches, then it can figure out that the other branch will not be used.  additionally, having this property will give stuff like alpha-beta pruning \"for free\"
+
+assert m(1) = 1.
+")

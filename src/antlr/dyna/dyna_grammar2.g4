@@ -660,7 +660,7 @@ expressionExponent returns [DynaTerm rterm]
     ;
 
 expressionMultiplicative returns [DynaTerm rterm]
-    : a=expressionExponent {$rterm = $a.rterm;} (op=('*'|'/'|'//') b=expressionExponent
+    : a=expressionExponent {$rterm = $a.rterm;} (op=('*'|'/') b=expressionExponent  // removed // for the int division. not sure if that is needed given we have a builtin range expression which only works for int expressions
                 {$rterm = DynaTerm.create($op.getText(), $rterm, $b.rterm);})*
     ;
 

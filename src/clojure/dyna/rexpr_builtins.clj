@@ -237,7 +237,7 @@
   (:allground (= v2 (< v0 v1)))
   (v2 (< v0 v1))) ;; there should be a return true / false place for this expression
 
-(def-user-term ["lesshthan" "<"] 2 (make-lessthan v0 v1 v2))
+(def-user-term ["lessthan" "<"] 2 (make-lessthan v0 v1 v2))
 (def-user-term ["greaterthan" ">"] 2 (make-lessthan v1 v0 v2))
 
 (def-builtin-rexpr lessthan-eq 3
@@ -283,6 +283,12 @@
   :infers (make-lessthan-eq C B (make-constant true)))
 
 (def-rewrite
+  :match {:rexpr (lessthan-eq (:any A) (:any B) (is-true? _))
+          :context (lessthan-eq B (:any C) (is-true? _))}
+  :run-at :inference
+  :infers (make-lessthan-eq A C (make-constant true)))
+
+(def-rewrite
   :match (lessthan (:any A) (:any B) (#(= % (make-constant false)) _))
   :run-at :construction
   (make-lessthan-eq B A (make-constant true)))
@@ -297,7 +303,6 @@
           :context (lessthan-eq B (:any C) (is-true? _))}
   :run-at :inference
   :infers (make-lessthan-eq A C (make-constant true)))
-
 
 (def-rewrite
   :match {:rexpr (lessthan (:any A) (:any B) (is-true? _))
@@ -322,7 +327,9 @@
   (v2 (= v0 v1)))
 
 
-;; XXX: should this rewrite exist??? this makes it basically the same as unify-with-return
+;; unify-with-return is just called equals.  In the case that we know that two
+;; of the values have to be equal, as the return from the expression is going to
+;; be true, then it can replace the expression with an equals value
 (def-rewrite
   :match (equals (:any A) (:any B) (is-true? _))
   :run-at [:construction :standard]
@@ -360,7 +367,6 @@
   :infers (make-equals B C (make-constant true)))
 
 
-;; this should maybe just be unification rather than having something different for equals checking?
 (def-user-term ["equals" "=="] 2 (make-equals v0 v1 v2))
 
 (def-builtin-rexpr not-equals 3
@@ -383,12 +389,12 @@
 (def-builtin-rexpr land 3
   (:allground (= (boolean v2) (boolean (and v0 v1))))
   (v2 (boolean (and v0 v1))))
-(def-user-term ["land" "&"] 2 (make-land v0 v1 v2))
+(def-user-term ["land" "&&"] 2 (make-land v0 v1 v2))
 
 (def-builtin-rexpr lor 3
   (:allground (= (boolean v2) (boolean (or v0 v1))))
   (v2 (boolean (or v0 v1))))
-(def-user-term ["lor" "|"] 2 (make-lor v0 v1 v2))  ;; the pipe might be something which is or between methods so that we can use this to define types
+(def-user-term ["lor" "||"] 2 (make-lor v0 v1 v2))  ;; the pipe might be something which is or between methods so that we can use this to define types
 
 
 (def-builtin-rexpr not 2
@@ -793,3 +799,24 @@
               (make-constant 1)
               Var
               (make-constant true)))
+
+
+(comment
+  (def-builtin-rexpr int-division 3
+    (:allground (= v2 (quot v0 v1)))
+    (v2 (quot v0 v1)))
+  (def-user-term ["int_division" "//"] 2 (make-int-division v0 v1 v2))
+
+  (def-rewrite
+    :match-combines [(int-division (:free Num) (:ground Denom) (:any Result))
+                     (or (lessthan (:free Num) (:ground Upper) (is-true? _))
+                         (lessthan-eq (:free Num) (:ground Upper) (is-true? _)))
+                     (or (lessthan (:ground Lower) (:free Num) (is-true? _))
+                         (lessthan-eq (:ground Lower) (:free Num) (is-true? _)))]
+    :run-at :inference
+    :infers
+    (make-range (make-constant (round-down (get-value Lower)))
+                (make-constant (round-up (get-value Upper)))
+                Demon
+                Num
+                (make-constant true))))

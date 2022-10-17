@@ -1,11 +1,13 @@
 LEIN := $(shell which lein 2>/dev/null > /dev/null && echo lein || { if [ ! -f .lein.sh ]; then curl -o .lein.sh https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein; chmod +x .lein.sh ; fi; echo './.lein.sh' ; })
 JAVA ?= java
 
-VERSION=0.1.0
+# this version should match the version in project.clj as that is what is going to be built by lein
+JVERSION:= 0.1.0
+VERSION= $(shell date '+%Y%m%d')
 
 SOURCE=$(wildcard src/*/*/*.clj) $(wildcard src/*/*/*.java)
-JAR_TARGET=target/dyna-$(VERSION)-SNAPSHOT-standalone.jar
-JAR_WITH_PYTHON_INSTALLER=target/dyna-combined-$(VERSION)-SNAPSHOT-standalone.jar
+JAR_TARGET=target/dyna-$(JVERSION)-SNAPSHOT-standalone.jar
+JAR_WITH_PYTHON_INSTALLER=target/dyna-combined-$(JVERSION)-SNAPSHOT-standalone.jar
 TARGET=dyna-standalone-$(VERSION)
 
 PYTHON_MODULE=python_module
@@ -17,7 +19,7 @@ PARSER_TARGET=target/classes/dyna/dyna_grammar2Parser.class
 all: $(TARGET)
 
 clean:
-	rm -rf target/ $(TARGET)
+	rm -rf target/ dyna-standalone-*
 
 test:
 	_JAVA_OPTIONS='-Ddyna.debug=false -Ddyna.trace_rexpr_construction=false -Xss8m' $(LEIN) test
@@ -40,7 +42,6 @@ clj-repl: clean
 # and we don't want to have mixed the old and new versions of this
 $(JAR_TARGET): $(SOURCE)
 	rm -rf target/
-#$(LEIN) do antlr, javac, compile, uberjar
 	$(LEIN) uberjar
 
 $(PARSER_TARGET): src/antlr/dyna/dyna_grammar2.g4

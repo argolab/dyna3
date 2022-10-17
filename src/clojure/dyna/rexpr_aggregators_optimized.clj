@@ -52,6 +52,13 @@
     ;([value] (r value 1))
 
 
+(def ^{:private true :dynamic true} *aggregator-op-additional-constraints*
+  ;; additional constraints that can be added to the R-expr in the case that it
+  ;; would not be resolved, this can take into account the current value known
+  ;; to the aggregator
+  (fn [incoming-variable]
+    (make-multiplicity 1)))
+
 
 (def-rewrite
   :match {:rexpr (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable)
@@ -168,8 +175,22 @@
                                                                  value
                                                                  ((:combine operator) old value)))))
                        ;; this will return mult 0, as we are saving the values directly rather than having this come back through the R-expr
-                       (make-multiplicity 0))]
-    (binding [*aggregator-op-contribute-value* contrib-func]
+                       (make-multiplicity 0))
+        additional-constraint-func
+        (if (and (= simplify simplify-inference) (:add-to-in-rexpr operator))
+          (let [ati (:add-to-in-rexpr operator)]
+            (fn [incoming-variable]
+              (let [kvals (vec (map get-value exposed-vars))
+                    cur-val (if (empty? exposed-vars)
+                              (get @accumulator nil)
+                              (get-in @accumulator kvals))]
+                (if-not (nil? cur-val)
+                  (ati cur-val incoming-variable)
+                  (make-multiplicity 1)))))
+          (fn [incoming-variable] ;; there is no additional constriants which can be added, so return mult 1
+            (make-multiplicity 1)))]
+    (binding [*aggregator-op-contribute-value* contrib-func
+              *aggregator-op-additional-constraints* additional-constraint-func]
       (let [ret (context/bind-context ctx (try (simplify Rbody)
                                                (catch UnificationFailure e (make-multiplicity 0))))]
         (if (is-empty-rexpr? ret)
@@ -224,6 +245,7 @@
 
        (cond
          (is-empty-rexpr? nR) (make-multiplicity 0)
+
          (and (is-multiplicity? nR) (is-bound-in-context? incoming-variable ctx))
          (let [ret (*aggregator-op-contribute-value* (get-value-in-context incoming-variable ctx) (:mult nR))]
            ;; this needs to just return the value from the expression
@@ -262,8 +284,11 @@
                                                [v (make-constant (get-value v))]))
                       new-projected (vec (filter #(not (is-bound? %)) projected-vars))
                       new-body (remap-variables inner-r remapping-map)
-                      rc (make-aggregator-op-inner new-incoming new-projected new-body)]
-                  ;(debug-repl "pp") ;; this needs to save the result, and remove any projections that are now fully resolved
+                      other-constraints (*aggregator-op-additional-constraints* new-incoming)
+                      rc (make-aggregator-op-inner new-incoming new-projected
+                                                   (if (not= (make-multiplicity 1) other-constraints)
+                                                     (make-conjunct [new-body other-constraints])
+                                                     new-body))]
                   (vswap! result-rexprs conj rc)))))
 
 
