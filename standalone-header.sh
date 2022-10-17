@@ -213,6 +213,7 @@ jvm_args+="-Xmx$memory -Dclojure.compiler.direct-linking=true -Ddyna.print_rewri
 if [ -z "$dyna_args" ]; then
     welcome_message
     printf "Loading...\r"
+    jvm_args+=" -Ddyna.loading_spin=true "
 fi
 
 

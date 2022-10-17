@@ -26,3 +26,8 @@ a += X=&f(1,Z), X=&f(Y,2), Z+Y.
 
 assert a = 3.
 ")
+
+(str-test combine-range "
+a += X for X >= 0, X < 10, int(X).
+
+assert a = 45.")

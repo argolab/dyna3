@@ -2,16 +2,13 @@
 
 
 
-// some bug that prevents us from having this loaded in a package
-// looks like it might be how the build script is trying to locate items
-// also unable to use any additional tools from antlr when using a package name...lame
 grammar dyna_grammar2;
-//
+
 @header {
 package dyna;
 
 import java.math.BigInteger;
-import clojure.java.api.Clojure;
+//import clojure.java.api.Clojure;
 import static dyna.ParserUtils.*;
 import clojure.lang.BigInt;
 
@@ -297,8 +294,8 @@ term returns[DynaTerm rterm = null]
         { // the warning stuff should somehow check something at runtime?
             // Though this is going to need which of the values will correspond with something
             // ideally, this should somehow allow for something to be conditional on some value
-
-            assert(false);
+            $rterm = DynaTerm.create("\$warning", $we.rterm, $we.ctx.getStart().getLine(), $t.rterm);
+            //assert(false);
         }
     ;
 
@@ -545,7 +542,7 @@ expressionRoot returns [DynaTerm rterm]
     | '(' e=expression ')' { $rterm = $e.rterm; }
     | ilf=inlineFunction2 { $rterm = $ilf.rterm; }
     | a=array { $rterm = $a.rterm; }
-    | ':' m=methodCall {  // for supporthing things like f(:int) => f(_:int)
+    | ':' m=methodCall {  // for supporting things like f(:int) => f(_:int)
             $rterm = DynaTerm.create("\$variable", gensym_variable_name());
             $m.args.add($rterm);
             $rterm = DynaTerm.create(",", DynaTerm.create($m.name, $m.args), $rterm); }

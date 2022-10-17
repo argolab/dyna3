@@ -714,6 +714,14 @@
                               (throw (DynaUserAssert. source-file line-number text-rep result)))
                             (make-unify out-variable (make-constant true))) ;; if the assert fails, then it will throw some exception
 
+            ["$warning" 3] (let [[warning-text line-number check-expression] (.arguments ast)]
+                             ;; should a warning somehow check arguments to a dynabase or something?
+                             ;; I suppose at the top level, this can just check the current assignments to variables and print something
+                             ;; inside of a dynabase, it might want to defer the checking until there are bindings to variables?  Though that
+                             ;; would be like haivng some function which defers until there is a construction of a dynabase.
+
+                             (???))
+
             ["$print" 3] (let [[expression text-rep line-number] (.arguments ast)
                                all-variable-names (find-term-variables expression)
                                result-variable (make-variable 'Result)

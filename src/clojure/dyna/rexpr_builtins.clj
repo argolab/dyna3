@@ -554,7 +554,7 @@
   :match (cast-to-string (:any Out) (:ground-var-list Args))
   (make-unify Out (make-constant (apply str (map get-value Args)))))
 
-;; this is going to cast the value to some expression
+;; this is going to cast the value into a string as well as concat multiple strings together
 (doseq [i (range 1 50)]
   (let [vars (map #(symbol (str "v" %)) (range 0 (+ 1 i)))]
     (eval `(def-user-term "str" ~i (make-cast-to-string ~(last vars) ~(vec (drop-last vars)))))))
@@ -634,9 +634,14 @@
 (def-base-rexpr map-list-keys [:var Map
                                :var KeyList])
 
+(def-builtin-rexpr is-map 2
+  (:allground (= v1 (instance? DynaMap v0)))
+  (v1 (instance? DynaMap v0)))
+
 (def-user-term "$map_empty" 0 (make-unify v0 (make-constant (DynaMap. {})))) ;; return an empty map value
 (def-user-term "$map_element" 3 (make-map-element-access v0 v1 v2 v3))
 (def-user-term "$map_keys" 1 (make-map-list-keys v0 v1))
+(def-user-term "map" 1 (make-is-map v0 v1))
 ;(def-user-term "$map_merge" 2) ;; take two maps and combine them together
 
 ;; there should be some way to isnert a value into a map overriding, but this will have that
@@ -666,9 +671,10 @@
       (make-multiplicity 0)
       (let [m (.map-elements ^DynaMap pm)
             k (get-value Key)
-            v (get-value Value)
-            r (assoc m k v)]
-        (make-unify resulting-map (make-constant (DynaMap. r)))))))
+            v (get-value Value)]
+        (if (contains? m k)
+          (make-multiplicity 0) ;; we can not override an existing key, otherwise this is going to break the out of order procesinsg of this expression...
+          (make-unify resulting-map (make-constant (DynaMap. (assoc m k v)))))))))
 
 (def-rewrite
   :match (map-list-keys (:ground Map) (:free KeyList))
@@ -678,6 +684,7 @@
       (throw (UnificationFailure. "not a map")))
     (DynaTerm/make_list (keys (.map-elements ^DynaMap pm)))))
 
+;; this is more permissive than the other function which will return the keys in a particular order
 (def-rewrite
   :match (map-list-keys (:ground Map) (:ground KeyList))
   :check true ;; this checks that the sets (represented as a list) are equal
@@ -748,8 +755,8 @@
 ;;                             (make-regex-matcher v0 v1 v2 ~(vec (drop-last vars))))))))
 
 (def-builtin-rexpr is-int 2
-  (:allground (= v1 (int? v0)))
-  (v1 (int? v0)))
+  (:allground (= v1 (integer? v0)))
+  (v1 (integer? v0)))
 
 (def-builtin-rexpr is-float 2
   (:allground (= v1 (float? v0)))
@@ -762,3 +769,27 @@
 (def-user-term "int" 1 (make-is-int v0 v1))
 (def-user-term "float" 1 (make-is-float v0 v1))
 (def-user-term "number" 1 (make-is-number v0 v1))
+
+(defn- round-down [v]
+  (cond (integer? v) v
+        (float? v) (int (Math/floor v))
+        :else (???)))
+
+(defn- round-up [v]
+  (cond (integer? v) v
+        (float? v) (int (Math/ceil v))
+        :else (???)))
+
+(def-rewrite
+  :match-combines [(is-int (:free Var) (is-true? _))
+                   (or (lessthan (:free Var) (:ground Upper) (is-true? _))
+                       (lessthan-eq (:free Var) (:ground Upper) (is-true? _)))
+                   (or (lessthan (:ground Lower) (:free Var) (is-true? _))
+                       (lessthan-eq (:ground Lower) (:free Var) (is-true? _)))]
+  :run-at :inference
+  :infers
+  (make-range (make-constant (round-down (get-value Lower)))
+              (make-constant (round-up (get-value Upper)))
+              (make-constant 1)
+              Var
+              (make-constant true)))
