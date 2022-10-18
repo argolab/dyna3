@@ -295,7 +295,7 @@
             underlying (iter-create-iterator iterator selected-binding)]
         (iterator-skip-variables underlying selected-binding skipped-variables)))))
 
-(defn- iterator-disjunct-diterator [branch-iters]
+(defn iterator-disjunct-diterator [branch-iters]
   (reify DIterator
     (iter-run-cb [this cb-fn]
       (doseq [v (iter-run-iterable this)]

@@ -5,7 +5,7 @@
   (:require [dyna.context :as context])
   (:require [dyna.prefix-trie :refer :all])
   (:require [dyna.base-protocols :refer :all])
-  (:require [dyna.iterators :refer [run-iterator]])
+  (:require [dyna.iterators :refer [run-iterator iterator-disjunct-diterator]])
   (:require [clojure.set :refer [subset? union]])
   (:import [dyna.rexpr disjunct-rexpr])
   (:import [dyna.prefix_trie PrefixTrie])
@@ -198,26 +198,42 @@
         (context/bind-context-raw child-context
                                   (let [new-child-rexpr (try (simplify child)
                                                              (catch UnificationFailure e (make-multiplicity 0)))]
-                                    ;; if this is a disjunct, then it should just take the values into this
-                                    (assert (and (not (is-disjunct? new-child-rexpr))
-                                                 (not (is-disjunct-op? new-child-rexpr))))
-                                        ;(when-not (is-empty-rexpr? new-child-rexpr))
-                                    (if (and *disjunct-run-inner-iterators* (not (is-multiplicity? new-child-rexpr)))
-                                      (let [iters (find-iterators new-child-rexpr)]
-                                        (run-iterator
-                                         :iterators iters
-                                         :bind-all true
-                                         :rexpr-in new-child-rexpr
-                                         :rexpr-result child-rexpr-itered
-                                         :simplify simplify
-                                         (let [] #_[nnr (try (simplify child-rexpr-itered)
-                                                            (catch UnificationFailure e (make-multiplicity 0)))]
-                                           #_(when (not= nnr child-rexpr-itered)
-                                             (debug-repl "nnr"))
-                                           (save-result-in-trie child-rexpr-itered
-                                                                (context/get-context) ;; we have to use get-context here as the iterator might have rebound the context
-                                                                ))))
-                                      (save-result-in-trie new-child-rexpr child-context))))))
+                                    ;; if the new-child-rexpr is a disjunct, then we are just going to combine that into the thing that we are processing
+                                    (cond (is-disjunct? new-child-rexpr)
+                                          (let [args (:args new-child-rexpr)
+                                                ctx (context/get-context)]
+                                            (doseq [a args]
+                                              (save-result-in-trie a ctx)))
+
+                                          (is-disjunct-op? new-child-rexpr)
+                                          (let [child-var-order (:disjunction-variables new-child-rexpr)
+                                                child-prefix-trie (:rexprs new-child-rexpr)]
+                                            (doseq [[key djc-rexpr] (trie-get-values child-prefix-trie nil)]
+                                              (let [val-map (zipmap child-var-order key)
+                                                    new-keys (map #(get val-map %) dj-vars)
+                                                    added-new (volatile! false)]
+                                                (vswap! ret-children trie-update-collection new-keys
+                                                        (fn [col]
+                                                          (let [[made-new ret] (merge-rexpr-disjunct-list col djc-rexpr)]
+                                                            (vreset! added-new made-new)
+                                                            ret)))
+                                                (if @added-new (vswap! num-children inc)))))
+
+                                          ;; if this is a more complex expression, then we will try to run iterators on the inner expression to allow it to become simpler and split into smaller expressions in the trie
+                                          (and *disjunct-run-inner-iterators* (not (is-multiplicity? new-child-rexpr)))
+                                          (let [iters (find-iterators new-child-rexpr)]
+                                            (run-iterator
+                                             :iterators iters
+                                             :bind-all true
+                                             :rexpr-in new-child-rexpr
+                                             :rexpr-result child-rexpr-itered
+                                             :simplify simplify
+                                             (let []
+                                               (save-result-in-trie child-rexpr-itered
+                                                                    (context/get-context) ;; we have to use get-context here as the iterator might have rebound the context
+                                                                       ))))
+                                          :else
+                                          (save-result-in-trie new-child-rexpr child-context))))))
     ;; set the values of variables which are the same across all branches
     (doseq [i (range (count dj-vars))]
       (let [dv (nth child-var-values i)]
@@ -249,12 +265,21 @@
     (iter-run-iterable-unconsolidated [this]
       (run-trie-iterator-from-node-unconsolidated remains node variable-order))
     (iter-bind-value [this value]
-      (let [v (get node value)]
-        (when-not (nil? v)
-          (trie-diterator-instance (- remains 1) v (next variable-order)))))
+      (let [wild (get node nil)
+            v (get node value)]
+        (cond (and (not (nil? v)) (nil? wild))
+              (trie-diterator-instance (- remains 1) v (next variable-order))
+
+              (and (nil? v) (not (nil? wild)))
+              (trie-diterator-instance (- remains 1) wild (next variable-order))
+
+              (and (not (nil? v)) (not (nil? wild))) ;; need to run both branches of the trie at the same time in this case
+              (iterator-disjunct-diterator [(trie-diterator-instance (- remains 1) v (next variable-order))
+                                            (trie-diterator-instance (- remains 1) wild (next variable-order))]))))
     (iter-debug-which-variable-bound [this] (first variable-order))
     (iter-estimate-cardinality [this]
       (count node))))
+
 
 ;; return a lazy sequence over bindings
 (defn- run-trie-iterator-from-node [remains trie-node variable-order]

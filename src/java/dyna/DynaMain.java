@@ -7,6 +7,7 @@ import clojure.lang.Var;
 class DynaMain {
     public static final long starting_time = System.currentTimeMillis();
     private static boolean is_loading = false;
+    private static final Object loading_lock = new Object();
 
     public static void main(String[] args) {
         // the time to first print is quite long, if we wanted, we could start the compilation in a thread
@@ -53,12 +54,26 @@ class DynaMain {
     public static void initRuntime() {
         // anything about setting up the clojure runtime before we begin or loading the files should be done here
         // then we can call this from other places which might serve as entry points to the runtime
-        is_loading = true;
-        if("true".equals(System.getProperty("dyna.unchecked_math"))) {
-            ((Var)Clojure.var("clojure.core", "*unchecked-math*")).bindRoot(true);
-        }
+        synchronized (loading_lock) {
+            is_loading = true;
+            if("true".equals(System.getProperty("dyna.unchecked_math"))) {
+                ((Var)Clojure.var("clojure.core", "*unchecked-math*")).bindRoot(true);
+            }
 
-        Clojure.var("clojure.core", "load").invoke("/dyna/core"); // load all of the files
-        is_loading = false;
+            Clojure.var("clojure.core", "load").invoke("/dyna/core"); // load all of the files
+            is_loading = false;
+        }
+    }
+
+    public static void backgroundInit() {
+        // the runtime takes a few seconds to load.  So from the Python wrapper,
+        // we can start that loading in the background without blocking the main
+        // python thread
+        Thread t = new Thread(new Runnable () {
+                public void run() {
+                    initRuntime();
+                }
+            });
+        t.start();
     }
 }

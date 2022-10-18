@@ -808,7 +808,6 @@
                :context (~type2 ~'(:free Var) (is-true? ~'_))}
        :run-at :inference
        (make-unify ~'Result (make-constant false)))
-
      (def-rewrite
        :match {:rexpr (~type2 ~'(:free Var) ~'(:any Result))
                :context (~type1 ~'(:free Var) (is-true? ~'_))}
@@ -821,11 +820,17 @@
 (incompatible-types is-number is-string)
 
 (defmacro not-structure-type [type]
-  `(def-rewrite
-     :match {:rexpr (~type ~'(:free Var) ~'(:any Result))
-             :context ~'(unify-structure Var _ _ _ _)}
-     :run-at :inference
-     (make-unify ~'Result (make-constant false))))
+  `(do
+     (def-rewrite
+       :match {:rexpr (~type ~'(:free Var) ~'(:any Result))
+               :context ~'(unify-structure Var _ _ _ _)}
+       :run-at :inference
+       (make-unify ~'Result (make-constant false)))
+     (def-rewrite
+       :match {:rexpr ~'(unify-structure (:free Var) _ _ _ _)
+               :context (~type ~'Var (is-true? ~'_))}
+       :run-at :inference
+       (make-multiplicity 0))))
 
 (not-structure-type is-int)
 (not-structure-type is-float)

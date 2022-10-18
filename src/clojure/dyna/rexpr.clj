@@ -1439,7 +1439,7 @@
   :run-at :inference
   (let [ctx (context/get-context)]
     (doseq [[projected-vars rr] (all-conjunctive-rexprs rexpr)]
-      (when (empty? projected-vars)
+      (when (empty? projected-vars) ;; TODO: handle when there are projected vars, as these could still be useful
         (ctx-add-rexpr! ctx rr)))
     (make-conjunct (vec (map simplify children)))))
 

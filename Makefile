@@ -49,7 +49,7 @@ $(PARSER_TARGET): src/antlr/dyna/dyna_grammar2.g4
 
 $(JAR_WITH_PYTHON_INSTALLER): $(JAR_TARGET) $(wildcard dyna_python_module/**/*.py)
 	cp $(JAR_TARGET) $(JAR_WITH_PYTHON_INSTALLER)
-	rm -f dyna_python_module/**/*.pyc
+	find dyna_python_module/ -name '*.pyc' -delete
 	jar -uf $(JAR_WITH_PYTHON_INSTALLER) dyna_python_module
 
 $(TARGET): $(JAR_WITH_PYTHON_INSTALLER) standalone-header.sh

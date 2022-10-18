@@ -7,6 +7,8 @@ print(t)
 assert t.name == 'test'
 assert t[2] == 3
 assert str(t) == 'test[1, 2, 3]'
+assert isinstance(t, DynaTerm)
+
 
 inst = Dyna()
 

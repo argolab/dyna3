@@ -134,7 +134,7 @@
             trie-binding (vec (map #(nth var-binding (first %)) new-trie-vars))
             pvb (vec (for [[idx var] save-proj-vars
                            :let [bnd (nth var-binding idx)]
-                           :when (not (nil? bnd))]
+                           :when (and (not (nil? bnd)) (not= incoming var))]
                        (make-no-simp-unify var (make-constant bnd))))
             new-children (vec (for [c children]
                                 (make-aggregator-op-inner income-var projected-vars (make-conjunct (conj pvb c)))))]

@@ -3,12 +3,16 @@ The Dyna programming language Python API.
 """
 
 import inspect
-from .java_wrapper import DynaInstance, DynaTerm
+
+# this will configure the JVM, and start loading the dyna runtime in the background concurrently
+from . import java_configure_jvm
 
 
 class Dyna:
 
     def __init__(self):
+        # this will reference the python class which wrap the java class.  This will block until the dyna runtime is loaded
+        from .java_wrapper import DynaInstance
         self.__system = DynaInstance()
 
     def define_function(self, name=None, arity=None):
@@ -54,6 +58,21 @@ class Dyna:
 
     def run_file(self, file):
         self.__system.run_file(file)
+
+
+class _DynaTermMetaClass(type):
+
+    def __instancecheck__(cls, obj):
+        from .java_wrapper import DynaTerm
+        return isinstance(obj, DynaTerm)
+
+class DynaTerm(metaclass=_DynaTermMetaClass):
+
+    def __new__(cls, *args, **kwargs):
+        from .java_wrapper import DynaTerm
+        return DynaTerm(*args, **kwargs)
+
+
 
 __all__ = [
     'Dyna',

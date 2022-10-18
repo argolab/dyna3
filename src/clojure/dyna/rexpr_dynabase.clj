@@ -267,3 +267,7 @@
 ;; inhert from a given dynabase, then it would know which expression would
 ;; result in it creating something.  I suppose that we could also track all of
 ;; the subclasses which inherit from a given dynabase
+
+
+(defmethod print-method Dynabase [^Dynabase this ^java.io.Writer w]
+  (.write w (.toString this)))
