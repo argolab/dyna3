@@ -174,7 +174,7 @@
   :identity false
   :combine (fn [a b] (or a b))
   :combine-mult (fn [a b mult] (or a b))
-  :saturate #(= true %)
+  :saturate #(= true (get-aggregated-value %))
   :add-to-out-rexpr (fn [current-value result-variable]  ;; want to force the result to be true
                       (make-unify result-variable (make-constant true)))
   :many-items (fn [val mul] val))
@@ -182,15 +182,14 @@
 (def-aggregator "|="
   :identity false
   :combine (fn [a b] (or a b))
-  :saturate #(= true %)
+  :saturate #(= true (get-aggregated-value %))
   :many-items (fn [val mult] val)
   :combine-mult (fn [a b mult] (or a b)))
 
-(comment)
 (def-aggregator "&="
   :identity true
   :combine (fn [a b] (and a b))
-  :saturate #(= false %)
+  :saturate #(= false (get-aggregated-value %))
   :many-items (fn [val mult] val)
   :combine-mult (fn [a b mult] (and a b)))
 

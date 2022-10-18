@@ -8,7 +8,7 @@
   (:require [dyna.context :as context])
   (:require [dyna.prefix-trie :as trie])
   (:require [dyna.iterators :refer [make-skip-variables-iterator run-iterator]])
-  (:require [clojure.set :refer [difference]])
+  (:require [clojure.set :refer [difference union]])
   (:import [dyna.rexpr proj-rexpr disjunct-rexpr aggregator-rexpr])
   (:import [dyna.rexpr_disjunction disjunct-op-rexpr])
   (:import [dyna.prefix_trie PrefixTrie])
@@ -17,7 +17,9 @@
 
 (def-base-rexpr aggregator-op-outer [:unchecked operator
                                      :var result
-                                     :rexpr bodies])
+                                     :rexpr bodies]
+  (is-constraint? [this] true)
+  (all-conjunctive-rexprs [this] (all-conjunctive-rexprs bodies)))
 
 (def-base-rexpr aggregator-op-inner [:hidden-var incoming
                                      :var-list projected ;; all of these variables are hidden
@@ -41,7 +43,12 @@
                                        new-map (merge variable-map new-hidden-names)]
                                    (make-aggregator-op-inner (get new-map incoming incoming)
                                                              (vec (map new-map projected))
-                                                             (remap-variables-handle-hidden body new-map)))))
+                                                             (remap-variables-handle-hidden body new-map))))
+  (all-conjunctive-rexprs [this]
+                          (cons [#{} this]
+                                (let [vs (conj (ensure-set projected) incoming)]
+                                  (for [[proj-out rexpr] (all-conjunctive-rexprs body)]
+                                    [(union proj-out vs) rexpr])))))
 
 (def ^{:private true :dynamic true} *aggregator-op-contribute-value*
   (fn r

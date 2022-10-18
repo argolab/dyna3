@@ -7,7 +7,8 @@
   (:require [dyna.context :as context])
   (:require [dyna.user-defined-terms :refer [add-to-user-term update-user-term! def-user-term get-user-term]])
   (:require [dyna.memoization :refer [set-user-term-as-memoized print-memo-table]])
-  (:require [clojure.set :refer [union intersection difference rename-keys]])
+  (:require [dyna.optimize-rexpr :refer [optimize-aliased-variables]])
+  (:require [clojure.set :refer [union intersection difference]])
   (:require [clojure.string :refer [join]])
   (:require [clojure.java.io :refer [resource]])
   (:require [aprint.core :refer [aprint]])
@@ -96,7 +97,8 @@
 ;; the reason we do this here instead of letting the standard simplification
 ;; handle this is that the parser will generate many intermediate values that
 ;; are "useless"
-(defn optimize-rexpr
+(defn optimize-rexpr [rexpr] (optimize-aliased-variables rexpr))
+#_(defn optimize-rexpr
   ([rexpr] (let [[unified-vars new-rexpr] (optimize-rexpr rexpr #{})]
              new-rexpr))
   ([rexpr proj-out-vars]
@@ -251,12 +253,12 @@
                     ;; conver an AST in its value.  This can either just return something from the AST if it is a variable or a constant, otherwise
                     ;; this has to construct other R-exprs which correspond with the evaluating of the node
                     (when-not (instance? DynaTerm a)
-                      (throw (RuntimeException. (str "badly formed AST\nexpected a value such as $variable(\"name\") or $constant(123)\ninstead got: " a))))
+                      (throw (DynaUserError. (str "badly formed AST\nexpected a value such as $variable(\"name\") or $constant(123)\ninstead got: " a))))
                     (case (.name a)
                       "$variable" (let [[name] (.arguments a)
                                         var (get variable-name-mapping name)]
                                     (when (nil? var)
-                                      (throw (RuntimeException. (str "Did not find variable " name))))
+                                      (throw (DynaUserError. (str "Did not find variable " name))))
                                     var)
                       "$constant" (let [[val] (.arguments a)]
                                     (when (is-constant? val)
@@ -838,7 +840,7 @@
             ;; TODO: this should better support stuff like require and using, where it would lift the require statements outside of the function
             ["$clojure" 1] (let [[clojure-const-str] (.arguments ast)]
                              (when (not= (.name ^DynaTerm clojure-const-str) "$constant")
-                               (throw (RuntimeException. "Syntax error, $clojure only works on constant strings")))
+                               (throw (DynaUserError. "Syntax error, $clojure only works on constant strings")))
                              (let [clojure-str (get clojure-const-str 0)
                                    arguments (vec (filter #(re-matches #"[\$a-zA-Z][\$a-zA-Z0-9\-\_]*" %) (keys variable-name-mapping)))
                                    arguments-symbols (vec (map symbol arguments))
@@ -875,7 +877,7 @@
                              ret)
 
             ["$syntax_error" 1] (let [[message] (.arguments ast)]
-                                  (throw (RuntimeException. (str "Syntax Error: " message))))
+                                  (throw (DynaUserError. (str "Syntax Error: " message))))
 
             ;; call without any qualification on it.  Just generate the user term
             (let [arity (.arity ast)

@@ -171,6 +171,8 @@
 
          (~'rexpr-jit-info ~'[this] nil) ;; there is nothing here by default. this should return information about what this expression represents
 
+         (~'all-conjunctive-rexprs ~'[this] [[#{} ~'this]])
+
          (~'as-list ~'[this]
           (list (quote ~(symbol name))
                 ~@(for [v vargroup]
@@ -625,7 +627,13 @@
         (prev x)))))
 
 (def-base-rexpr conjunct [:rexpr-list args]
-  (is-constraint? [this] (every? is-constraint? args)))
+  (is-constraint? [this] (every? is-constraint? args))
+
+  (all-conjunctive-rexprs [this]
+                          (cons [#{} this]
+                                (for [a args
+                                      v (all-conjunctive-rexprs a)]
+                                  v))))
 
 
 (def-base-rexpr disjunct [:rexpr-list args]
@@ -717,18 +725,32 @@
                    #_(dyna-debug (when-not (not (some #{var} (vals variable-map)))
                                  (debug-repl "bad remap")))
 
-                   (make-proj var (remap-variables body variable-map))))
+                   (make-proj var (remap-variables body variable-map)))
+
+  (all-conjunctive-rexprs [this]
+                          (cons [#{} this]
+                                (for [[proj-out rexpr] (all-conjunctive-rexprs body)]
+                                  [(conj proj-out var) rexpr]))))
 
 (def-base-rexpr aggregator [:str operator
                             :var result
                             :hidden-var incoming
                             ;; if the body-is-conjunctive == true, then there are additional optimizations that we can perform
                             :boolean body-is-conjunctive
-                            :rexpr body])
+                            :rexpr body]
+
+  (is-constraint? [this] true)
+  (all-conjunctive-rexprs [this]
+                          (cons [#{} this]
+                                (when body-is-conjunctive
+                                  (for [[proj-out rexpr] (all-conjunctive-rexprs body)]
+                                    [(conj proj-out incoming) rexpr])))))
 
 (def-base-rexpr if [:rexpr cond
                     :rexpr true-branch
-                    :rexpr false-branch])
+                    :rexpr false-branch]
+
+  (is-constraint? [this] (and (is-constant? true-branch) (is-constant? false-branch))))
 
 
 ;; (defn set-variable [var value]
@@ -883,8 +905,9 @@
                                 (recur (cdr matchers)
                                        (fn [c-present-vars]
                                          (make-rexpr-matching-function (cadar matchers) c-present-vars (caddar matchers) body-fn))))))]
-    (assert (= (count (get @rexpr-containers-signature (symbol rexpr-type-matched))) (- (count rexpr-match) 1))
-            "The R-expr match expression does not contain the right number of arguments, it will never match")
+    (dyna-assert (= (count (get @rexpr-containers-signature (symbol rexpr-type-matched))) (- (count rexpr-match) 1))
+          ;  "The R-expr match expression does not contain the right number of arguments, it will never match"
+                 )
     (assert (subset? (keys matcher) #{:rexpr :context :check})
             "matcher map contains unexepxected key")
     `(when (~(symbol (str "is-" rexpr-type-matched "?")) ~source-variable)
@@ -1408,9 +1431,18 @@
 
 (def-rewrite
   :match (conjunct (:rexpr-list children))
-  :run-at [:standard :inference :jit-compiler]
-  (let [res (make-conjunct (vec (map simplify children)))]
-    res))
+  :run-at [:standard :jit-compiler] ; :inference
+  (make-conjunct (vec (map simplify children))))
+
+(def-rewrite
+  :match (conjunct (:rexpr-list children))
+  :run-at :inference
+  (let [ctx (context/get-context)]
+    (doseq [[projected-vars rr] (all-conjunctive-rexprs rexpr)]
+      (when (empty? projected-vars)
+        (ctx-add-rexpr! ctx rr)))
+    (make-conjunct (vec (map simplify children)))))
+
 
 
 (def-rewrite

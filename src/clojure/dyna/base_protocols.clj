@@ -48,6 +48,10 @@
 
   (rexpr-map-function-with-access-path [this cb-fn])
 
+  (all-conjunctive-rexprs [this]
+    ;; return [set-of-projected-out-variables, The rexpr]
+    )
+
   (rexpr-jit-info [this])
   )
 

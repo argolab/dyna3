@@ -60,9 +60,9 @@
   (equals [this other] (identical? this other)))
 
 (defn add-watcher-function! [assumption func]
-  (add-watch assumption (reify Watcher
-                          (notify-message! [this assumpt message] (func message))
-                          (notify-invalidated! [this assumpt] (func nil)))))
+  (add-watcher! assumption (reify Watcher
+                             (notify-message! [this assumpt message] (func message))
+                             (notify-invalidated! [this assumpt] (func nil)))))
 
 ;; this can be done via atoms or agents and then there can be a watcher which is
 ;; added in the case that the value changes
@@ -112,7 +112,7 @@
 
 (defn make-assumption []
   (assumption. (WeakHashMap.)                               ; downstream dependents
-               (atom true)                                  ; if this is still valid, this is atomic
+               (atom true)                                  ; if this is still valid, this is atomic and we will only ever set it to false (no false->true)
                ))
 
 (defn make-invalid-assumption []
@@ -134,7 +134,7 @@
     (when (not (is-valid? assumption))
       ;; there should be some exception to restart the computation or something
       ;; it would allow for the runtime to check which of the expressions
-      (throw (RuntimeException. "attempting to use invalid assumption")))))
+      (throw (InvalidAssumption. "attempting to use invalid assumption")))))
 
 (defmacro bind-assumption [assumpt & body]
   `(binding [*current-watcher* ~assumpt]

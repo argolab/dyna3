@@ -8,6 +8,7 @@
   (:require [clojure.set :refer [union]])
   (:require [dyna.user-defined-terms :refer [def-user-term]])
   (:require [dyna.context :as context])
+  (:import [dyna.rexpr unify-structure-rexpr])
   (:import [dyna DynaTerm DIterable DIterator DIteratorInstance UnificationFailure]))
 
 ;(in-ns 'dyna.rexpr)
@@ -800,6 +801,36 @@
               Var
               (make-constant true)))
 
+(defmacro incompatible-types [type1 type2]
+  `(do
+     (def-rewrite
+       :match {:rexpr (~type1 ~'(:free Var) ~'(:any Result))
+               :context (~type2 ~'(:free Var) (is-true? ~'_))}
+       :run-at :inference
+       (make-unify ~'Result (make-constant false)))
+
+     (def-rewrite
+       :match {:rexpr (~type2 ~'(:free Var) ~'(:any Result))
+               :context (~type1 ~'(:free Var) (is-true? ~'_))}
+       :run-at :inference
+       (make-unify ~'Result (make-constant false)))))
+
+(incompatible-types is-int is-string)
+(incompatible-types is-int is-float)
+(incompatible-types is-float is-string)
+(incompatible-types is-number is-string)
+
+(defmacro not-structure-type [type]
+  `(def-rewrite
+     :match {:rexpr (~type ~'(:free Var) ~'(:any Result))
+             :context ~'(unify-structure Var _ _ _ _)}
+     :run-at :inference
+     (make-unify ~'Result (make-constant false))))
+
+(not-structure-type is-int)
+(not-structure-type is-float)
+(not-structure-type is-number)
+(not-structure-type is-string)
 
 (comment
   (def-builtin-rexpr int-division 3
@@ -808,7 +839,9 @@
   (def-user-term ["int_division" "//"] 2 (make-int-division v0 v1 v2))
 
   (def-rewrite
-    :match-combines [(int-division (:free Num) (:ground Denom) (:any Result))
+    :match-combines [(int-division (:free Num) (:ground Denom) (:any Result))h.D., Mathematics, University of Texas at Austin, 2003.
+
+
                      (or (lessthan (:free Num) (:ground Upper) (is-true? _))
                          (lessthan-eq (:free Num) (:ground Upper) (is-true? _)))
                      (or (lessthan (:ground Lower) (:free Num) (is-true? _))

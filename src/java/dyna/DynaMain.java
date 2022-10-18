@@ -15,6 +15,7 @@ class DynaMain {
 
         is_loading = true;
         if(Boolean.getBoolean("dyna.loading_spin")) {
+            System.out.print("\033[?25l"); // hide the cursor
             Thread t = new Thread(new Runnable () {
                     public void run() {
                         int step = 0;
@@ -38,7 +39,13 @@ class DynaMain {
             t.start();
         }
 
-        initRuntime();
+        initRuntime(); // do the actual init of the runtime, this function takes a few seconds
+
+        if(Boolean.getBoolean("dyna.loading_spin")) {
+            // show the cursor again and clear the line
+            System.out.print("\033[?25h\r\033[K");
+        }
+
         IFn main_function = Clojure.var("dyna.core", "main"); // invoke the main method with the arguments now
         main_function.invoke(args);
     }

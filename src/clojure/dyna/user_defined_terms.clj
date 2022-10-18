@@ -4,7 +4,7 @@
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
-  (:require [dyna.assumptions :refer [invalidate! make-assumption make-invalid-assumption depend-on-assumption]])
+  (:require [dyna.assumptions :refer [invalidate! make-assumption make-invalid-assumption depend-on-assumption compute-with-assumption]])
   (:require [clojure.set :refer [subset? union]])
   (:import [dyna.rexpr user-call-rexpr]))
 
@@ -187,6 +187,16 @@
                       (map #(remap-variables-handle-hidden % {(first out-vars) intermediate-var}) (vals groupped-aggs))))
          (first (vals groupped-aggs)))))))
 
+(defn optimize-user-term [term-rep]
+  (let [unopt-rexpr (combine-user-rexprs-bodies term-rep)
+        [assumpt optimized] (binding [system/user-recursion-limit (min system/user-recursion-limit 5)]
+                              (compute-with-assumption
+                               (simplify-top unopt-rexpr)))])
+  (debug-repl "optimize user term")
+  (???)
+  (assoc term-rep
+         ))
+
 (defn user-rexpr-combined-no-memo [term-rep]
   ;; this should check if there is some optimized
   (assert (nil? (:optimized-rexpr term-rep)))
@@ -206,6 +216,8 @@
       :null (do
               (depend-on-assumption (:is-memoized-null term-rep))
               (:memoized-rexpr term-rep)))))
+
+
 
 (def-rewrite
   :match (user-call (:unchecked name) (:unchecked var-map) (#(< % @system/user-recursion-limit) call-depth) (:unchecked parent-call-arguments))

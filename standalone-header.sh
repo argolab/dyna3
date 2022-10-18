@@ -155,10 +155,10 @@ while [ $# -gt 0 ]; do
             exit 1  # TODO implement this
             ;;
 
-        --random-seed=*)
+        --random-seed*)
             seed="${1#*=}"
             [[ $seed =~ ^[0-9]+$ ]] || {
-                echo "--random-seed was unexpected, expected something like `--random-seed=42`"
+                echo "--random-seed was unexpected, expected something like: --random-seed=42"
                 exit 1
             }
             jvm_args+="-Ddyna.random_seed=$seed "
