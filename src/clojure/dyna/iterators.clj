@@ -23,7 +23,6 @@
 ;; this will want to find which of the values will have this binding
 
 
-;; should we run all of the possible iterators?  that would
 
 
 
@@ -307,7 +306,7 @@
            (if (nil? iter-val)
              ;; this needs to move to the next iterator
              (if (empty? next-iterators)
-               () ;; then we are done iterating, so just return the empty sequence which indi
+               () ;; then we are done iterating, so just return the empty sequence which will be the tail of the list
                (rec (conj completed-iterators current-diterable)
                     (next next-iterators)
                     (iter-run-iterable (first next-iterators))
@@ -341,7 +340,8 @@
               (= (count new-branches) 1) (first new-branches)
               :else (iterator-disjunct-diterator new-branches))))
     (iter-debug-which-variable-bound [this] (???))
-    (iter-estimate-cardinality [this] (???))))
+    (iter-estimate-cardinality [this]
+      (reduce + (map iter-estimate-cardinality branch-iters)))))
 
 
 
