@@ -2,6 +2,7 @@
 The Dyna programming language Python API.
 """
 
+import io as _io
 import inspect
 
 # this will configure the JVM, and start loading the dyna runtime in the background concurrently
@@ -52,9 +53,12 @@ class Dyna:
 
     def run(self, code, *value_args):
         """
-        Run a string of code
+        Run a string or a file of code
         """
-        return self.execute(code, *value_args)
+        if isinstance(code, (_io.TextIOBase, _io.BufferedIOBase, _io.RawIOBase, _io.IOBase)) and not value_args:
+            return self.run_file(code)
+        else:
+            return self.execute(code, *value_args)
 
     def run_file(self, file):
         self.__system.run_file(file)

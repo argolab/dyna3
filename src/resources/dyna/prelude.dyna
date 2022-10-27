@@ -130,8 +130,6 @@ $map_values(Map) = map_to_list_rec(Map, $map_keys(Map)).
 
 
 
-
-
 :- $clojure'{
   (require 'clojure.data.csv)
   (require 'clojure.java.io)

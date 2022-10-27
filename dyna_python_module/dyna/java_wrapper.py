@@ -12,6 +12,7 @@ _jpype.JClass('java.lang.Object').__repr__ = lambda self: f'Backend<{str(self)}>
 _interface = _jpype.JClass('dyna.DynaInterface').getInstance()
 
 _term_class = _jpype.JClass('dyna.DynaTerm')
+_map_class = _jpype.JClass('dyna.DynaMap')
 
 
 def _construct_make_method(name):
@@ -104,6 +105,20 @@ class Dynabase:
 
 __all__.append('Dynabase')
 
+def _cast_map_from_dyna(system, value):
+    m = dict(value.map_elements)
+    return dict((DynaInstance.cast_from_dyna(system, k), DynaInstance.cast_from_dyna(system, v))
+                for k,v in m.items())
+
+def _cast_dict_to_dyna(system, value):
+    arr = []
+    for k,v in value.items():
+        arr.append(DynaInstance.cast_to_dyna(system, k))
+        arr.append(DynaInstance.cast_to_dyna(system, v))
+    return _map_class.create(arr)
+
+
+
 @_jpype.JImplements('dyna.OpaqueValue')
 class _OpaqueValue:
     def __init__(self, wrapped):
@@ -140,6 +155,7 @@ _cast_map = {
 
     _jpype.JClass('dyna.Dynabase'): Dynabase,
     _jpype.JClass('dyna.DynaTerm'): _cast_term_from_dyna,
+    _jpype.JClass('dyna.DynaMap'): _cast_map_from_dyna,
 }
 
 
@@ -191,6 +207,8 @@ class DynaInstance:
         elif isinstance(x, DynaTerm):
             assert x._system is self or x._system is DynaInstance
             return x._term
+        elif isinstance(x, dict):
+            return _cast_dict_to_dyna(self, x)
         else:
             return _OpaqueValue(x)
 

@@ -429,3 +429,14 @@ a += X: range(0,10).
 %print a.
 assert a = 45.  % 0 + . . . + 9 = 45
 ")
+
+
+(str-test inline-funciton1 "
+map(F, []) = [].
+map(F, [X|R]) = [F(X) | map(F, R)].
+
+
+assert map(((X) += X + 1), [1,2,3]) = [2,3,4].
+
+assert Seven=7, map(((X) max= X; Seven), [1,5,10]) = [7,7,10].
+")

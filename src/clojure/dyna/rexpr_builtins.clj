@@ -9,7 +9,7 @@
   (:require [dyna.user-defined-terms :refer [def-user-term]])
   (:require [dyna.context :as context])
   (:import [dyna.rexpr unify-structure-rexpr])
-  (:import [dyna DynaTerm DIterable DIterator DIteratorInstance UnificationFailure]))
+  (:import [dyna DynaTerm DIterable DIterator DIteratorInstance UnificationFailure DynaMap]))
 
 ;(in-ns 'dyna.rexpr)
 
@@ -627,7 +627,7 @@
 (def-user-term "$cons" 2 (make-unify-structure v2 nil (make-constant DynaTerm/null_term) "." [v0 v1]))
 
 ;; operators for handing a map of elements.  The map is a wrapped clojure map which is associate
-(defrecord DynaMap [map-elements])
+;(defrecord DynaMap [map-elements])
 
 (defmethod print-method DynaMap [^DynaMap this ^java.io.Writer w]
   (.write w (str (.map-elements this))))

@@ -55,6 +55,9 @@
 (defn create-system []
   (system/make-new-dyna-system))
 
+;; this might want to have some assumption which gets reset during every query,
+;; such that would allow for an external function to change and for the results
+;; to not get memoized outside of the scope of a single query
 (defn define-external-function [sys ^String name arity ^ExternalFunction func]
   (maybe-sys sys
              (assert (and (string? name) (int? arity)))

@@ -176,18 +176,16 @@
       (apply union (map #(recurse-through-escaped % fun) (.arguments ^DynaTerm ast))))
     #{}))
 
-(defn- find-all-variables [ast]
-  (if (instance? DynaTerm ast)
-    (case [(.name ^DynaTerm ast) (.arity ^DynaTerm ast)]
-      ["$variable" 1] #{(get ast 0)}
-      ["$constant" 1] #{}  ;; no variables in a constant
-      ["$quote1" 1] (apply union (map find-all-variables (.arguments ^DynaTerm (get ast 0))))
-      ["$dynabase_quote1" 2] (union (apply union (map find-all-variables (.arguments ^DynaTerm (get ast 1))))
-                                    (find-all-variables (get ast 0)))
-      ["$escaped" 1] (recurse-through-escaped (get ast 0) find-all-variables)
-      (apply union (map find-all-variables (.arguments ^DynaTerm ast)))
-    ;; this is something else, like maybe the inside of a constant or something
-    #{})))
+(defn- find-all-variables [^DynaTerm ast]
+  (assert (instance? DynaTerm ast))
+  (case [(.name ^DynaTerm ast) (.arity ^DynaTerm ast)]
+    ["$variable" 1] #{(get ast 0)}
+    ["$constant" 1] #{}  ;; no variables in a constant
+    ["$quote1" 1] (apply union (map find-all-variables (.arguments ^DynaTerm (get ast 0))))
+    ["$dynabase_quote1" 2] (union (apply union (map find-all-variables (.arguments ^DynaTerm (get ast 1))))
+                                  (find-all-variables (get ast 0)))
+    ["$escaped" 1] (recurse-through-escaped (get ast 0) find-all-variables)
+    (apply union (map find-all-variables (.arguments ^DynaTerm ast)))))
 
 (defn- find-term-variables [ast]
   (if (instance? DynaTerm ast)
