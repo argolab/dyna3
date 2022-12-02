@@ -33,7 +33,8 @@
          is-constant?
          make-structure
 ;         is-empty-rexpr?
- ;        is-non-empty-rexpr?
+                                        ;        is-non-empty-rexpr?
+         get-user-term
          )
 
 

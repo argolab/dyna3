@@ -858,3 +858,20 @@
                 Demon
                 Num
                 (make-constant true))))
+
+
+(def-builtin-rexpr int-cast 2
+  (:allground (= v1 (bigint v0)))
+  (v1 (bigint v0)))
+
+(defn- cast-to-float [x]
+  (if (instance? String x)
+    (Double/parseDouble ^String x)
+    (.doubleVaue ^Number (num x))))
+
+(def-builtin-rexpr float-cast 2
+  (:allground (= v1 (cast-to-float v0)))
+  (v1 (cast-to-float v0)))
+
+(def-user-term "cast_int" 1 (make-int-cast v0 v1))
+(def-user-term "cast_float" 1 (make-float-cast v0 v1))

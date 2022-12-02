@@ -179,13 +179,13 @@
         exposed-vars (vec (exposed-variables Rbody))
         ctx (context/make-nested-context-aggregator-op-outer Rbody)
         contrib-func (fn [value mult]
-                       (assert (= mult 1))
+                       (assert (>= mult 1))
                        (dyna-assert (not (nil? value)))
                        (let [kvals (vec (map get-value exposed-vars))]
                          (vswap! accumulator update-in kvals (fn [old]
                                                                (if (nil? old)
-                                                                 value
-                                                                 ((:combine operator) old value)))))
+                                                                 ((:many-items operator) value mult)
+                                                                 ((:combine-mult operator) old value mult)))))
                        ;; this will return mult 0, as we are saving the values directly rather than having this come back through the R-expr
                        (make-multiplicity 0))
         additional-constraint-func

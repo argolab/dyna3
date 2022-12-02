@@ -144,14 +144,29 @@
                 another-file (:imported-from-another-file u)]
             (if another-file
               (recur another-file)
-              u)))))))
+              (if (nil? u)
+                (do
+                  ;; printing a waring here does not work, as recursive functions will call themselves before they are fully defined
+                  ;;(dyna-warning (str "Did not find method " (:name name) "/" (:arity name) " from file " (:source-file name)))
+
+                  (get ;; if the term is not found, then we are going to create an
+                   ;; empty term.  This will have mult 0, but assumptions
+                   ;; which allow it to be overriden later
+                   (swap! system/user-defined-terms (fn [x]
+                                                      (if (contains? x name)
+                                                        x
+                                                        (assoc x name (empty-user-defined-term name)))))
+                   name))
+                u))))))))
+(intern 'dyna.rexpr-constructors 'get-user-term get-user-term)
 
 (defn- combine-user-rexprs-bodies [term-bodies]
   ;; this will combine multiple rexprs from a uesr's definition together
   ;; this should
   (context/bind-no-context ;; this is something that should be the same regardless of whatever nested context we are in
-   (if (= 1 (count term-bodies))
-     (:rexpr (first term-bodies))
+   (case (count term-bodies)
+     0 (make-multiplicity 0)
+     1 (:rexpr (first term-bodies))
      (let [out-vars (try (into #{} (map #(:result (:rexpr %))
                                         term-bodies))
                          (catch AssertionError e (debug-repl "assert error")))
@@ -222,10 +237,11 @@
 (def-rewrite
   :match (user-call (:unchecked name) (:unchecked var-map) (#(< % @system/user-recursion-limit) call-depth) (:unchecked parent-call-arguments))
   (let [ut (get-user-term name)]
-    (when (nil? ut)
+    #_(when (nil? ut)
       (debug-repl "nil user term")
       (dyna-warning (str "Did not find method " (:name name) "/" (:arity name) " from file " (:source-file name))))
-
+    (when (and (empty? (:rexprs ut)) (= :none (:memoization-mode ut)))
+      (dyna-warning (str "Did not find method " (:name name) "/" (:arity name) " from file " (:source-file name))))
 
     (let [existing-parent-args (get parent-call-arguments name #{})
           local-map (into {} (for [[k v] var-map]

@@ -354,6 +354,15 @@
          (~'is-empty-rexpr? ~'[this] false)
          (~'is-non-empty-rexpr? [this] false)
 
+         (~'check-rexpr-basecases ~'[this stack]
+          (min 3 ;; this is the default for intersection
+               ~@(for [v vargroup
+                       :when (#{:rexpr} (car v))]
+                   `(check-rexpr-basecases ~(cdar v) ~'stack))
+               ~@(for [v vargroup
+                       :when (#{:rexpr-list} (car v))]
+                   `(apply min (map #(check-rexpr-basecases % ~'stack) ~(cdar v))))))
+
          Object
          (~'equals ~'[this other]
            (or (identical? ~'this ~'other)
@@ -770,7 +779,14 @@
                            :call-parent-map args-parent-map ;; this needs to track which the values of
                            ]
                                         ;(get-variables [this] (into #{} (vals args-map)))
-  )
+  (check-rexpr-basecases [this stack]
+                         (if (contains? stack name)
+                           0 ;; then we found ourself in the stack, so this means that there is recursion
+                           (let [ut (dyna.rexpr-constructors/get-user-term name)
+                                 s (conj stack name)]
+                             (if (nil? ut)
+                               0 ;; then there is no term defined for this, so it is just nothing
+                               (apply min (map #(check-rexpr-basecases % s) (:rexprs ut))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

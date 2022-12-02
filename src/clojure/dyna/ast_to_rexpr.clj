@@ -977,7 +977,10 @@
           (println "===================================================================================================="))))
     (reportUnwantedToken [recognizer]
       (when print-parser-errors
-        (println "=============> unwanted token")))))
+        (println "=============> unwanted token")))
+    (reportMissingToken [recognizer]
+      (when print-parser-errors
+        (proxy-super reportMissingToken recognizer)))))
 
 (def lexer-error-handler
   (proxy [org.antlr.v4.runtime.ConsoleErrorListener] []
@@ -993,13 +996,14 @@
                 (.removeErrorListeners)
                 (.addErrorListener lexer-error-handler))
         token-stream (UnbufferedTokenStream. lexer)
-        parser (dyna.dyna_grammar2Parser. token-stream)]
+        parser (doto (dyna.dyna_grammar2Parser. token-stream)
+                 (.removeErrorListeners)
+                 (.setErrorHandler parse-error-handler))]
     (comment
       (if run-parser-fast ;; there needs to be some way in which this can be
         ;; configured or something.  I suppose that this could
         ;; happen via flags or for large inputs
         (.setErrorHandler parser (BailErrorStrategy.))))
-    (.setErrorHandler parser parse-error-handler)
     (let [r (if fragment-allowed
               (.eval_entry parser)
               (.program parser))

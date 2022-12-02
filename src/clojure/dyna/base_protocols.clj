@@ -53,7 +53,17 @@
     )
 
   (rexpr-jit-info [this])
-  )
+
+
+  ;; An R-expr will have to hit a basecase as R-exprs do not allow for "infinite"
+  ;; expressions.  So if there is something without a basecase, then that means
+  ;; that it would be impossible for it to resolve as anything
+  ;; Returns:
+  ;;    0 indicates that for sure there is no base case
+  ;;    1 this uses indirect calls somewhere so we can not be sure if this will have a base cases as a result of the indirection
+  ;;    2 there is some recursion, but there is also a base case that could maybe get hit
+  ;;    3 there is no recursion
+  (check-rexpr-basecases [this stack]))
 
   ;; (visit-rexpr-children [this remap-function]) ;; this will visit any nested R-exprs on the expression, and return a new expression of the same type with
   ;(visit-all-children [this remap-function]) ;; this will visit

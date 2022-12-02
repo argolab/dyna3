@@ -1,0 +1,88 @@
+:- export state_transducer/1.
+:- export epsilon/0.
+
+% this is like a FST, but we are not having "finite states" as the states are allowed to be represented using dyna rules, which means that q
+
+epsilon = &epsilon.
+
+state_transducer(X: dynabase) := state_transducer_dynabase(X).
+state_transducer(X: string) := state_transducer_str(X).
+
+
+% there could be a special semiring argument?  Though we might also want to
+state_transducer_dynbase(Wrapped) = {
+    edge(From, To, InLabel, OutLabel) = Wrapped.edge(From, To, InLabel, OutLabel).
+    start = Wrapped.start.
+    end(X) = Wrapped.end(X).
+
+
+    compose(Other) = state_transducer_dynabase {
+        % This would still have to handle epsilon labels on the edges, as those could also align together
+        edge(&c(FA, FB), &c(TA, TB), InLabel, OutLabel) += Self.edge(FA, TA, InLabel, InterLabel) * Other.edge(FB, TB, InterLabel, OutLabel).
+        start = &c(Self.start, Other.start).
+        end(&c(A, B)) = Self.end(A) * Other.end(B).
+    } for Self=$self.
+
+    num_edges += 1 for _ = $self.edge(_,_,_,_).
+    states(X) :- _ = $self.edge(X,_,_,_).
+    states(X) :- _ = $self.edge(_,X,_,_).
+    states($self.start).
+    states(X) :- _ = $self.end(X).
+    num_states += 1 for states(X).
+
+    remove_epsilon = state_transducer_dynabase {
+        start = Self.start.
+        end(X) = Self.end(X).
+
+        node_remove_epsilon(A, A) *= 1.
+        node_remove_epsilon(From, To) *= Self.edge(From, T1, epislon, epislon) * $self.node_remove_epsilon(T1, To).
+        edge(From, To, IL, OL) = Self.edge(From, T1, IL, OL) * $self.node_remove_epsilon(T1, To) for (IL != epislon || OL != epislon).
+    } for Self=$self.
+
+    % minimize = state_transducer_dynabase {
+
+    % } for Self=$self.
+
+    concat(Other) = state_transducer_dynabase {
+        start = a[Self.start].
+        end(b[X]) = Other.end(X).
+        edge(a[From], a[To], InLabel, OutLabel) = Self.edge(From, To, InLabel, OutLabel).
+        edge(b[From], b[To], InLabel, OutLabel) = Other.edge(From, To, InLabel, OutLabel).
+        edge(a[From], b[Other.start], epsilon, epsilon) = Self.end(From).
+    } for Self=$self.
+
+    % determinize = state_transducer_dynabase {
+    %     start = Self.start.
+
+    % } for Self=$self.
+
+    intersect(Other) = state_transducer_dynabase {
+        start = c[Self.start, Other.start].
+        end(c[A,B]) = Self.end(A) * Other.end(B).
+        % this would have to handle epsilon somehow?
+        edge(c[From1, From2], c[To1, To2], InLabel, OutLabel) = Self.edge(From1, To1, InLabel, OutLabel) * Other.edge(From2, To1, InLabel, OutLabel).
+    } for Self=$self.
+
+}.
+
+
+% want to write something like:
+% f = fst'{
+% 0 1 The The
+% 1 2 cat cat
+% 2 3 sat sat
+% 3 4 on on
+% 4 5 the the
+% 5 6 mat mat
+% 6 !
+% }.
+%
+% possibly matching the openfst file format? https://www.openfst.org/twiki/bin/view/FST/FstExamples
+
+state_transducer_str(Str) = state_transducer_dynabase {
+    start = start[].
+    end(X) = 1 for $regex_match(Str, "(\w+) !", _, X).
+    edge(From, To, InLabel, OutLabel) = 1 for $regex_match(Str, "(\w+) (\w+) (\w+) (\w+)", _, From, To, InLabel, OutLabel).
+}.
+
+fst_str(X) = &error.

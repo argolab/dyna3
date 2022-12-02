@@ -55,6 +55,12 @@
                                           nr))))]
      [(persistent! var-unifies) mr])))
 
+;; (defn- check-rexpr-basecases
+;;   ([rexpr stack]
+;;    (if )
+;;    )
+;;   ([rexpr] (recur rexpr ())))
+
 (defn- get-all-conjunctive-rexprs [rexpr]
   ())
 

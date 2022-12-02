@@ -9,7 +9,10 @@
 
 (def-base-rexpr indirect-user-call [:var indirect-user-var
                                     :var-list argument-vars
-                                    :var result])
+                                    :var result]
+  (check-rexpr-basecases [this stack]
+                         1 ;; indicate that there is an indirect user call, so we can't be sure about this
+                         ))
 
 (def-base-rexpr reflect-structure [:var out
                                    :var dynabase

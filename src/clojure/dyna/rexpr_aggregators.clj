@@ -31,25 +31,35 @@
                                                    val
                                                    (recur ((:combine args2) val b) (- cnt 1))))))
                 args2)
-        args4 (assoc args3 :name name)]
+        args4 (if (nil? (:many-items args3))
+                (let [ident (:identity args3)
+                      cmb (:combine-mult args3)]
+                  (assoc args3 :many-items (fn [val mult]
+                                             (cmb ident val mult))))
+                args3)
+        args5 (assoc args4 :name name)]
     ;(assert (subset? (keys kw-args) #{:combine :identity :}))
 
     ;; this should construct the other functions if they don't already exist, so that could mean that there are some defaults for everything
     ;; when the aggregator is created, it can have whatever oeprations are
-    (swap! aggregators assoc name args4)))
+    (swap! aggregators assoc name args5)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def-aggregator "+="
   :combine +
-  :combine-mult (fn [a b mult] (+ a (* b mult))) ;; a + b*mult
+  :combine-mult (fn [a b mult]
+                  (+ a (* b mult))) ;; a + b*mult
   :many-items *
   :rexpr-binary-op make-add)
 
 (def-aggregator "*="
   :combine *
   :combine-mult (fn [a b mult] (* a (Math/pow b mult)))
-  :many-items (fn [x mult] (Math/pow x mult))
+  :many-items (fn [x mult]
+                (if (= mult 1)
+                  x
+                  (Math/pow x mult)))
   :rexpr-binary-op make-times)
 
 
@@ -73,7 +83,10 @@
                    (throw (UnificationFailure. (str "The equals aggregator (=) requires only one contribution, got " a " and " b)))
                    a)))
     :identity ident ;DynaTerm/null_term
-    :many-items (fn [val mul] (throw (UnificationFailure. "The equals aggregator (=) requires only one contribution")))
+    :many-items (fn [val mul]
+                  (when (> mul 1)
+                    (throw (UnificationFailure. "The equals aggregator (=) requires only one contribution")))
+                  val)
     :lower-value (fn [x]
                    (when (identical? x ident)
                      (throw (UnificationFailure. "No contributions on aggregator")))
@@ -91,8 +104,12 @@
                  (throw (DynaUserError. "multiple aggregators on the same rule"))))
     :lower-value (fn [x]
                    (when (identical? ident x)
-                     (throw (UnificationFailure. "no contributionso on aggregator")))
-                   x)))
+                     (throw (UnificationFailure. "no contributions on aggregator")))
+                   x)
+    :many-items (fn [val mult]
+                    (when (> mult 1)
+                      (throw (UnificationFailure. "multiple aggregators on the same rule")))
+                    val)))
 
 (defn- get-aggregated-value [v]
   (if (and (instance? DynaTerm v)
@@ -243,12 +260,13 @@
 (let [ident (Object.)]
   (def-aggregator "?="
     :identity ident
-    :combine (fn [a b] a) ;; this just picks something
+    :combine (fn [a b] (if (identical? a ident) b a)) ;; this just picks something
     :saturate (fn [x] true)  ;; once there is a value, this is going to mark it as saturated meaning that it is done and can stop processing
     :lower-value (fn [x]
                    (if (identical? x ident)
                      (throw (UnificationFailure. "No contributions on aggregator"))
-                     x))))
+                     x))
+    :many-items (fn [val mult] val)))
 
 
 
