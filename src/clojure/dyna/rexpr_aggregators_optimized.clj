@@ -38,7 +38,9 @@
                                                                 (apply dissoc variable-map incoming projected)))))
 
   (remap-variables-handle-hidden [this variable-map]
-                                 (let [new-hidden-names (into {} (for [v (cons incoming projected)]
+                                 (let [new-hidden-names (into {} (for [v (if (is-variable? incoming)
+                                                                           (cons incoming projected)
+                                                                           projected)]
                                                                    [v (make-variable (gensym 'agg-op-hidden))]))
                                        new-map (merge variable-map new-hidden-names)]
                                    (make-aggregator-op-inner (get new-map incoming incoming)

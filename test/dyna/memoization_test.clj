@@ -65,7 +65,7 @@ assert fib(100) = 354224848179261915075.
 (str-test factorial-null "
 :- memoize_null fact/1.
 fact(0) := 1.
-fact(N) := fact(N-1)*N for N < 10.
+fact(N) := fact(N-1)*N for N < 4.
 
 :- run_agenda.
 

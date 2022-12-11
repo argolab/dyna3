@@ -3,6 +3,7 @@
   (:require [dyna.core])
   (:require [dyna.simple-test :refer [str-test]]))
 
+(deftest dummy) ;; intellij seems to need this to recognize this file
 
 (str-test unification-type "
 a += X=&f(Z), X=&g(W), 1.  % should unify to nothing,

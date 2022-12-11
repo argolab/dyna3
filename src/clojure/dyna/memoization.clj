@@ -121,7 +121,7 @@
                                               (compute-with-assumption
                                                (simplify-top (make-conjunct [cond Rorig]))))]
         (when-not (deep-equals orig-result memo)
-          #_(debug-delay-ntimes 0
+          (debug-delay-ntimes 5
                               (debug-repl "refresh"))
           #_(let [vv (simplify-top orig-result)]
             (debug-repl "tables not equal"))

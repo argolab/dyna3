@@ -33,6 +33,8 @@
 ;;            (is false)
 ;;            (throw e#))))))
 
+(deftest dummy) ;; for intellij
+
 (defmacro make-file-test [fname]
   `(deftest ~(symbol fname)
      (run-file ~(str fname))))

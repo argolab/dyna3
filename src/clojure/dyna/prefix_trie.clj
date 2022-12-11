@@ -289,7 +289,7 @@
                                                                   0))
                                                         (range (count new-order))))
             new-root (volatile! {})]
-        (doseq [[key col] (trie-get-values-collection this)]
+        (doseq [[key col] (trie-get-values-collection this nil)]
           (let [new-key (vec (map (fn [i] (if (nil? i) nil (nth key i))) new-order))]
             (vswap! new-root assoc-in new-key col)))
         (PrefixTrie. (count new-order) new-contains-wildcard @new-root))))
