@@ -14,7 +14,7 @@
   (:require [dyna.rexpr-aggregators])
   (:require [dyna.rexpr-dynabase])
   (:require [dyna.rexpr-meta-programming])
-  (:require [dyna.memoization])
+  (:require [dyna.memoization-v1])
   (:require [dyna.rexpr-disjunction])
   (:require [dyna.rexpr-aggregators-optimized])
  ; (:require [dyna.rexpr-jit])

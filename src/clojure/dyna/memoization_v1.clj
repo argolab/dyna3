@@ -1,4 +1,4 @@
-(ns dyna.memoization
+(ns dyna.memoization-v1
   (:require [dyna.utils :refer :all])
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.system :as system])
@@ -157,7 +157,7 @@
                                 :var-map variable-name-mapping])
 
 (def-rewrite
-  :match (memoized-rexpr (:unchecked ^dyna.memoization.MemoContainer memoization-container) (:unchecked variable-name-mapping))
+  :match (memoized-rexpr (:unchecked ^dyna.memoization_v1.MemoContainer memoization-container) (:unchecked variable-name-mapping))
   (let [memo-config (.memo-config memoization-container)]
     (when (or (= :null (:memo-mode memo-config))
               (every? is-ground? (map variable-name-mapping (:required-ground-variables memo-config))))

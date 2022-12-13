@@ -875,3 +875,26 @@
 
 (def-user-term "cast_int" 1 (make-int-cast v0 v1))
 (def-user-term "cast_float" 1 (make-float-cast v0 v1))
+
+
+(def-base-rexpr meta-is-ground [:var input
+                                :var result])
+(def-user-term "$ground" 2 (make-meta-is-ground v0 v1))
+
+(def-rewrite
+  :match (meta-is-ground (:ground input) (:any result))
+  :assigns-variable result
+  true)
+
+(def-base-rexpr meta-is-free [:var input
+                              :var result])
+(def-user-term "$free" 2 (make-meta-is-free v0 v1))
+(def-rewrite
+  :match (meta-is-free (:ground input) (:any result))
+  :assigns-variable result
+  false)
+(def-rewrite
+  :match (meta-is-free (:free input) (:any result))
+  :run-at :inference ;; this is indended to delay this a bit such that it has time to check if this is truly a free variable
+  :assigns-variable result
+  true)

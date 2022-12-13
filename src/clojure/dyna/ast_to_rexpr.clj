@@ -6,7 +6,7 @@
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
   (:require [dyna.user-defined-terms :refer [add-to-user-term update-user-term! def-user-term get-user-term]])
-  (:require [dyna.memoization :refer [set-user-term-as-memoized print-memo-table]])
+  (:require [dyna.memoization-v1 :refer [set-user-term-as-memoized print-memo-table]])
   (:require [dyna.optimize-rexpr :refer [optimize-aliased-variables]])
   (:require [clojure.set :refer [union intersection difference]])
   (:require [clojure.string :refer [join]])
@@ -229,7 +229,50 @@
           (DynaTerm. "$constant" [(DynaTerm. (.name ast) DynaTerm/null_term source-file (vec (map #(get % 0) arguments)))]) ;; if this does not have nested structure, then can optimize and just use a constant structure
           (DynaTerm. "$quote1" [(DynaTerm. (.name ast) DynaTerm/null_term source-file arguments)]))))))
 
+(defn- get-all-conjuncts [^DynaTerm ast]
+  (if (instance? DynaTerm ast)
+    (case [(.name ast) (.arity ast)]
+      ["," 2] (union (get-all-conjuncts (get ast 0)) (get-all-conjuncts (get ast 1)))
+      ["$quote1" 1] (let [qs (get ast 0)
+                          args (.arguments ^DynaTerm qs)]
+                      (apply union (map get-all-conjuncts args)))
+      ["$escaped" 1] (recurse-through-escaped (get ast 0) get-all-conjuncts)
+      ["$variable" 1] #{}
+      ["$constant" 1] #{}
+      ["$inline_function" 3] (???) ;; this is not really something that should be getting used here....
+      (conj (apply union (map get-all-conjuncts (.arguments ast))) ast))
+    #{}))
+
+(defn- get-return-value [^DynaTerm ast]
+  (if (instance? DynaTerm ast)
+    (case [(.name ast) (.arity ast)]
+      ["," 2] (get-return-value (get ast 1))
+      ["$constant" 1] (get ast 1)
+      nil)))
+
+#_(defn- get-all-conjuncts [^DynaTerm term]
+  (if (and (= "," (.name term)) (= 2 (.arity term)))
+    (union (get-all-conjuncts (get term 0)) (get-all-conjuncts (get term 1)))
+    #{term}))
+
+
+
+(defn- handle-dollar-memo-definition [source-file dynabase aggregator body]
+  (when-not (dnil? dynabase)
+    (throw (DynaUserError. "$memo does not support dynabases (yet)")))
+  (let [conjuncts (get-all-conjuncts body)
+        return-value (get-return-value body) ;; if this is a constant string of "none", "unk" or "null" that will control the memo more directly
+        variable-unifies {}
+        ]
+
+
+    ;(debug-repl "$memo handler")
+    )
+  ;(???)
+  body)
+
 (def ^{:private true :dynamic true} *do-not-use-with-key* false)
+(def ^{:private true :dynamic true} *compiler-expression-dynabase* nil)
 
 (defn convert-from-ast [^DynaTerm ast out-variable variable-name-mapping source-file]
   ;; convert from the ast into an R-expr which can then be evaluated
@@ -276,38 +319,41 @@
           (case [(.name ast) (.arity ast)] ;; this should match on name and arity
             ["$compiler_expression" 1] (let [^DynaTerm arg1 (get ast 0)]
                                          (case (.name arg1)
-                                           "import" (let [imported-filename (if (= (.arity arg1) 2)
-                                                                              (get arg1 1)
-                                                                              (get arg1 0))
-                                                          lfilename (if-not (.endsWith ^String imported-filename ".dyna")
-                                                                                   (str imported-filename ".dyna")
-                                                                                   imported-filename)
-                                                          file (URL. source-file lfilename)
-                                                          file (try
-                                                                 (do (import-file-url file)
-                                                                     file)
-                                                                 (catch FileNotFoundException e
-                                                                   ;; attempt to import a file from the resources which are built in
-                                                                   (let [rf (resource (str "dyna/builtin_libraries/" lfilename))]
-                                                                     (try
-                                                                       (do (import-file-url rf)
-                                                                           rf)
-                                                                       (catch FileNotFoundException e2
-                                                                         (throw e))))))]
-                                                      ;(import-file-url file)
-                                                      (let [imported-names (if (= (.arity arg1) 2)
-                                                                             (.list_to_vec ^DynaTerm (get arg1 0))
-                                                                             ;; then this should lookup the exported terms
-                                                                             (get @system/user-exported-terms file))]
-                                                        (doseq [imported-term imported-names]
-                                                          (match-term imported-term ("/" name arity)
-                                                                      (update-user-term! {:name name
-                                                                                         :arity (int arity)
-                                                                                         :source-file source-file}
-                                                                                        (fn [o]
-                                                                                          (assoc o :imported-from-another-file {:source-file file
-                                                                                                                                :name name
-                                                                                                                                :arity arity})))))))
+                                           "import" (do
+                                                      (when-not (nil? *compiler-expression-dynabase*)
+                                                        (throw (DynaUserError. "`:- import` must be at the top level in the file, not inside of a Dynabase.")))
+                                                      (let [imported-filename (if (= (.arity arg1) 2)
+                                                                                (get arg1 1)
+                                                                                (get arg1 0))
+                                                            lfilename (if-not (.endsWith ^String imported-filename ".dyna")
+                                                                        (str imported-filename ".dyna")
+                                                                        imported-filename)
+                                                            file (URL. source-file lfilename)
+                                                            file (try
+                                                                   (do (import-file-url file)
+                                                                       file)
+                                                                   (catch FileNotFoundException e
+                                                                     ;; attempt to import a file from the resources which are built in
+                                                                     (let [rf (resource (str "dyna/builtin_libraries/" lfilename))]
+                                                                       (try
+                                                                         (do (import-file-url rf)
+                                                                             rf)
+                                                                         (catch FileNotFoundException e2
+                                                                           (throw e))))))]
+                                        ;(import-file-url file)
+                                                        (let [imported-names (if (= (.arity arg1) 2)
+                                                                               (.list_to_vec ^DynaTerm (get arg1 0))
+                                                                               ;; then this should lookup the exported terms
+                                                                               (get @system/user-exported-terms file))]
+                                                          (doseq [imported-term imported-names]
+                                                            (match-term imported-term ("/" name arity)
+                                                                        (update-user-term! {:name name
+                                                                                            :arity (int arity)
+                                                                                            :source-file source-file}
+                                                                                           (fn [o]
+                                                                                             (assoc o :imported-from-another-file {:source-file file
+                                                                                                                                   :name name
+                                                                                                                                   :arity arity}))))))))
 
                                            ;; use like `:- export name/arity`.  we
                                            ;; will have a set of symbols which are
@@ -320,11 +366,14 @@
                                            ;; there can just be a function which is
                                            ;; called by import to do the importing
                                            ;; of a function in place.
-                                           "export" (match-term arg1 ("export" ("/" lname larity))
-                                                                (swap! system/user-exported-terms
-                                                                       (fn [o]
-                                                                         (assoc o source-file (conj (get o source-file #{})
-                                                                                                    (DynaTerm. "/" [lname larity]))))))
+                                           "export" (do
+                                                      (when-not (nil? *compiler-expression-dynabase*)
+                                                        (throw (DynaUserError. "`:- export` must be at the top level in the file, not inside of a Dynabase.")))
+                                                      (match-term arg1 ("export" ("/" lname larity))
+                                                                  (swap! system/user-exported-terms
+                                                                         (fn [o]
+                                                                           (assoc o source-file (conj (get o source-file #{})
+                                                                                                      (DynaTerm. "/" [lname larity])))))))
 
                                            ;; some of the arugments to a function should get escaped escaped, or quoted
                                            ;; used like `:- dispose foo(quote1,eval).`
@@ -339,6 +388,8 @@
                                                                                      (DynaTerm. "quote" []) "$constant"
                                                                                      (DynaTerm. "eval" []) "$eval"} % "$eval")
                                                                                   (.arguments disp-term)))]
+                                                       (when-not (nil? *compiler-expression-dynabase*)
+                                                         (throw (DynaUserError. "Dispose is not support on Dynabase methods.")))
                                                        (update-user-term! {:name (.name disp-term)
                                                                           :arity (.arity disp-term)
                                                                           :source-file source-file}
@@ -350,6 +401,8 @@
                                                        ;; used like `:- macro foo/3.`
 
                                            "macro" (match-term arg1 ("macro" ("/" name arity))
+                                                               (when-not (nil? *compiler-expression-dynabase*)
+                                                                 (throw (DynaUserError. "Macros are not supported on Dynabase methods.")))
                                                                (update-user-term! {:name name
                                                                                   :arity arity
                                                                                   :source-file source-file}
@@ -365,8 +418,9 @@
                                                                                 rexpr (make-no-simp-user-call call-name
                                                                                                       (into {} (map #(let [x (make-variable (str "$" %))] [x x])
                                                                                                                     (range (+ arity 1))))
-                                                                                                      0 {})
-                                                                                ]
+                                                                                                      0 {})]
+                                                                            (when-not (nil? *compiler-expression-dynabase*)
+                                                                              (throw (DynaUserError. "make_system_term is not supported on Dynabase methods.")))
                                                                             (when (is-multiplicity? rexpr) (debug-repl))
                                                                             (swap! system/globally-defined-user-term
                                                                                    assoc [name arity] rexpr)))
@@ -396,6 +450,15 @@
                                                                                        :arity arity
                                                                                        :source-file source-file}]
                                                                         (set-user-term-as-memoized call-name :none)))
+
+                                           "memoize" (match-term arg1 ("memoize" term)
+                                                                 (let [name (.name ^DynaTerm term)
+                                                                       arg-signature (.arguments ^DynaTerm term)
+                                                                       call-name {:name name
+                                                                                  :arity (.arity ^DynaTerm term)
+                                                                                  :source-file source-file}]
+                                                                   (???)
+                                                                   ))
 
                                            "print_memo_table" (match-term arg1 ("print_memo_table" ("/" name arity))
                                                                           (let [call-name {:name name
@@ -484,7 +547,10 @@
                                                          aggregator
                                                          new-body])]
                                  (make-eval-from-ast out-variable (make-constant new-ast) {} source-file))
-            ["$define_term_normalized" 6] (let [[functor-name functor-arity source-file dynabase aggregator body] (.arguments ^DynaTerm ast)
+            ["$define_term_normalized" 6] (let [[functor-name functor-arity source-file dynabase aggregator body0] (.arguments ^DynaTerm ast)
+                                                body (if (and false (= "$memo" functor-name) (= 1 functor-arity))
+                                                       (handle-dollar-memo-definition source-file dynabase aggregator body0)
+                                                       body0)
                                                 all-variables (find-term-variables body)
                                                 aggregator-result-variable (make-variable (str "$" functor-arity))
                                                 argument-variables (merge ;; these are the variables which are arguments to this
@@ -515,12 +581,20 @@
                                                                                incoming-variable
                                                                                true ;; meaning that the body is conjunctive, so if the result of the body is 0, the the aggregator will be 0 also (instead of identity)
                                                                                (make-proj-many (vals project-variables-map)
-                                                                                               body-rexpr))]
+                                                                                               body-rexpr))
+                                                rexpr-opt (optimize-rexpr rexpr)]
                                             (when (get @system/globally-defined-user-term [functor-name functor-arity])
                                               (throw (DynaUserError. (str "The term " functor-name "/" functor-arity " is a system defined term, unable to redefine"))))
+                                            (when (and (= "$memo" functor-name) (= 1 functor-arity))
+                                              (debug-repl "handle the $memo rexpr"))
+                                            (when (= "$priority" functor-name)
+                                              ;; this needs to mark the memo table as having a priority function.
+                                              ;; the thing could register that there is some function which calls back into the R-expr.  If there
+                                              (debug-repl "handle $priority declare")
+                                              (???))
 
                                             (add-to-user-term source-file dynabase functor-name functor-arity
-                                                              (optimize-rexpr rexpr))
+                                                              rexpr-opt)
                                             ;; the result from the expression should just be to unify the out variable with true
                                             ;; ideally, this would check if the expression corresponds with
                                             (make-unify out-variable (make-constant true)))
@@ -667,8 +741,13 @@
                                                                                                                                  variable-name-mapping)))
                                                                                                               source-file)]
                                                                                     (assert (= res (make-multiplicity 1)))))
+                                                  (= (.name dt) "$compiler_expression") (binding [*compiler-expression-dynabase* dbase-name]
+                                                                                          (???)
+                                                                                          (let [res (convert-from-ast dt (make-constant true) {} source-file)]
+                                                                                            (assert (= res (make-multiplicity 1)))))
                                                   :else (do
                                                           (debug-repl "dynabase unsupported body type")
+                                                          (throw (DynaUserError. (str "Dynabase unsupported body type: " (.name dt))))
                                                           (???)))
                                             (when (= "," (.name trm)) (recur (get trm 1)))))
                                         dynabase-terms))

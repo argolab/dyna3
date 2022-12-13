@@ -734,6 +734,8 @@ compilerExpressionArgument returns [Object val]
     | '**' {$val = "**";}
     | '&' {$val = "&";}
     | '&&' {$val = "&&";}
+    | '+' {$val = "+";}
+    | '-' {$val = "-";}
     ;
 
 compilerExpressionParams returns [ArrayList<Object> args = new ArrayList<>()]
