@@ -28,8 +28,10 @@
   (invalidate! [this]
     (let [[old new] (swap-vals! valid (constantly false))]
       (when (= true old) ;; meaning that this was valid before
-        (locking watchers (doseq [w (.keySet watchers)]
-                            (notify-invalidated! w this))))))
+        (locking watchers
+          (doseq [w (.keySet watchers)]
+            (notify-invalidated! w this))
+          (.clear watchers)))))
   (is-valid? [this] @valid)
   (add-watcher! [this watcher]
     (locking watchers
@@ -37,11 +39,12 @@
         (.put watchers watcher nil)
         (do (notify-invalidated! watcher this)
             (when *fast-fail-on-invalid-assumption*
-              (throw (InvalidAssumption. "invlaid assumption")))))))
+              (throw (InvalidAssumption. "invalid assumption")))))))
 
   (send-message! [this message]
-    (locking watchers (doseq [w (.keySet watchers)]
-                        (notify-message! w this message))))
+    (locking watchers
+      (doseq [w (.keySet watchers)]
+        (notify-message! w this message))))
 
   Watcher
   (notify-invalidated! [this from-watcher] (invalidate! this))

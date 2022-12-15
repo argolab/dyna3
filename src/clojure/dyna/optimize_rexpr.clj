@@ -61,8 +61,8 @@
 ;;    )
 ;;   ([rexpr] (recur rexpr ())))
 
-(defn- get-all-conjunctive-rexprs [rexpr]
-  ())
+;; (defn- get-all-conjunctive-rexprs [rexpr]
+;;   ())
 
 
 (defn optimize-disjuncts [rexpr]

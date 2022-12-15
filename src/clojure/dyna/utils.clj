@@ -433,3 +433,5 @@
     (or (nil? n) (< n 0)) coll
     (= n 0) (rest coll)
     :else (cons (first coll) (lazy-seq (drop-nth (rest coll) (- n 1))))))
+
+(defn only [x] {:pre [(nil? (next x))]} (first x))

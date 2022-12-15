@@ -81,7 +81,7 @@ assert fact(2) = 2.
 fact(0) := 1.
 fact(N) = fact(N-1)*N.
 
-$memo(fact[N:$ground]) = \"unk\" for 3 = 1 + 2.
+$memo(fact[N:$ground]) = \"unk\".
 
 assert fact(10) = 55.
 

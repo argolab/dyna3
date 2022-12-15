@@ -7,6 +7,7 @@
   (:require [dyna.context :as context])
   (:require [dyna.user-defined-terms :refer [add-to-user-term update-user-term! def-user-term get-user-term]])
   (:require [dyna.memoization-v1 :refer [set-user-term-as-memoized print-memo-table]])
+  (:require [dyna.memoization-v2 :refer [handle-dollar-memo-rexpr handle-dollar-priority-rexpr]])
   (:require [dyna.optimize-rexpr :refer [optimize-aliased-variables]])
   (:require [clojure.set :refer [union intersection difference]])
   (:require [clojure.string :refer [join]])
@@ -83,7 +84,11 @@
                     source-file ;; this is just some constant
                     ))
   (remap-variables-handle-hidden [this variable-map]
-                                 (remap-variables this variable-map)))
+                                 (remap-variables this variable-map))
+
+  (exposed-variables [this] (filter is-variable?
+                                    (into #{out-variable ast}
+                                          (vals variable-name-mapping)))))
 
 
 (declare import-file-url)
@@ -229,7 +234,7 @@
           (DynaTerm. "$constant" [(DynaTerm. (.name ast) DynaTerm/null_term source-file (vec (map #(get % 0) arguments)))]) ;; if this does not have nested structure, then can optimize and just use a constant structure
           (DynaTerm. "$quote1" [(DynaTerm. (.name ast) DynaTerm/null_term source-file arguments)]))))))
 
-(defn- get-all-conjuncts [^DynaTerm ast]
+#_(defn- get-all-conjuncts [^DynaTerm ast]
   (if (instance? DynaTerm ast)
     (case [(.name ast) (.arity ast)]
       ["," 2] (union (get-all-conjuncts (get ast 0)) (get-all-conjuncts (get ast 1)))
@@ -243,7 +248,7 @@
       (conj (apply union (map get-all-conjuncts (.arguments ast))) ast))
     #{}))
 
-(defn- get-return-value [^DynaTerm ast]
+#_(defn- get-return-value [^DynaTerm ast]
   (if (instance? DynaTerm ast)
     (case [(.name ast) (.arity ast)]
       ["," 2] (get-return-value (get ast 1))
@@ -257,7 +262,7 @@
 
 
 
-(defn- handle-dollar-memo-definition [source-file dynabase aggregator body]
+#_(defn- handle-dollar-memo-definition [source-file dynabase aggregator body]
   (when-not (dnil? dynabase)
     (throw (DynaUserError. "$memo does not support dynabases (yet)")))
   (let [conjuncts (get-all-conjuncts body)
@@ -547,10 +552,10 @@
                                                          aggregator
                                                          new-body])]
                                  (make-eval-from-ast out-variable (make-constant new-ast) {} source-file))
-            ["$define_term_normalized" 6] (let [[functor-name functor-arity source-file dynabase aggregator body0] (.arguments ^DynaTerm ast)
-                                                body (if (and false (= "$memo" functor-name) (= 1 functor-arity))
-                                                       (handle-dollar-memo-definition source-file dynabase aggregator body0)
-                                                       body0)
+            ["$define_term_normalized" 6] (let [[functor-name functor-arity source-file dynabase aggregator body] (.arguments ^DynaTerm ast)
+                                                ;; body (if (and false (= "$memo" functor-name) (= 1 functor-arity))
+                                                ;;        (handle-dollar-memo-definition source-file dynabase aggregator body0)
+                                                ;;        body0)
                                                 all-variables (find-term-variables body)
                                                 aggregator-result-variable (make-variable (str "$" functor-arity))
                                                 argument-variables (merge ;; these are the variables which are arguments to this
@@ -585,16 +590,21 @@
                                                 rexpr-opt (optimize-rexpr rexpr)]
                                             (when (get @system/globally-defined-user-term [functor-name functor-arity])
                                               (throw (DynaUserError. (str "The term " functor-name "/" functor-arity " is a system defined term, unable to redefine"))))
-                                            (when (and (= "$memo" functor-name) (= 1 functor-arity))
-                                              (debug-repl "handle the $memo rexpr"))
-                                            (when (= "$priority" functor-name)
+                                            (cond (and (= "$memo" functor-name) (= 1 functor-arity))
+                                                  (handle-dollar-memo-rexpr rexpr-opt source-file dynabase)
+
+                                                  (= "$priority" functor-name)
+                                                  (handle-dollar-priority-rexpr rexpr-opt source-file dynabase)
+
+                                                  :else
+                                                  (add-to-user-term source-file dynabase functor-name functor-arity
+                                                                    rexpr-opt))
+                                            #_(when
                                               ;; this needs to mark the memo table as having a priority function.
                                               ;; the thing could register that there is some function which calls back into the R-expr.  If there
                                               (debug-repl "handle $priority declare")
                                               (???))
 
-                                            (add-to-user-term source-file dynabase functor-name functor-arity
-                                                              rexpr-opt)
                                             ;; the result from the expression should just be to unify the out variable with true
                                             ;; ideally, this would check if the expression corresponds with
                                             (make-unify out-variable (make-constant true)))

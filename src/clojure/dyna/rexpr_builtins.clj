@@ -879,7 +879,7 @@
 
 (def-base-rexpr meta-is-ground [:var input
                                 :var result])
-(def-user-term "$ground" 2 (make-meta-is-ground v0 v1))
+(def-user-term "$ground" 1 (make-meta-is-ground v0 v1))
 
 (def-rewrite
   :match (meta-is-ground (:ground input) (:any result))
@@ -888,11 +888,17 @@
 
 (def-base-rexpr meta-is-free [:var input
                               :var result])
-(def-user-term "$free" 2 (make-meta-is-free v0 v1))
+(def-user-term "$free" 1 (make-meta-is-free v0 v1))
+
+;; if this value is used, then $free will return true.  This should make it easier to run this against
+;; though it would only match against $free rather than having it actually match against an unbound value
+(def meta-free-dummy-free-value (DynaTerm. "$free_meta_representing_unbound_value" []))
+
 (def-rewrite
   :match (meta-is-free (:ground input) (:any result))
   :assigns-variable result
-  false)
+  ;; this can only match the dummy placeholder value for free, otherwise then it would clearly be bound to something else
+  (= meta-free-dummy-free-value (get-value input)))
 (def-rewrite
   :match (meta-is-free (:free input) (:any result))
   :run-at :inference ;; this is indended to delay this a bit such that it has time to check if this is truly a free variable

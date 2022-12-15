@@ -51,10 +51,9 @@
 ;; a set of java.net.URL objects of which files have been imported into the runnint system
 (def ^:dynamic imported-files (atom #{}))
 
-;; the agenda of pending work.  When an assumption is invalidated, this will want to push the work onto this object
-;; this should probably be a queue type rather than just a set, also some priority function will want to be constructed
-;; for this also
-(def ^:dynamic work-agenda (DynaAgenda.)) ;; this should really be a priority quieue instead of just a set
+;; the agenda is a priority queue of the work as well as a hash set which tracks what is already pushed.
+;; Parallel processing could work by just processing work from the agenda in parallel.  If there is multiple
+(def ^:dynamic work-agenda (DynaAgenda.))
 
 ;; how many times a user-defined function can be expanded before we stop expanding
 (def ^:dynamic user-recursion-limit (atom default-recursion-limit))  ;; this does not need to really be an atom?  it can just hold the value directly
@@ -62,7 +61,7 @@
 ;; if a query is made, where it should get printed to
 (def ^:dynamic query-output println)
 
-;; in the parser expressions like `$0$`, `$1`, .... can be replaced with an R-expr.  This is done via this handler
+;; in the parser expressions like `$0`, `$1`, .... can be replaced with an R-expr.  This is done via this handler
 ;; this is used in the case of using the system like a database
 (def ^:dynamic parser-external-value (fn [index]
                                        (throw (RuntimeException. "External value handler not set"))))
