@@ -8,14 +8,20 @@
   (:require [dyna.assumptions :refer :all])
   (:require [dyna.context :as context])
   (:require [dyna.user-defined-terms :refer [add-to-user-term user-rexpr-combined-no-memo]])
+  (:require [dyna.rexpr-builtins :refer [meta-free-dummy-free-value]])
   (:require [clojure.set :refer [union]])
-  (:import [dyna DynaUserError IDynaAgendaWork]))
+  (:import [dyna DynaUserError IDynaAgendaWork DynaTerm]))
 
 (defsimpleinterface IMemoContainer
   (refresh-memo-table [])
   (compute-value-for-key [key])
   (get-value-for-key [key])
-  )
+  (refresh-value-for-key [term])
+
+  ;; calls which are made by the R-expr when it is trying to access the expression
+  (memo-rewrite-access [variables variable-values])
+  (memo-get-iterator [variables variable-values])
+  (memo-get-assumption []))
 
 (deftype AgendaReprocessWork [^IMemoContainer memo-container term ^double priority]
   IDynaAgendaWork
@@ -32,18 +38,19 @@
       (and (identical? memo-container (.memo-container ^AgendaReprocessWork other))
            (= term (.term ^AgendaReprocessWork other))))))
 
+
 ;; this memo container only will be a value that is a single R-expr.  This is
 ;; the "naive" implementation which will "support everything" because it makes
 ;; no assumptions about the internal representation of what is getting memoized
-(deftype MemoContainerRexpr []
-  )
+;; (deftype MemoContainerRexpr []
+;;   )
 
 ;; this is the efficient implementation of a memo table which uses an
 ;; associative map from keys to rexpr-values.  The map will be of a subset of
 ;; the keys which are contained.  If something comes in with an invalidation message, then
-(deftype MemoContainerTrie [])
+;; (deftype MemoContainerTrie [])
 
-(deftype MemoContainer [memo-config
+#_(deftype MemoContainer [memo-config
                         Rmemo ;; atom which contains the
                         ]
   Watcher
@@ -56,42 +63,240 @@
   (compute-value-for-key [this key]
     (???))
   (get-value-for-key [this key]
+    (???))
+  (memo-get-assumption [this]
     (???)))
 
-(def-base-rexpr memoization-placeholder [:unchecked name ;; this should match
-                                                         ;; the term name which
-                                                         ;; we are going to look
-                                                         ;; up the memoization
-                                                         ;; container and
-                                                         ;; configuration on
-                                         :var-map args-map])
+(deftype MemoContainerGenericRexpr []
+  ;; this is a generic version of the memo table.  It uses R-exprs to control
+  ;; when it will access some value, as well as for the internal representation.
+  ;; The internal representations are treated as "opaque" which means that they
+  ;; can be "more general", though because performing checks against the
+  ;; internal representation can require comparing equality between R-exprs
+  ;; (something which essentially doesn't really work in general), this is going to be a lot slower and .
+  Watcher
+  (notify-invalidated! [this watching] (???))
+  (notify-message! [this watching message] (???))
 
+  IMemoContainer
+  (refresh-memo-table [this])
+  (compute-value-for-key [this key])
+  (get-value-for-key [this key])
+  (refresh-value-for-key [this key])
+  (memo-get-assumption [this]
+    (???)))
+
+(defn- is-key-contained [])
+
+(deftype MemoContainerTrieStorage [memo-modes ;; either a keyword (:unk or :null) or a set of keywords
+                                   memo-controller ;; a function which will identify when the memo is supported
+                                   memo-controller-term-name  ;; the DynaTerm name that is used when calling memo controller
+                                   number-of-variables  ;; the number of variables which are used for any key
+                                   assumption
+                                   data ;; (atom [map-of-what-keys-are-contained (PrefixTrie.)])
+                                   ;; the map will bve
+                                   ]
+  Watcher
+  (notify-invalidated! [this watching] (???))
+  (notify-message! [this watching message] (???))
+
+  IMemoContainer
+  (refresh-memo-table [this])
+  (compute-value-for-key [this key])
+  (get-value-for-key [this key])
+  (refresh-value-for-key [this key])
+
+  ;; calls which are made by the R-expr when it is trying to access the expression
+  (memo-rewrite-access [this variables variable-values]
+    (???))
+  (memo-get-iterator [this variables variable-values]
+    (???))
+  (memo-get-assumption [this]
+    assumption))
+
+;; the placeholder will lookup the memoization container associated with a given
+;; name.  This is an extra step of indirection which we can "defer."  This will
+;; have that the placeholder will be able to get rewritten as needed
+(def-base-rexpr memoization-placeholder [:unchecked name
+                                         :var-list args-map])
+;; if this should expand the memoization-placeholder or just leave it as is.
 (def ^{:private true :dynamic true} *expand-memoization-placeholder* true)
+
+(def-base-rexpr memoized-access [:unchecked memoization-container
+                                 :var-list variable-mapping])
+(def ^{:private true :dynamic true} *lookup-memoized-values* true)
+
+
 (def-rewrite
   :match {:rexpr (memoization-placeholder (:unchecked name) (:unchecked args-map))
           :check *expand-memoization-placeholder*}
   (let [term (get-user-term name)]
-    ))
+    ;;(make-memoized-rexpr-v2 nil args-map)
+    (debug-repl "memoization placeholder r-expr rewrite")
+    (make-memoized-access nil args-map)))
 
-(def-base-rexpr memoized-rexpr-v2 [:unchecked memoization-container
-                                   :var-map variable-name-mapping])
+#_(def-rewrite
+  :match {:rexpr (memoized-rexpr-v2 (:unchecked memoization-container) (:unchecked variable-name-mapping))
+          :check *lookup-memoized-values*}
+  (let [memo-config (.memo-config memoization-container)]
+    (debug-repl "memoized rexpr v2 rewrite")
+    (???)))
 
 (def-rewrite
-  :match (memoized-rexpr-v2 (:unchecked memoization-container) (:unchecked variable-name-mapping))
-  (let [memo-config (.memo-config memoization-container)]
+  :match {:rexpr (memoized-access (:unchecked ^IMemoContainer container) (:unchecked variable-map))
+          :check *lookup-memoized-values*}
+  ;; inside of the JIT, the last argument could be something which will be generated using the local variables
+  ;; this will prevent us from having to indirect through the *context* to access the values of variables
+  (memo-rewrite-access container variable-map (map get-value variable-map)))
+
+(def-iterator
+  :match {:rexpr (memoized-access (:unchecked ^IMemoContainer container) (:unchecked variable-map))
+          :check *lookup-memoized-values*}
+  (memo-get-iterator container variable-map (map get-value variable-map)))
+
+
+(defn- get-all-children [rexpr]
+  (let [c (ensure-set (get-children rexpr))]
+    (union c
+           (apply union (map get-all-children c)))))
+
+(defn- make-memoization-controller-function-rexpr-backed [info]
+  (let [memo-controller-rexpr (make-user-call {:name (:memoization-tracker-method-name info)
+                                               :arity 1
+                                               :source-file (:source-file (:term-name info))}
+                                              {(make-variable "$0") (make-variable 'Input)
+                                               (make-variable "$1") (make-variable 'Result)}
+                                              0 {})]
+    (fn [^DynaTerm signature]
+      (let [ctx (context/make-empty-context memo-controller-rexpr)
+            res (context/bind-context-raw ctx
+                                          (set-value! (make-variable 'Input) signature)
+                                          (simplify-top memo-controller-rexpr))]
+        (when (= (make-multiplicity 1) res)
+          (keyword (ctx-get-value ctx (make-variable 'Result))))))))
+
+(defn- make-memoization-controller-function [info]
+  ;; this will return a function which represents $memo.  If the representation of the function is "sufficently simple"
+  (cond (and (= 1 (count (:memoization-modes info)))
+             (= 1 (count (:memoization-argument-modes info)))
+             (not (:memoization-has-non-trivial-constraint info)))
+        (let [f `(do
+                   (ns dyna.memoization-v2)
+                   (fn [^DynaTerm signature#]
+                       (let [~'args (.arguments signature#)]
+                         (when (and ~@(for [[i mode] (zipseq (range) (first (:memoization-argument-modes info)))
+                                            :when (= :ground mode)]
+                                        ;; for the free variables, we are not going to care about those
+                                        `(not= (get ~'args ~i) meta-free-dummy-free-value)
+                                        ))
+                           ~(first (:memoization-modes info))))))
+              r (eval f)
+              ]
+          r)
+        ;; TODO: this should handle slightly more complex functions in the case
+        ;; that all of the constraints are trivial, though if there is
+        ;; overrides, the order might be different atm?  I supose that the
+        ;; representation will have to use something other than sets to control
+        ;; what the order is for overriding expressions
+
+        :else
+        (make-memoization-controller-function-rexpr-backed info)))
+
+(defn- rebuild-memos-for-term [term-name]
+  ;;
+  )
+
+(defn- refresh-memo-table [^IMemoContainer memo-container]
+  ;; refreshing the memo table will be that it should
+  (debug-repl "refresh memo table")
+  (when (is-valid? (memo-get-assumption memo-container))
+    ;; this is going to have to identify which keys in the table are defined as null, and then
 
     ))
 
 (defn- rebuild-memo-table-for-term [term-name]
-  (let [[old new] (update-user-term! term-name
+  ;; this will create a new memo container for the term.  The container will
+  ;; just be the thing which holds the memos and the references to the R-expr
+  ;; which represents the computation for the term.  In the case that the R-expr changes, then we should probably just
+  (let [dep-memos (volatile! nil)
+        [old new] (update-user-term! term-name
                                      (fn [dat]
-                                       (let [[orig-rexpr-assumpt orig-rexpr] (compute-with-assumption
-                                                                              (user-rexpr-combined-no-memo dat))
+                                       (let [[orig-rexpr-assumpt orig-rexpr] (binding [*expand-memoization-placeholder* false
+                                                                                       *lookup-memoized-values* false]
+                                                                               (compute-with-assumption
+                                                                                (simplify-top (user-rexpr-combined-no-memo dat))))
                                              required-vars ()
+                                             rexpr-children (get-all-children orig-rexpr)
+                                             dependant-memos (vec (filter #(or (is-memoization-placeholder? %) (is-memoized-access? %)) rexpr-children))  ;; this should also identify memoization access expressions
+                                             controller-function (make-memoization-controller-function dat)
+                                             memo-container (MemoContainerTrieStorage.
+                                                             (if (= 1 (count (:memoization-modes dat)))
+                                                               (first (:memoization-modes dat))
+                                                               (:memoization-modes dat))
+                                                             controller-function
+                                                             (:name (:term-name dat)) ;; the name used for creating the term
+                                                             ;; the last argument which is the result is not included, so there needs to be some
+                                                             ;; map from the variables which are used and which variables are included in the mapping
+                                                             (+ 1 (:arity (:term-name dat) 0)) ;;
+                                                             (make-assumption)
+                                                             (atom [{} {}])
+                                                             )
+                                             ret (assoc dat
+                                                        :memoization-container memo-container
+                                                        :memoization-subscribed-upstream (into #{} (map :name (filter is-memoization-placeholder? dependant-memos)))  ;; things that we are following
+                                                        )
                                              ]
+                                         (vreset! dep-memos dependant-memos)
                                          (debug-repl "rebuild 1")
-                                         (???))))])
-  (debug-repl "rebuild memo")
+
+                                         ret)))]
+    (when (:memoization-container old)
+      ;; any old container is going to have to get deleted.
+      (invalidate! (memo-get-assumption (:memoization-container old))))
+    (let [container (:memoization-container new)
+          old-subscribed (:memoization-subscribed-upstream old)
+          new-subscribed (:memoization-subscribed-upstream new)]
+      (doseq [n new-subscribed]
+        (update-user-term! n (fn [dat]
+                               (let [c (:memoization-container dat)]
+                                 (when (and c (is-valid? (memo-get-assumption c)))
+                                   (add-watcher! (memo-get-assumption c) container)))
+                               (update dat :memoization-subscribed-downstream conj term-name))))
+      (doseq [n old-subscribed
+              :when (not (contains? new-subscribed n))]
+        (update-user-term! (fn [dat]
+                             ;; this should remove the assumption from the term container.  This will mean that
+                             (update dat :memoization-subscribed-downstream disj term-name))))
+      (doseq [n new-subscribed]
+        (let [sub (get @system/user-defined-terms n)
+              dc (:memoization-container sub)]
+          (when (and dc (is-valid? (memo-get-assumption dc)))
+            (add-watcher! (memo-get-assumption container) dc))))
+      (doseq [v @dep-memos]
+        (when (is-memoized-access? v)
+          ;; this is a table directly without a term name, which means that we need to just notify it directly
+          (???)
+          ))
+
+      #_(doseq [v @dep-memos]
+        (debug-repl "need to subscribe to the table")
+        (if (is-memoization-placeholder? v)
+          (update-user-term! (:name v) (fn [dat]
+
+                                         ))
+          (let [table (:memoization-container v)]
+            (???))
+          )
+        ;; if the table already exists, then this can just subscribe to the table, otherwise this will have that it might need
+        (???))
+
+      )
+    ;; if there is something else that is downstream which needs to get subscribed to this item, then we are going to have to handle that as well
+
+    (when (:null (:memoization-modes new))
+      (system/push-agenda-work #(refresh-memo-table (:memoization-container new))))
+
+    (debug-repl "rebuild memo"))
 
   )
 
@@ -176,7 +381,8 @@
                                                  dat2 (assoc dat1
                                                              :memoization-modes modes
                                                              :memoization-argument-modes (conj (:memoization-argument-modes dat1 #{}) argument-modes)
-                                                             :memoization-decl-settings (inc (:memoization-decl-settings dat1 0)))
+                                                             :memoization-decl-settings (inc (:memoization-decl-settings dat1 0))
+                                                             :memoization-has-non-trivial-constraint (or has-non-trivial-constraint (:memoization-has-non-trivial-constraint dat1 false)))
                                                  mode (if (and (= (count modes) 1) (<= (:memoization-decl-settings dat2) 1))
                                                         (first (:memoization-modes dat2))
                                                         :complex)
@@ -189,7 +395,13 @@
                                                                                 (make-assumption)
                                                                                 (:is-memoized-null dat2))
                                                              :memoized-rexpr (if (or (:null modes) (:unk modes))
-                                                                               (make-multiplicity 0)
+                                                                               (make-memoization-placeholder call-name
+                                                                                                             (into [] (for [i (range (+ 1 (count args)))]
+                                                                                                                        (make-variable (str "$" i))))
+                                                                                                             #_(into {} (for [i (range (+ 1 (count args)))
+                                                                                                                            :let [v (make-variable (str "$" i))]]
+                                                                                                                        [v v])))
+                                                                               ;(make-multiplicity 0)
                                                                                ;; if this is only :none, then there is no memoized R-expr
                                                                                nil))]
                                              dat3)))]

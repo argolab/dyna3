@@ -37,6 +37,9 @@
    :is-memoized-unk (make-invalid-assumption)
 
    :memoization-mode :none  ;; should either be :none, :null or :unk depending
+   :memoization-subscribed-downstream #{} ;; things that need to get notified in the case that *we* change
+   :memoization-subscribed-upstream #{} ;; then that will notify *us* in the case that they change
+
 
    ;:optimized-assumption (make-assumption) ;; the assumption that there is no more optimized version of this term
    ;:memoized-assumption (make-assumption) ;; if there is some changed to the memoized value for this term
@@ -230,7 +233,14 @@
              (:memoized-rexpr term-rep))
       :null (do
               (depend-on-assumption (:is-memoized-null term-rep))
-              (:memoized-rexpr term-rep)))))
+              (:memoized-rexpr term-rep))
+      :complex (do
+                 (when (:unk (:memoiztaion-modes term-rep))
+                   (depend-on-assumption (:is-memoized-unk term-rep)))
+                 (if (:null (:memoization-modes term-rep))
+                   (depend-on-assumption (:is-memoized-null term-rep))
+                   (depend-on-assumption (:is-not-memoized-null term-rep)))
+                 (:memoized-rexpr term-rep)))))
 
 
 
