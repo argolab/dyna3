@@ -6,7 +6,8 @@
   (:require [dyna.user-defined-terms :refer [update-user-term! user-rexpr-combined-no-memo get-user-term]])
   (:require [dyna.assumptions :refer :all])
   (:require [dyna.context :as context])
-  ;(:import  [dyna.base_protocols MemoizationContainer])
+                                        ;(:import  [dyna.base_protocols MemoizationContainer])
+  (:import [dyna.assumptions Watcher Assumption])
   )
 
 (defsimpleinterface IMemoContainer

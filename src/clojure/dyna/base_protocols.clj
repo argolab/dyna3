@@ -177,8 +177,6 @@
     (iter-continuation []))) ;; return the next iterator in the sequence of binding multiple values
 
 
-
-
 ;; (defrecord MemoizationContainer [RConditional
 ;;                                  Rmemo
 ;;                                  Rorig

@@ -1,7 +1,7 @@
 (ns dyna.memoization-v2
   (:require [dyna.utils :refer :all])
   (:require [dyna.rexpr :refer :all])
-  (:require [dyna.rexpr-constructors :refer [is-meta-is-free? is-meta-is-ground?]])
+  (:require [dyna.rexpr-constructors :refer [is-meta-is-free? is-meta-is-ground? make-disjunct-op]])
   (:require [dyna.system :as system])
   (:require [dyna.base-protocols :refer :all])
   (:require [dyna.user-defined-terms :refer [update-user-term! user-rexpr-combined-no-memo get-user-term]])
@@ -9,8 +9,11 @@
   (:require [dyna.context :as context])
   (:require [dyna.user-defined-terms :refer [add-to-user-term user-rexpr-combined-no-memo]])
   (:require [dyna.rexpr-builtins :refer [meta-free-dummy-free-value]])
+  (:require [dyna.prefix-trie :refer :all])
   (:require [clojure.set :refer [union]])
-  (:import [dyna DynaUserError IDynaAgendaWork DynaTerm]))
+  (:import [dyna DynaUserError IDynaAgendaWork DynaTerm])
+  (:import [dyna.assumptions Watcher Assumption])
+  (:import [dyna.prefix_trie PrefixTrie]))
 
 (defsimpleinterface IMemoContainer
   (refresh-memo-table [])
@@ -86,13 +89,25 @@
   (memo-get-assumption [this]
     (???)))
 
-(defn- is-key-contained [])
+(defn- is-key-contained? [keys-contained-map check-for]
+  (if (empty? check-for)
+    true
+    (if (nil? keys-contained-map)
+      false
+      (let [k (first check-for)
+            r (rest check-for)]
+        (or (is-key-contained? (get keys-contained-map k) r)
+            (and (not (nil? k)) ;; do not check for nil twice if that is already the value of K
+                 (is-key-contained? (get keys-contained-map nil) r)))))))
 
 (deftype MemoContainerTrieStorage [memo-modes ;; either a keyword (:unk or :null) or a set of keywords
                                    memo-controller ;; a function which will identify when the memo is supported
-                                   memo-controller-term-name  ;; the DynaTerm name that is used when calling memo controller
+                                   memo-priority-function
+                                        ;memo-controller-term-name  ;; the DynaTerm name that is used when calling memo controller
                                    number-of-variables  ;; the number of variables which are used for any key
                                    assumption
+                                   orig-rexpr
+                                   local-variable-names ;; vector of the names used by the prefix trie in data
                                    data ;; (atom [map-of-what-keys-are-contained (PrefixTrie.)])
                                    ;; the map will bve
                                    ]
@@ -104,12 +119,43 @@
   (refresh-memo-table [this])
   (compute-value-for-key [this key])
   (get-value-for-key [this key])
-  (refresh-value-for-key [this key])
+  (refresh-value-for-key [this key]
+    (debug-repl "refresh for key"))
 
   ;; calls which are made by the R-expr when it is trying to access the expression
   (memo-rewrite-access [this variables variable-values]
-    (???))
+    (let [access-mode (memo-controller variable-values)]
+      (case access-mode
+        :defer nil
+        :fallthrough (do
+                       ;; this needs to return the R-expr which is the origional expression.  This is going to have to do rename variables to match
+                       (???))
+        (let [[lk keyed-args] access-mode
+              [mcontained mvals] @data
+              is-contained (is-key-contained? mcontained keyed-args)]
+          (assert (= lk :lookup))
+
+
+          (when-not is-contained
+            ;; then we are going to have to enqueue some refresh for these values
+            (swap! data (fn [[mcont trie]]
+                          [(update-in mcont keyed-args (constantly true)) trie]))
+            (let [prio (memo-priority-function variable-values)] ;; TODO: there needs to be a priority for this function as well
+              (system/push-agenda-work (reify IDynaAgendaWork
+                                         (run [workthis]
+                                           (refresh-value-for-key this keyed-args)
+                                           (debug-repl "runq the memo update")
+                                           (???))
+                                         (priority [this] prio)))))
+          (let [retr (make-disjunct-op local-variable-names mvals)
+                vmap (into {} (map vec (zipseq local-variable-names variables)))
+                retr-mapped (remap-variables retr vmap)]
+            (debug-repl "rewrite access")
+            retr-mapped
+            ;(???)
+            )))))
   (memo-get-iterator [this variables variable-values]
+    (debug-repl "get iterator")
     (???))
   (memo-get-assumption [this]
     assumption))
@@ -130,10 +176,13 @@
 (def-rewrite
   :match {:rexpr (memoization-placeholder (:unchecked name) (:unchecked args-map))
           :check *expand-memoization-placeholder*}
-  (let [term (get-user-term name)]
+  (let [term (get-user-term name)
+        container (:memoization-container term)]
     ;;(make-memoized-rexpr-v2 nil args-map)
-    (debug-repl "memoization placeholder r-expr rewrite")
-    (make-memoized-access nil args-map)))
+    ;(debug-repl "memoization placeholder r-expr rewrite")
+    (when-not (nil? container)
+      (depend-on-assumption (assumption-no-messages (memo-get-assumption container)))
+      (make-memoized-access container args-map))))
 
 #_(def-rewrite
   :match {:rexpr (memoized-rexpr-v2 (:unchecked memoization-container) (:unchecked variable-name-mapping))
@@ -160,20 +209,48 @@
     (union c
            (apply union (map get-all-children c)))))
 
+;; The memo controller function should return one of 3 values:
+;;  :lookup      -- means that it should be looked up in the memo table.  If it is not already computed in the table, then some update should be enqueued (null)
+;;  :defer       -- this should not do anything, there is not enough information here yet.  This could be an unk or an R-expr which is not yet resolved
+;;  :fallthrough -- fall through the computation of the underlying R-expr.  Do NOT memoize the result
+
+;; if is only using these three values, then how will it know what the
+;; conditional expression depends on.  This needs to return some "key" in the
+;; case of :lookup, which indicates what the
+
 (defn- make-memoization-controller-function-rexpr-backed [info]
   (let [memo-controller-rexpr (make-user-call {:name (:memoization-tracker-method-name info)
                                                :arity 1
                                                :source-file (:source-file (:term-name info))}
                                               {(make-variable "$0") (make-variable 'Input)
                                                (make-variable "$1") (make-variable 'Result)}
-                                              0 {})]
-    (fn [^DynaTerm signature]
+                                              0 {})
+        term-name (:name (:term-name info))]
+    (fn [signature] ;; the signature should be an array of argument bindings.  The last value will be the result of
       (let [ctx (context/make-empty-context memo-controller-rexpr)
             res (context/bind-context-raw ctx
-                                          (set-value! (make-variable 'Input) signature)
+                                          (set-value! (make-variable 'Input) (DynaTerm. term-name (drop-last signature)))
                                           (simplify-top memo-controller-rexpr))]
-        (when (= (make-multiplicity 1) res)
-          (keyword (ctx-get-value ctx (make-variable 'Result))))))))
+        (if (= (make-multiplicity 1) res)
+          (let [v (ctx-get-value ctx (make-variable 'Result))]
+            (if (= "none" v)
+              :fallthrough
+              (if (= "null" v)
+                [:lookup (vec (drop-last signature))]
+                (if (= "unk" v)
+                  ;; if all of the variables are ground, then it can return :lookup, otherwise
+                  (if (every? #(not= meta-free-dummy-free-value %) (drop-last signature))
+                    [:lookup (vec (drop-last signature))]
+                    :defer)
+                  (throw (DynaUserError. "$memo returned something other than none, null or unk"))
+                  ))))
+          (if (= (make-multiplicity 0) res)
+            :fallthrough
+            (do
+              ;(dyna-warning "$memo defined such that it uses delayed constraints, this is _not_ recommened, as it means the memo can not be used until it is resolved")
+              :defer)
+            ;(throw (DynaUserError. "$memo defined incorrectly"))
+            ))))))
 
 (defn- make-memoization-controller-function [info]
   ;; this will return a function which represents $memo.  If the representation of the function is "sufficently simple"
@@ -182,14 +259,25 @@
              (not (:memoization-has-non-trivial-constraint info)))
         (let [f `(do
                    (ns dyna.memoization-v2)
-                   (fn [^DynaTerm signature#]
-                       (let [~'args (.arguments signature#)]
-                         (when (and ~@(for [[i mode] (zipseq (range) (first (:memoization-argument-modes info)))
-                                            :when (= :ground mode)]
-                                        ;; for the free variables, we are not going to care about those
-                                        `(not= (get ~'args ~i) meta-free-dummy-free-value)
-                                        ))
-                           ~(first (:memoization-modes info))))))
+                   (fn [~'args] ;; the function that is generated could be cached and reused in many cases, as there are unlikely to be lots of different kinds of functions here?
+                     ~(cond
+                        (= :unk (:memoization-mode info))
+                        `(if (and ~@(for [i (range (count (first (:memoization-argument-modes info))))]
+                                      `(not= (get ~'args ~i) meta-free-dummy-free-value)))
+                           [:lookup (drop-last ~'args)]
+                           :defer)
+
+                        (= (:null (:memoization-mode info)))
+                        `(if (and ~@(for [[i mode] (zipseq (range) (first (:memoization-argument-modes info)))
+                                          :when (= :ground mode)]
+                                      `(not= (get ~'args ~i) meta-free-dummy-free-value)))
+                           [:lookup [~@(for [[i mode] (zipseq (range) (first (:memoization-argument-modes info)))
+                                             :when (= :ground mode)]
+                                         `(get ~'args ~i))]]
+                           :defer)
+
+                        (= :none (:memoization-mode info))
+                        `:fallthrough)))
               r (eval f)
               ]
           r)
@@ -234,21 +322,24 @@
                                                                (first (:memoization-modes dat))
                                                                (:memoization-modes dat))
                                                              controller-function
-                                                             (:name (:term-name dat)) ;; the name used for creating the term
+                                                             (constantly 0) ;; TODO: the priority function which controlls whihc of the
+                                        ;(:name (:term-name dat)) ;; the name used for creating the term
                                                              ;; the last argument which is the result is not included, so there needs to be some
                                                              ;; map from the variables which are used and which variables are included in the mapping
                                                              (+ 1 (:arity (:term-name dat) 0)) ;;
                                                              (make-assumption)
-                                                             (atom [{} {}])
+                                                             orig-rexpr
+                                                             (vec (map #(make-variable (str "$" %)) (range (+ 1 (:arity (:term-name dat) 0)))))
+                                                             (atom [nil (PrefixTrie. (+ 1 (:arity (:term-name dat))) 0 nil)])
                                                              )
                                              ret (assoc dat
                                                         :memoization-container memo-container
                                                         :memoization-subscribed-upstream (into #{} (map :name (filter is-memoization-placeholder? dependant-memos)))  ;; things that we are following
                                                         )
                                              ]
+                                         (add-watcher! orig-rexpr-assumpt memo-container)
                                          (vreset! dep-memos dependant-memos)
-                                         (debug-repl "rebuild 1")
-
+                                         ;(debug-repl "rebuild 1")
                                          ret)))]
     (when (:memoization-container old)
       ;; any old container is going to have to get deleted.
@@ -296,7 +387,8 @@
     (when (:null (:memoization-modes new))
       (system/push-agenda-work #(refresh-memo-table (:memoization-container new))))
 
-    (debug-repl "rebuild memo"))
+    ;(debug-repl "rebuild memo")
+    )
 
   )
 
@@ -415,7 +507,7 @@
           (let [ov (get old k)
                 nv (get new k)]
             (when (and (not (identical? ov nv))
-                       (satisfies? Assumption ov))
+                       (instance? Assumption ov))
               (when (nil? ov) (debug-repl))
               (invalidate! ov))))
 

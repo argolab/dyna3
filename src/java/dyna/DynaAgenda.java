@@ -49,5 +49,9 @@ public class DynaAgenda {
         }
     }
 
+    public boolean is_done() {
+        return queue.isEmpty();
+    }
+
     public final boolean print_progress = Boolean.parseBoolean(System.getProperty("dyna.print_agenda_progress", "false"));
 }

@@ -298,8 +298,8 @@
                `(~(symbol (munge (first m))) ~(second m))))
          ~@(for [m methods]
              `(defn ~(first m)
-                ;; this does not seem to generate the type annotation correctly..... so this does not become a direct call properly
                 {:inline (fn [~this-var & args#]
+                           ;; embed a direct call to the interface using as it has the type annotation for the class-name
                            (concat (list '. (with-meta ~this-var ~{:tag class-name})
                                          (quote ~(symbol (munge (first m)))))
                                    args#))}

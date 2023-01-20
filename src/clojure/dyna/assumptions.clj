@@ -1,6 +1,7 @@
 (ns dyna.assumptions
   (:require [dyna.system :as system])
   (:require [dyna.utils :refer :all])
+  ;(:require [dyna.base-protocols :refer :all])
   (:import [java.util WeakHashMap])
   (:import [dyna InvalidAssumption IDynaAgendaWork]))
 
@@ -11,15 +12,53 @@
 (declare depend-on-assumption
          make-assumption)
 
-(defprotocol Watcher
-  (notify-invalidated! [this watching])
-  (notify-message! [this watching message]))
 
-(defprotocol Assumption
-  (invalidate! [this])
-  (is-valid? [this])
-  (add-watcher! [this watcher])
-  (send-message! [this message]))
+(defsimpleinterface Watcher
+  (notify-invalidated! [watching])
+  (notify-message! [watching message]))
+
+(defsimpleinterface Assumption
+  (invalidate! [])
+  (is-valid? [])
+  (add-watcher! [^dyna.assumptions.Watcher watcher])
+  (send-message! [message]))
+
+
+;(debug-repl "loading")
+
+(deftype assumption-no-message-cls
+    [^WeakHashMap watchers
+     ^Assumption upstream]
+  Assumption
+  (invalidate! [this] (invalidate! upstream))
+  (is-valid? [this] (is-valid? upstream))
+  (add-watcher! [this watcher]
+    (assert (instance? Watcher watcher))
+    (locking watchers      (.put watchers watcher nil)
+      (when-not (is-valid? this)
+        (notify-invalidated! watcher this)
+        (when *fast-fail-on-invalid-assumption*
+          (throw (InvalidAssumption. "invalid assumption"))))))
+  (send-message! [this message]
+    (???))
+
+  Watcher
+  (notify-invalidated! [this from-watcher]
+            (locking watchers
+              (doseq [w (.keySet watchers)]
+                (notify-invalidated! w this))))
+  (notify-message! [this from-watcher message]
+    ;; NOP
+    )
+  Object
+  (toString [this] (str "[Assumption-no-message isvalid=" (is-valid? this)
+                        " watchers=" (let [w watchers]
+                                       (if-not (nil? w)
+                                         (locking w) (str (.keySet w))))
+                        " id=" (.hashCode this)
+                        "])"))
+  (hashCode [this] (System/identityHashCode this))
+  (equals [this other] (identical? this other)))
 
 (deftype assumption
   [^WeakHashMap watchers
@@ -62,48 +101,20 @@
   (hashCode [this] (System/identityHashCode this))
   (equals [this other] (identical? this other)))
 
-(defn add-watcher-function! [assumption func]
-  (add-watcher! assumption (reify Watcher
-                             (notify-message! [this assumpt message] (func message))
-                             (notify-invalidated! [this assumpt] (func nil)))))
+(defn assumption-no-messages [^Assumption x]
+  (assert (instance? Assumption x))
+  (if (instance? assumption-no-message-cls x)
+    x
+    (let [r nil;(assumption-no-messages-cls. (WeakHashMap.) x)
+          ]
+      (add-watcher! x r)
+      r)))
 
-;; this can be done via atoms or agents and then there can be a watcher which is
-;; added in the case that the value changes
-#_(comment
-  (defprotocol Modifable-value
-    (set-value! [this value])
-    (set-recompute-function! [this func]))
-
-  (deftype reactive-value
-      [value
-       ^:unsynchronized-mutable recompute-function]
-    clojure.lang.IDeref
-    (deref [this] (let [[assumption v] @value]
-                    (depend-on-assumption assumption)
-                    v))
-
-    Modifable-value
-    (set-value! [this v]
-      (let [[[old-assumpt _] _] (swap-vals! value (fn [old] [(make-assumption)
-                                                             v]))]
-        (invalidate! old-assumpt)))
-    (set-recompute-function! [this function]
-      (set! recompute-function function)
-      (???))
-
-    Watcher
-    (notify-invalidated! [this watching]
-      (let [rcf recompute-function]
-        (if (nil? rcf)
-          ;; then there is no way to recompute
-          (set-value! this nil)
-          (system/push-agenda-work (fn []
-                                     (???)))
-          )))
-    (notify-message! [this watching message]
-      ;; just invalidate and force a clean recompute for now.
-      (notify-invalidated! this watching))))
-
+(defn add-watcher-function! [^Assumption ass func]  ;; if the variable name matches the class name, bad stuff happens...OMFG what in the world
+  (let [f (reify Watcher
+            (notify-message! [this assumpt message] (func message))
+            (notify-invalidated! [this assumpt] (func nil)))]
+    (add-watcher! ass ^Watcher f)))
 
 (defmethod print-method assumption [^assumption this ^java.io.Writer w]
   (.write w (.toString this)))
@@ -128,13 +139,14 @@
 ;;                             initial-value])
 ;;                             (fn [] nil))))
 
-(defn depend-on-assumption [assumption & {:keys [hard] :or {hard true}}]
+(defn depend-on-assumption [^Assumption ass ;& {:keys [hard] :or {hard true}}
+                            ]
   ;; in this case, we are stating that the current computation would need to get
   ;; redone if the current assumption becomes invalid
   (when (bound? #'*current-watcher*)
-    (add-watcher! assumption *current-watcher*)
+    (add-watcher! ass *current-watcher*)
     ;; check the assumption after adding it might get invalidated inbetween
-    (when (not (is-valid? assumption))
+    (when (not (is-valid? ass))
       ;; there should be some exception to restart the computation or something
       ;; it would allow for the runtime to check which of the expressions
       (throw (InvalidAssumption. "attempting to use invalid assumption")))))

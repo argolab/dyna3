@@ -799,7 +799,8 @@
                                 rexpr (make-proj-many (vals variable-name-mapping)
                                                       (convert-from-ast expression (make-constant true) variable-name-mapping source-file))
                                 run-agenda-zzz (system/maybe-run-agenda)
-                                result (simplify-top rexpr)]
+                                result (system/converge-agenda
+                                        (simplify-top rexpr))]
                             (when-not (= wants-to-succeed (= result (make-multiplicity 1)))
                               (if dyna.utils/debug-on-assert-fail
                                 (debug-repl (str "user program assert failed: " text-rep))) ;; when in debug mode, stop here when an assert fails
@@ -849,7 +850,8 @@
                                all-variables (find-term-variables expression) ;; if there is an nested aggregator, those are not found, just the exposed variables
                                variable-map (into {} (map (fn [x] [x (make-variable x)]) all-variables))
                                rexpr (convert-from-ast expression result-var variable-map source-file)]
-                           (simplify-rexpr-query [text-rep line-number] rexpr)
+                           (system/converge-agenda
+                            (simplify-rexpr-query [text-rep line-number] rexpr))
                            (make-unify out-variable (make-constant true)))
 
             ["$external_value" 1] (let [[value-index] (.arguments ast)]

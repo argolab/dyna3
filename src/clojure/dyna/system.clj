@@ -123,3 +123,14 @@
 (defn maybe-run-agenda []
   (when *auto-run-agenda-before-query*
     (run-agenda)))
+
+(defmacro converge-agenda [& body]
+  ;; rerun the query in the case that there is work on the agenda
+  ;; this can invoke the expression multiple times until it is fully done
+  `(let [f# (fn [] ~@body)]
+     (loop []
+       (run-agenda)
+       (let [r# (f#)]
+         (if (.is_done ^DynaAgenda work-agenda)
+           r#
+           (recur))))))
