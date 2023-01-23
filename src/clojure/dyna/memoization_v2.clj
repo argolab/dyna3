@@ -1,7 +1,7 @@
 (ns dyna.memoization-v2
   (:require [dyna.utils :refer :all])
   (:require [dyna.rexpr :refer :all])
-  (:require [dyna.rexpr-constructors :refer [is-meta-is-free? is-meta-is-ground? make-disjunct-op]])
+  (:require [dyna.rexpr-constructors :refer [is-meta-is-free? is-meta-is-ground? make-disjunct-op is-aggregator-op-outer? make-aggregator-op-outer]])
   (:require [dyna.system :as system])
   (:require [dyna.base-protocols :refer :all])
   (:require [dyna.user-defined-terms :refer [update-user-term! user-rexpr-combined-no-memo get-user-term]])
@@ -149,8 +149,13 @@
                                          (priority [this] prio)))))
           (let [retr (make-disjunct-op local-variable-names mvals)
                 vmap (into {} (map vec (zipseq local-variable-names variables)))
+                ;; TODO: this remap-variables is likely slow as this is going to
+                ;; be a big trie with lots of branches.  This should have that
+                ;; it somehow handles the fact that the variable names will be
+                ;; different?
+                ;; XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXxx
                 retr-mapped (remap-variables retr vmap)]
-            (debug-repl "rewrite access")
+            ;(debug-repl "rewrite access")
             retr-mapped
             ;(???)
             )))))
@@ -236,11 +241,11 @@
             (if (= "none" v)
               :fallthrough
               (if (= "null" v)
-                [:lookup (vec (drop-last signature))]
+                [:lookup (conj (vec (drop-last signature)) nil)]
                 (if (= "unk" v)
                   ;; if all of the variables are ground, then it can return :lookup, otherwise
                   (if (every? #(not= meta-free-dummy-free-value %) (drop-last signature))
-                    [:lookup (vec (drop-last signature))]
+                    [:lookup (conj (vec (drop-last signature)) nil)]
                     :defer)
                   (throw (DynaUserError. "$memo returned something other than none, null or unk"))
                   ))))
@@ -264,7 +269,7 @@
                         (= :unk (:memoization-mode info))
                         `(if (and ~@(for [i (range (count (first (:memoization-argument-modes info))))]
                                       `(not= (get ~'args ~i) meta-free-dummy-free-value)))
-                           [:lookup (drop-last ~'args)]
+                           [:lookup (conj (vec (drop-last ~'args)) nil)]
                            :defer)
 
                         (= (:null (:memoization-mode info)))
@@ -273,7 +278,8 @@
                                       `(not= (get ~'args ~i) meta-free-dummy-free-value)))
                            [:lookup [~@(for [[i mode] (zipseq (range) (first (:memoization-argument-modes info)))
                                              :when (= :ground mode)]
-                                         `(get ~'args ~i))]]
+                                         `(get ~'args ~i))
+                                     nil]]
                            :defer)
 
                         (= :none (:memoization-mode info))
@@ -302,6 +308,18 @@
 
     ))
 
+(defn- convert-user-term-to-have-memos [rexpr mapf]
+  (if (is-aggregator-op-outer? rexpr)
+    (if (= "only_one_contrib" (:name (:operator rexpr)))
+      (make-aggregator-op-outer (:operator rexpr)
+                                (:result rexpr)
+                                (rewrite-rexpr-children (:bodies rexpr)
+                                                        #(convert-user-term-to-have-memos % mapf)))
+      (make-aggregator-op-outer (:operator rexpr)
+                                (:result rexpr)
+                                (mapf (:bodies rexpr))))
+    (mapf rexpr)))
+
 (defn- rebuild-memo-table-for-term [term-name]
   ;; this will create a new memo container for the term.  The container will
   ;; just be the thing which holds the memos and the references to the R-expr
@@ -317,6 +335,7 @@
                                              rexpr-children (get-all-children orig-rexpr)
                                              dependant-memos (vec (filter #(or (is-memoization-placeholder? %) (is-memoized-access? %)) rexpr-children))  ;; this should also identify memoization access expressions
                                              controller-function (make-memoization-controller-function dat)
+                                             zzzz (debug-repl "or")
                                              memo-container (MemoContainerTrieStorage.
                                                              (if (= 1 (count (:memoization-modes dat)))
                                                                (first (:memoization-modes dat))

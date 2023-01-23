@@ -62,8 +62,8 @@ install_python() {
     trap "rm -rf $t" EXIT
     set -x
 
-    unzip -qq $self "dyna_python_module/*" -d $t 2>/dev/null
-    cp $self $t/dyna_python_module/dyna/dyna.jar
+    unzip -qq "$self" "dyna_python_module/*" -d $t 2>/dev/null
+    cp "$self" $t/dyna_python_module/dyna/dyna.jar
     python -m pip install $t/dyna_python_module
 }
 
@@ -217,7 +217,7 @@ if [ -z "$dyna_args" ]; then
 fi
 
 
-exec $DYNA_JVM $jvm_args -Ddyna.runtimejar=$self -jar "$self" $import_args $dyna_args
+exec $DYNA_JVM $jvm_args "-Ddyna.runtimejar=$self" -jar "$self" $import_args $dyna_args
 exit 1  # should not get to this line
 
 # what follows is the dyna implementation compiled into a jar
