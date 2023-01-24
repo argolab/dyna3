@@ -228,6 +228,7 @@
                                                :arity 1
                                                :source-file (:source-file (:term-name info))}
                                               {(make-variable "$0") (make-variable 'Input)
+
                                                (make-variable "$1") (make-variable 'Result)}
                                               0 {})
         term-name (:name (:term-name info))]
@@ -335,6 +336,11 @@
                                              rexpr-children (get-all-children orig-rexpr)
                                              dependant-memos (vec (filter #(or (is-memoization-placeholder? %) (is-memoized-access? %)) rexpr-children))  ;; this should also identify memoization access expressions
                                              controller-function (make-memoization-controller-function dat)
+                                             rexpr-with-memos (convert-user-term-to-have-memos orig-rexpr
+                                                                                               (fn [rr]
+                                                                                                 (let [exposed (exposed-variables rr)]
+                                                                                                   (debug-repl "rr")
+                                                                                                   (???))))
                                              zzzz (debug-repl "or")
                                              memo-container (MemoContainerTrieStorage.
                                                              (if (= 1 (count (:memoization-modes dat)))

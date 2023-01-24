@@ -50,10 +50,6 @@ public final class DynaTerm implements ILookup {
 
     public String toString() {
         StringBuilder b = new StringBuilder();
-        if(include_filename_in_print && from_file != null) {
-            b.append(from_file.toString());
-            b.append("/");
-        }
         if(".".equals(name) && arguments != null && arity() == 2) {
             Object[] arr = list_to_array();
             if(arr != null) {
@@ -77,6 +73,15 @@ public final class DynaTerm implements ILookup {
             //     return b.toString();
             // }
         }
+        if(include_filename_in_print && from_file != null) {
+            b.append(from_file.toString());
+            b.append("/");
+        }
+        final int count = arity();
+        if(name.charAt(0) == '$' && count == 0) {
+            // $nil (and $null) is a term which would cause it to print as $nil[], but we also have it defined as a term which just returns its value
+            return name;
+        }
         // if(",".equals(name) && arguments != null && arity() == 2) {
         //     return get(0) + ", " + get(1);
         // }
@@ -84,18 +89,13 @@ public final class DynaTerm implements ILookup {
         // I suppose that we could make the end of a list represented as something else?  Like use `[]` as the name of the list term or something
         // in which case it would
         b.append(name);
-        if(arguments != null) {
-            int count = arity();
-            if(count > 0) {
-                b.append("["); // going to use the square bracket to print these as that is the syntax for writing this without &x(1,2,3) == x[1,2,3]
-                for(int i = 0; i < count; i++) {
-                    if(i != 0) b.append(", ");
-                    Object o = get(i);
-                    b.append(o == null ? "null" : o.toString());
-                }
-                b.append("]");
-            }
+        b.append("["); // going to use the square bracket to print these as that is the syntax for writing this without &x(1,2,3) == x[1,2,3]
+        for(int i = 0; i < count; i++) {
+            if(i != 0) b.append(", ");
+            Object o = get(i);
+            b.append(o == null ? "null" : o.toString());
         }
+        b.append("]");
         return b.toString();
     }
 

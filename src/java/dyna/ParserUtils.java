@@ -15,7 +15,6 @@ class ParserUtils {
     static private final IFn clojure_gensym;
     static private final IFn clojure_check_aggregator_defined;
 
-
     static {
         clojure_gensym = Clojure.var("clojure.core", "gensym");
         clojure_check_aggregator_defined = Clojure.var("dyna.rexpr-aggregators", "is-aggregator-defined?");
