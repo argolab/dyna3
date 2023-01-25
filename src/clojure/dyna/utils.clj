@@ -295,7 +295,7 @@
         class-name (str (namespace-munge *ns*) "." name)]
     `(do (definterface ~name
            ~@(for [m methods]
-               `(~(symbol (munge (first m))) ~(second m))))
+               `(~(with-meta (symbol (munge (first m))) (meta (first m))) ~(second m))))
          ~@(for [m methods]
              `(defn ~(first m)
                 {:inline (fn [~this-var & args#]

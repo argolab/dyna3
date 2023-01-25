@@ -224,7 +224,15 @@
 (defn user-rexpr-combined [term-rep]
   (if (:builtin-def term-rep)
     (:rexpr term-rep)
-    (case (:memoization-mode term-rep)
+    (if (:memoized-rexpr term-rep)
+      (do
+        (depend-on-assumption (:memoized-rexpr-assumption term-rep))
+        (:memoized-rexpr term-rep))
+      (do
+        (depend-on-assumption (:is-not-memoized-null term-rep))
+        (user-rexpr-combined-no-memo term-rep)))
+
+    #_(case (:memoization-mode term-rep)
       :none (do
               (depend-on-assumption (:is-not-memoized-null term-rep)) ;; memization of unk is fine, but null requires that we redo all of the computation
               (user-rexpr-combined-no-memo term-rep))

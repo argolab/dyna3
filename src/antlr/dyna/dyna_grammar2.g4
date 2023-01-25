@@ -89,9 +89,7 @@ atom returns[String t]
     ;
 
 
-// for the fact that you aren't allowed to set to the $variable things
 readAtom returns[String t]
-//    : n=DollaredAtom { $t = $n.getText();  }
     : a=atom { $t = $a.t; }
     ;
 

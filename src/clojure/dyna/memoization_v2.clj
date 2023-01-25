@@ -1,7 +1,9 @@
 (ns dyna.memoization-v2
   (:require [dyna.utils :refer :all])
   (:require [dyna.rexpr :refer :all])
-  (:require [dyna.rexpr-constructors :refer [is-meta-is-free? is-meta-is-ground? make-disjunct-op is-aggregator-op-outer? make-aggregator-op-outer]])
+  (:require [dyna.rexpr-constructors :refer [is-meta-is-free? is-meta-is-ground? make-disjunct-op
+                                             is-aggregator-op-outer? is-aggregator-op-inner?
+                                             make-aggregator-op-outer make-aggregator-op-inner]])
   (:require [dyna.system :as system])
   (:require [dyna.base-protocols :refer :all])
   (:require [dyna.user-defined-terms :refer [update-user-term! user-rexpr-combined-no-memo get-user-term]])
@@ -15,21 +17,32 @@
   (:import [dyna.assumptions Watcher Assumption])
   (:import [dyna.prefix_trie PrefixTrie]))
 
-(defsimpleinterface IMemoContainer
-  (refresh-memo-table [])
-  (compute-value-for-key [key])
-  (get-value-for-key [key])
-  (refresh-value-for-key [term])
+;; (defsimpleinterface IMemoContainer
+;;   (refresh-memo-table [])
+;;   (compute-value-for-key [key])
+;;   (get-value-for-key [key])
+;;   (refresh-value-for-key [term])
 
-  ;; calls which are made by the R-expr when it is trying to access the expression
+;;   ;; calls which are made by the R-expr when it is trying to access the expression
+;;   (memo-rewrite-access [variables variable-values])
+;;   (memo-get-iterator [variables variable-values])
+;;   (memo-get-assumption []))
+
+
+(defsimpleinterface IMemoContainer
+  ;; this interface represent the "public" methods for each of the memo
+  ;; containers to access the underlying memo containers
+  (memo-get-assumption [])
   (memo-rewrite-access [variables variable-values])
   (memo-get-iterator [variables variable-values])
-  (memo-get-assumption []))
+  )
 
 (deftype AgendaReprocessWork [^IMemoContainer memo-container term ^double priority]
   IDynaAgendaWork
   (run [this]
-    (refresh-value-for-key memo-container term))
+    (???)
+    ;(refresh-value-for-key memo-container term)
+    )
   (priority [this]
     priority)
   Object
@@ -82,12 +95,13 @@
   (notify-message! [this watching message] (???))
 
   IMemoContainer
-  (refresh-memo-table [this])
-  (compute-value-for-key [this key])
-  (get-value-for-key [this key])
-  (refresh-value-for-key [this key])
-  (memo-get-assumption [this]
-    (???)))
+  ;; (refresh-memo-table [this])
+  ;; (compute-value-for-key [this key])
+  ;; (get-value-for-key [this key])
+  ;; (refresh-value-for-key [this key])
+  ;; (memo-get-assumption [this]
+  ;;   (???))
+  )
 
 (defn- is-key-contained? [keys-contained-map check-for]
   (if (empty? check-for)
@@ -100,7 +114,36 @@
             (and (not (nil? k)) ;; do not check for nil twice if that is already the value of K
                  (is-key-contained? (get keys-contained-map nil) r)))))))
 
-(deftype MemoContainerTrieStorage [memo-modes ;; either a keyword (:unk or :null) or a set of keywords
+(deftype MemoContainerTrieStorageAggregatorContributions [memo-controller
+                                                          memo-priority-function
+                                                          aggregator-op
+                                                          orig-rexpr
+                                                          argument-variables
+                                                          result-variable
+                                                          ^Assumption assumption
+                                                          data ;; (atom [valid has-computed memoized-values])
+                                                          ]
+  Watcher
+  (notify-invalidated! [this watching] (swap! data (fn [[a b c]] [false b c])))
+  (notify-message! [this watching message]
+    (debug-repl "notify message")
+    ;; TODO: this is going to have to identify which keys need to get recomputed
+    ;; and then do the recomputation.  In the case that some of the values will have that it might
+    (???)
+    )
+
+  IMemoContainer
+  (memo-get-assumption [this] assumption)
+  (memo-rewrite-access [this variables variable-values]
+    (debug-repl "memo rewrite access")
+    ;; returning nil will indicate that this can not yet do the rewrite
+    (???)
+    nil)
+  (memo-get-iterator [this variables variable-values]
+    (debug-repl "memo get iterator")
+    (???)))
+
+#_(deftype MemoContainerTrieStorage [memo-modes ;; either a keyword (:unk or :null) or a set of keywords
                                    memo-controller ;; a function which will identify when the memo is supported
                                    memo-priority-function
                                         ;memo-controller-term-name  ;; the DynaTerm name that is used when calling memo controller
@@ -314,18 +357,60 @@
     (if (= "only_one_contrib" (:name (:operator rexpr)))
       (make-aggregator-op-outer (:operator rexpr)
                                 (:result rexpr)
-                                (rewrite-rexpr-children (:bodies rexpr)
-                                                        #(convert-user-term-to-have-memos % mapf)))
+                                (rewrite-rexpr-children (:bodies rexpr) ;; this is a disjunct
+                                                        (fn [rr]
+                                                          (assert (and (is-aggregator-op-inner? rr)
+                                                                       (empty? (:projected rr))))
+                                                          (make-aggregator-op-inner (:incoming rr)
+                                                                                    (:projected rr)
+                                                                                    (convert-user-term-to-have-memos (:body rr) mapf)))))
       (make-aggregator-op-outer (:operator rexpr)
                                 (:result rexpr)
-                                (mapf (:bodies rexpr))))
-    (mapf rexpr)))
+                                (mapf (:bodies rexpr) (:operator rexpr))))
+    (mapf rexpr nil)))
 
 (defn- rebuild-memo-table-for-term [term-name]
   ;; this will create a new memo container for the term.  The container will
   ;; just be the thing which holds the memos and the references to the R-expr
   ;; which represents the computation for the term.  In the case that the R-expr changes, then we should probably just
   (let [dep-memos (volatile! nil)
+        new-containers (volatile! nil)
+        variable-list (vec (map #(make-variable (str "$" %)) (range (+ 1 (:arity term-name)))))  ;; the variables which need to be synced across the memoization expressions (could be in any order, but it needs to be the same in all places)
+
+        ;; first we will put in some placeholder in for this expression, such that in the case that we reference ourselves, it will not have an issue.
+        [old1 new1] (update-user-term! term-name
+                                       (fn [dat]
+                                         (assoc dat
+                                                :memoized-rexpr-assumption (make-assumption)
+                                                :memoized-rexpr (make-memoization-placeholder term-name variable-list))))
+        ;; second we will generate the Real memo tables (there might be multiple tables which are combined together depending on the structure of the R-expr
+        [old2 new2] (update-user-term! term-name
+                                       (fn [dat]
+                                         (let [[orig-rexpr-assumpt orig-rexpr] (binding [*expand-memoization-placeholder* false
+                                                                                         *lookup-memoized-values* false]
+                                                                                 (compute-with-assumption
+                                                                                  (simplify-top (user-rexpr-combined-no-memo dat))))
+                                               controller-function (make-memoization-controller-function dat)
+                                               priority-function (constantly 0) ;; TODO: have the priority function
+                                               rexpr-with-memos (convert-user-term-to-have-memos orig-rexpr
+                                                                                               (fn [rr agg-op]
+                                                                                                 (let [exposed (exposed-variables rr)
+                                                                                                       container (MemoContainerTrieStorageAggregatorContributions.
+                                                                                                                  controller-function
+                                                                                                                  priority-function
+                                                                                                                  agg-op
+                                                                                                                  rr
+                                                                                                                  (drop-last variable-list) ;; the argument variables
+                                                                                                                  (last variable-list) ;; result of aggregation goes here....though this might not be used by the aggregator
+                                                                                                                  (make-assumption)
+                                                                                                                  (atom [true {} {}]))]
+                                                                                                   (vswap! new-containers cons container)
+                                                                                                   ;; the variable list might not want to contain the resulting variable...
+                                                                                                   (make-memoized-access container variable-list))))
+
+                                               ])
+                                         ))
+
         [old new] (update-user-term! term-name
                                      (fn [dat]
                                        (let [[orig-rexpr-assumpt orig-rexpr] (binding [*expand-memoization-placeholder* false
@@ -336,27 +421,36 @@
                                              rexpr-children (get-all-children orig-rexpr)
                                              dependant-memos (vec (filter #(or (is-memoization-placeholder? %) (is-memoized-access? %)) rexpr-children))  ;; this should also identify memoization access expressions
                                              controller-function (make-memoization-controller-function dat)
+                                             priority-function (constantly 0) ;; TODO: have the priority function
                                              rexpr-with-memos (convert-user-term-to-have-memos orig-rexpr
-                                                                                               (fn [rr]
-                                                                                                 (let [exposed (exposed-variables rr)]
+                                                                                               (fn [rr agg-op]
+                                                                                                 (let [exposed (exposed-variables rr)
+                                                                                                       container (MemoContainerTrieStorageAggregatorContributions.
+                                                                                                                  controller-function
+                                                                                                                  priority-function
+                                                                                                                  agg-op
+                                                                                                                  rr
+                                                                                                                  (make-assumption)
+                                                                                                                  (atom [true {} {}]))]
+                                                                                                   (make-memoized-access container )
                                                                                                    (debug-repl "rr")
                                                                                                    (???))))
                                              zzzz (debug-repl "or")
-                                             memo-container (MemoContainerTrieStorage.
-                                                             (if (= 1 (count (:memoization-modes dat)))
-                                                               (first (:memoization-modes dat))
-                                                               (:memoization-modes dat))
-                                                             controller-function
-                                                             (constantly 0) ;; TODO: the priority function which controlls whihc of the
+                                             memo-container (???) #_(MemoContainerTrieStorage.
+                                                               (if (= 1 (count (:memoization-modes dat)))
+                                                                 (first (:memoization-modes dat))
+                                                                 (:memoization-modes dat))
+                                                               controller-function
+                                                               (constantly 0) ;; TODO: the priority function which controlls whihc of the
                                         ;(:name (:term-name dat)) ;; the name used for creating the term
-                                                             ;; the last argument which is the result is not included, so there needs to be some
-                                                             ;; map from the variables which are used and which variables are included in the mapping
-                                                             (+ 1 (:arity (:term-name dat) 0)) ;;
-                                                             (make-assumption)
-                                                             orig-rexpr
-                                                             (vec (map #(make-variable (str "$" %)) (range (+ 1 (:arity (:term-name dat) 0)))))
-                                                             (atom [nil (PrefixTrie. (+ 1 (:arity (:term-name dat))) 0 nil)])
-                                                             )
+                                                               ;; the last argument which is the result is not included, so there needs to be some
+                                                               ;; map from the variables which are used and which variables are included in the mapping
+                                                               (+ 1 (:arity (:term-name dat) 0)) ;;
+                                                               (make-assumption)
+                                                               orig-rexpr
+                                                               (vec (map #(make-variable (str "$" %)) (range (+ 1 (:arity (:term-name dat) 0)))))
+                                                               (atom [nil (PrefixTrie. (+ 1 (:arity (:term-name dat))) 0 nil)])
+                                                               )
                                              ret (assoc dat
                                                         :memoization-container memo-container
                                                         :memoization-subscribed-upstream (into #{} (map :name (filter is-memoization-placeholder? dependant-memos)))  ;; things that we are following
