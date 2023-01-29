@@ -85,7 +85,9 @@
   (let [[old new](swap-vals! system/user-defined-terms
                              (fn [old]
                                (let [v (get old name nil)]
-                                 (assoc old name (function (if-not (nil? v) v (empty-user-defined-term name)))))))]
+                                 (assoc old name (let [r (function (if-not (nil? v) v (empty-user-defined-term name)))]
+                                                   (assert (not (nil? r)))
+                                                   r)))))]
     [(get old name) (get new name)]))
 
 (defn add-to-user-term [source-file dynabase name arity rexpr]

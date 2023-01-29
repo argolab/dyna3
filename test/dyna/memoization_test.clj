@@ -79,7 +79,7 @@ assert fact(2) = 2.
 
 (str-test memoization-v2 "
 fact(0) := 1.
-fact(N) = fact(N-1)*N.
+fact(N) := fact(N-1)*N.
 
 $memo(fact[N:$ground]) = \"unk\".
 

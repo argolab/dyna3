@@ -12,7 +12,7 @@
   (:require [dyna.user-defined-terms :refer [add-to-user-term user-rexpr-combined-no-memo]])
   (:require [dyna.rexpr-builtins :refer [meta-free-dummy-free-value]])
   (:require [dyna.prefix-trie :refer :all])
-  (:require [clojure.set :refer [union]])
+  (:require [clojure.set :refer [union difference]])
   (:import [dyna DynaUserError IDynaAgendaWork DynaTerm])
   (:import [dyna.assumptions Watcher Assumption])
   (:import [dyna.prefix_trie PrefixTrie]))
@@ -119,12 +119,14 @@
                                                           aggregator-op
                                                           orig-rexpr
                                                           argument-variables
-                                                          result-variable
+                                                          ;result-variable
                                                           ^Assumption assumption
                                                           data ;; (atom [valid has-computed memoized-values])
                                                           ]
   Watcher
-  (notify-invalidated! [this watching] (swap! data (fn [[a b c]] [false b c])))
+  (notify-invalidated! [this watching]
+    (swap! data (fn [[a b c]] [false b c]))
+    (invalidate! assumption))
   (notify-message! [this watching message]
     (debug-repl "notify message")
     ;; TODO: this is going to have to identify which keys need to get recomputed
@@ -224,7 +226,11 @@
 (def-rewrite
   :match {:rexpr (memoization-placeholder (:unchecked name) (:unchecked args-map))
           :check *expand-memoization-placeholder*}
-  (let [term (get-user-term name)
+  (let [term (get-user-term name)]
+    (depend-on-assumption (:memoized-rexpr-assumption term))
+    (remap-variables (:memoized-rexpr term) args-map))
+
+  #_(let [term (get-user-term name)
         container (:memoization-container term)]
     ;;(make-memoized-rexpr-v2 nil args-map)
     ;(debug-repl "memoization placeholder r-expr rewrite")
@@ -361,13 +367,25 @@
                                                         (fn [rr]
                                                           (assert (and (is-aggregator-op-inner? rr)
                                                                        (empty? (:projected rr))))
-                                                          (make-aggregator-op-inner (:incoming rr)
-                                                                                    (:projected rr)
-                                                                                    (convert-user-term-to-have-memos (:body rr) mapf)))))
+                                                          (let [zz (make-aggregator-op-inner (:incoming rr)
+                                                                                             (:projected rr)
+                                                                                             (convert-user-term-to-have-memos (:body rr) mapf))]
+                                                            (when-not (= (exposed-variables rr) (exposed-variables zz))
+                                                              (debug-repl "expose fail"))
+                                                            zz))))
       (make-aggregator-op-outer (:operator rexpr)
                                 (:result rexpr)
-                                (mapf (:bodies rexpr) (:operator rexpr))))
-    (mapf rexpr nil)))
+                                (mapf (:bodies rexpr) (:operator rexpr) (:result rexpr))))
+    (mapf rexpr nil nil)))
+
+(defn- get-tables-from-rexpr [r]
+  (cond
+    (is-memoized-access? r) [(:memoization-container r)]
+    (is-memoization-placeholder? r)
+    (let [t (get-user-term (:name r))]
+      (???))
+
+    nil))
 
 (defn- rebuild-memo-table-for-term [term-name]
   ;; this will create a new memo container for the term.  The container will
@@ -393,25 +411,35 @@
                                                controller-function (make-memoization-controller-function dat)
                                                priority-function (constantly 0) ;; TODO: have the priority function
                                                rexpr-with-memos (convert-user-term-to-have-memos orig-rexpr
-                                                                                               (fn [rr agg-op]
-                                                                                                 (let [exposed (exposed-variables rr)
-                                                                                                       container (MemoContainerTrieStorageAggregatorContributions.
-                                                                                                                  controller-function
-                                                                                                                  priority-function
-                                                                                                                  agg-op
-                                                                                                                  rr
-                                                                                                                  (drop-last variable-list) ;; the argument variables
-                                                                                                                  (last variable-list) ;; result of aggregation goes here....though this might not be used by the aggregator
-                                                                                                                  (make-assumption)
-                                                                                                                  (atom [true {} {}]))]
-                                                                                                   (vswap! new-containers cons container)
-                                                                                                   ;; the variable list might not want to contain the resulting variable...
-                                                                                                   (make-memoized-access container variable-list))))
+                                                                                                 (fn [rr agg-op agg-result]
 
-                                               ])
-                                         ))
+                                                                                                   (let [exposed (exposed-variables rr)
+                                                                                                         container (if (contains? exposed (last variable-list))
+                                                                                                                     (do
+                                                                                                                       ;; this needs to just creat a normal memo table?
+                                                                                                                       ;; or something which isn't optimized for aggregators
+                                                                                                                       (???))
+                                                                                                                     (MemoContainerTrieStorageAggregatorContributions.
+                                                                                                                      controller-function
+                                                                                                                      priority-function
+                                                                                                                      agg-op
+                                                                                                                      rr
+                                                                                                                      (drop-last variable-list) ;; the argument variables
+                                        ;agg-result  ;; this is the local variable which is used
+                                                                                                                      #_(last variable-list) ;; result of aggregation goes here....though this might not be used by the aggregator
+                                                                                                                      (make-assumption)
+                                                                                                                      (atom [true {} {}])))]
+                                                                                                     (debug-repl "tt")
+                                                                                                     (vswap! new-containers conj container)
+                                                                                                     ;; the variable list might not want to contain the resulting variable...
+                                                                                                     (make-memoized-access container (vec (drop-last variable-list))))))
 
-        [old new] (update-user-term! term-name
+                                               ]
+                                           (assoc dat
+                                                  :memoized-rexpr rexpr-with-memos))))
+
+        ;[old new]
+        #_(update-user-term! term-name
                                      (fn [dat]
                                        (let [[orig-rexpr-assumpt orig-rexpr] (binding [*expand-memoization-placeholder* false
                                                                                        *lookup-memoized-values* false]
@@ -460,10 +488,42 @@
                                          (vreset! dep-memos dependant-memos)
                                          ;(debug-repl "rebuild 1")
                                          ret)))]
-    (when (:memoization-container old)
+
+    (let [old-tables (ensure-set (when (:memoized-rexpr old1)
+                                   (filter #(or (is-memoized-access? %) (is-memoization-placeholder? %))
+                                           (get-all-children (:memoized-rexpr old1)))))
+          new-tables (ensure-set (when (:memoized-rexpr new2)
+                                   (filter #(or (is-memoized-access? %) (is-memoization-placeholder? %))
+                                           (get-all-children (:memoized-rexpr new2)))))]
+      (when (:memoized-rexpr-assumption old1)
+        (invalidate! (:memoized-rexpr-assumption old1)))
+
+
+
+      ;; this needs make the new tables be subscribed to anything that they need
+      (doseq [t (difference new-tables old-tables)]
+        (debug-repl "handle new tables")
+        )
+
+
+      ;; then this needs to mark the old tables as invalidated.  This should kick off other work to get done
+
+      (doseq [t (difference old-tables new-tables)]
+        ;; these tables are no longer used, so they should be invalidated
+        (notify-invalidated! t nil)
+        )
+
+      ;; this needs to have the new tables get setup which means that work is going to be pushed to the agenda
+
+
+      (???))
+
+    #_(when (:memoization-container old)
       ;; any old container is going to have to get deleted.
       (invalidate! (memo-get-assumption (:memoization-container old))))
-    (let [container (:memoization-container new)
+
+
+    #_(let [container (:memoization-container new)
           old-subscribed (:memoization-subscribed-upstream old)
           new-subscribed (:memoization-subscribed-upstream new)]
       (doseq [n new-subscribed]
@@ -503,7 +563,7 @@
       )
     ;; if there is something else that is downstream which needs to get subscribed to this item, then we are going to have to handle that as well
 
-    (when (:null (:memoization-modes new))
+    #_(when (:null (:memoization-modes new))
       (system/push-agenda-work #(refresh-memo-table (:memoization-container new))))
 
     ;(debug-repl "rebuild memo")
