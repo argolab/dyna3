@@ -381,7 +381,7 @@
                                                       (subset? (exposed-variables x) var-set))
                                                true
                                                (do
-                                                 (debug-repl "gg1")
+                                                 (debug-repl "disjunct gg1")
                                                  false)))
                       (trie-get-values rexprs nil))
       (let [rx (into [] (map second (trie-get-values rexprs nil)))]
