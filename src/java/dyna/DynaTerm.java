@@ -61,17 +61,6 @@ public final class DynaTerm implements ILookup {
                 b.append("]");
                 return b.toString();
             }
-            // Object list_as_vec = list_to_vec();
-            // if(list_as_vec != null) {
-            //     b.append("[");
-            //     int cnt = ((java.lang.Number)clojure_count.invoke(list_as_vec)).intValue();
-            //     for(int i = 0; i < cnt; i++) {
-            //         if(i != 0) b.append(", ");
-            //         b.append(clojure_nth.invoke(list_as_vec, i).toString());
-            //     }
-            //     b.append("]");
-            //     return b.toString();
-            // }
         }
         if(include_filename_in_print && from_file != null) {
             b.append(from_file.toString());
@@ -82,9 +71,6 @@ public final class DynaTerm implements ILookup {
             // $nil (and $null) is a term which would cause it to print as $nil[], but we also have it defined as a term which just returns its value
             return name;
         }
-        // if(",".equals(name) && arguments != null && arity() == 2) {
-        //     return get(0) + ", " + get(1);
-        // }
         // there is no way to tell the difference between $nil and [] as those are the same expression.
         // I suppose that we could make the end of a list represented as something else?  Like use `[]` as the name of the list term or something
         // in which case it would

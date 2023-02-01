@@ -12,6 +12,7 @@
   (:require [dyna.user-defined-terms :refer [add-to-user-term user-rexpr-combined-no-memo]])
   (:require [dyna.rexpr-builtins :refer [meta-free-dummy-free-value]])
   (:require [dyna.prefix-trie :refer :all])
+  (:require [dyna.rexpr-aggregators-optimized :refer [*aggregator-op-contribute-value*]])
   (:require [clojure.set :refer [union difference]])
   (:import [dyna DynaUserError IDynaAgendaWork DynaTerm InvalidAssumption])
   (:import [dyna.assumptions Watcher Assumption])
@@ -32,7 +33,11 @@
   (memo-rewrite-access [variables variable-values])
   (memo-get-iterator [variables variable-values])
 
-  (memo-setup-new-table []))
+  ;; setup assumptions about what this depends on
+  (memo-setup-new-table [])
+
+  ;;
+  (memo-refresh-value-for-key [key]))
 
 ;; the placeholder will lookup the memoization container associated with a given
 ;; name.  This is an extra step of indirection which we can "defer."  This will
@@ -51,9 +56,7 @@
 (deftype AgendaReprocessWork [^IMemoContainer memo-container term ^double priority]
   IDynaAgendaWork
   (run [this]
-    (???)
-    ;(refresh-value-for-key memo-container term)
-    )
+    (memo-refresh-value-for-key memo-container term))
   (priority [this]
     priority)
   Object
@@ -105,7 +108,7 @@
                                                           argument-variables
                                                           ;result-variable
                                                           ^Assumption assumption
-                                                          data ;; (atom [valid has-computed memoized-values])
+                                                          data ;; (atom [valid has-computed (PrefixTrie memoized-values)])
                                                           ]
   Watcher
   (notify-invalidated! [this watching]
@@ -121,7 +124,8 @@
   IMemoContainer
   (memo-get-assumption [this] assumption)
   (memo-rewrite-access [this variables variable-values]
-    (let [control-setting (memo-controller variable-values)]
+    (let [control-arg (conj (vec (map #(if (nil? %) meta-free-dummy-free-value %) variable-values)) nil)
+          control-setting (memo-controller control-arg)]
       (cond (= control-setting :fallthrough)
             (let [vm (zipmap argument-variables variables)]
               (remap-variables orig-rexpr vm))
@@ -136,19 +140,35 @@
               (let [lookup-key (drop-last (second control-setting))
                     has-key (is-key-contained? has-computed lookup-key)]
                 (when-not has-key
-                  (let [prio (memo-priority-function variable-values)] ;; the priority of this compute operation
-
-                    (debug-repl "need to compute for key")))
+                  (let [prio (memo-priority-function variable-values)  ;; the priority of this compute operation.  though this is different
+                        [old-dat new-dat] (swap-vals! data (fn [[a b c]]
+                                                        (if-not a
+                                                          [a b c]
+                                                          [a (assoc-in b lookup-key true) c] ;; record that this value is going to get computed
+                                                          )))
+                        ]
+                    (when (or (identical? (second old-dat) has-computed) (not (is-key-contained? (second old-dat) lookup-key)))
+                      (system/push-agenda-work (AgendaReprocessWork. this lookup-key prio)))
+                    ;(debug-repl "need to compute for key")
+                    ))
 
                 ;; this should return the result for this expression
-                (???)
+                (when has-key
+                  ;; TODO: this needs to return the right values for this.  In which case, it will need to be represented as a memo table
+                  (???))
+                (let [
+                      ;rr (make-disjunct-op argument-variables memoized-values)
+                      ]
+
+                  )
                 (make-multiplicity 0)
                 ))
 
             :else (???) ;; this should not happen, means that it returned something that was unexpected
             )))
   (memo-get-iterator [this variables variable-values]
-    (let [control-setting (memo-controller variable-values)]
+    (let [control-arg (conj (vec (map #(if (nil? %) meta-free-dummy-free-value %) variable-values)) nil)
+          control-setting (memo-controller control-arg)]
       (cond (= control-setting :fallthrough) #{} ;; in the fallthrough case this
                                                  ;; should just rewrite as the
                                                  ;; orig-rexpr, so just let that
@@ -166,7 +186,25 @@
     (let [deps (flatten (map get-tables-from-rexpr (filter #(or (is-memoization-placeholder? %) (is-memoized-access? %))
                                                            (get-all-children orig-rexpr))))]
       (doseq [d deps]
-        (add-watcher! (memo-get-assumption d) this)))))
+        (add-watcher! (memo-get-assumption d) this))))
+
+  (memo-refresh-value-for-key [this key]
+    (let [cctx (context/make-empty-context orig-rexpr)]
+      (doseq [[var val] (zipseq argument-variables key)
+              :when (not (nil? val))]
+        (ctx-set-value! cctx var val))
+      (let [rr (binding [*aggregator-op-contribute-value* (fn [value mult]
+                                                            (debug-repl "agg contrib")
+                                                            (make-aggregator-op-inner (make-constant value)
+                                                                                      []
+                                                                                      (make-multiplicity mult)))]
+                 (context/bind-context cctx
+                                       (debug-repl "simp top")
+                                       (simplify-top orig-rexpr)))]
+        (debug-repl "refresh for key")
+        (???)))
+
+    ))
 
 
 
@@ -263,7 +301,7 @@
                         `:fallthrough)))
               r (eval f)
               ]
-          r)
+                    r)
         ;; TODO: this should handle slightly more complex functions in the case
         ;; that all of the constraints are trivial, though if there is
         ;; overrides, the order might be different atm?  I supose that the
@@ -286,24 +324,26 @@
     ))
 
 (defn- convert-user-term-to-have-memos [rexpr mapf]
-  (if (is-aggregator-op-outer? rexpr)
-    (if (= "only_one_contrib" (:name (:operator rexpr)))
-      (make-aggregator-op-outer (:operator rexpr)
-                                (:result rexpr)
-                                (rewrite-rexpr-children (:bodies rexpr) ;; this is a disjunct
-                                                        (fn [rr]
-                                                          (assert (and (is-aggregator-op-inner? rr)
-                                                                       (empty? (:projected rr))))
-                                                          (let [zz (make-aggregator-op-inner (:incoming rr)
-                                                                                             (:projected rr)
-                                                                                             (convert-user-term-to-have-memos (:body rr) mapf))]
-                                                            (when-not (= (exposed-variables rr) (exposed-variables zz))
-                                                              (debug-repl "expose fail"))
-                                                            zz))))
-      (make-aggregator-op-outer (:operator rexpr)
-                                (:result rexpr)
-                                (mapf (:bodies rexpr) (:operator rexpr) (:result rexpr))))
-    (mapf rexpr nil nil)))
+  (debug-binding
+   [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
+   (if (is-aggregator-op-outer? rexpr)
+     (if (= "only_one_contrib" (:name (:operator rexpr)))
+       (make-aggregator-op-outer (:operator rexpr)
+                                 (:result rexpr)
+                                 (rewrite-rexpr-children (:bodies rexpr) ;; this is a disjunct
+                                                         (fn [rr]
+                                                           (assert (and (is-aggregator-op-inner? rr)
+                                                                        (empty? (:projected rr))))
+                                                           (let [zz (make-aggregator-op-inner (:incoming rr)
+                                                                                              (:projected rr)
+                                                                                              (convert-user-term-to-have-memos (:body rr) mapf))]
+                                                             (when-not (= (exposed-variables rr) (exposed-variables zz))
+                                                               (debug-repl "expose fail"))
+                                                             zz))))
+       (make-aggregator-op-outer (:operator rexpr)
+                                 (:result rexpr)
+                                 (mapf (:bodies rexpr) (:operator rexpr) (:result rexpr))))
+     (mapf rexpr nil nil))))
 
 (defn- get-tables-from-rexpr [r]
   (cond
@@ -359,7 +399,8 @@
                                         ;agg-result  ;; this is the local variable which is used
                                                                                                                       #_(last variable-list) ;; result of aggregation goes here....though this might not be used by the aggregator
                                                                                                                       (make-assumption)
-                                                                                                                      (atom [true nil nil])))]
+                                                                                                                      (atom [true nil (PrefixTrie. (- (count variable-list) 1)
+                                                                                                                                                   0 {})])))]
                                                                                                      ;(debug-repl "tt")
                                                                                                      ;(vswap! new-containers conj container)
                                                                                                      ;; the variable list might not want to contain the resulting variable...

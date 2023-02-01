@@ -6,7 +6,7 @@ import clojure.lang.ILookup;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Static method for use by parser
+ * Static method used by parser
  */
 class ParserUtils {
 

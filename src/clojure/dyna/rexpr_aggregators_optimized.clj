@@ -54,7 +54,7 @@
 
 ;; this might be something that the memoization is going to want to override,
 ;; which would allow for it to get the result of aggregation directly
-(def ^{:private true :dynamic true} *aggregator-op-contribute-value*
+(def ^{:dynamic true} *aggregator-op-contribute-value*
   (fn r
     ([value mult]
      ;; return a dummy expression in the case that there is nothing that is able

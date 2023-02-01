@@ -1,5 +1,12 @@
 package dyna;
 
+
+/**
+ * A unification failure means an expresison like `1=2` was in the program.
+ * This is equivalent to a `(multiplicity 0)` event.  However, throwing a
+ * unification failure can be more efficient than waiting for the `(multiplicity
+ * 0)` to processed.
+ */
 public class UnificationFailure extends RuntimeException {
 
     public UnificationFailure(String msg) {

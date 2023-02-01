@@ -55,7 +55,7 @@
 
 ;(def ^:dynamic *current-matched-rexpr* nil)
 (def ^:dynamic *current-top-level-rexpr* nil)
-(def ^:dynamic *current-simplify-stack* [])
+(def ^:dynamic *current-simplify-stack* [])  ;; the last value of this is used for tracking :constructed-from
 (def ^:dynamic *current-simplify-running* nil)
 
 
@@ -1808,3 +1808,19 @@
   [function result args]
   (assert (fn? function))
   (make-simple-function-call function result args))
+
+
+
+(def-base-rexpr delayed-rexpr-renamed [:var-map vmap
+                                       :unchecked deferred-rexpr])
+
+(def-rewrite
+  :match (delayed-rexpr-renamed (:unchecked vmap) (:unchecked deferred-rexpr))
+  (let [nctx (context/make-empty-context deferred-rexpr)]
+    (doseq [[vdef vcur] vmap
+            :let [val (get-value vcur)]]
+      (when-not (nil? val)
+        (ctx-set-value! nctx vdef val)))
+    (let [nr (context/bind-context nctx
+                           (simplify deferred-rexpr))]
+      (remap-variables nr vmap))))
