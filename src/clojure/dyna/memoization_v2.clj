@@ -43,7 +43,7 @@
 ;; name.  This is an extra step of indirection which we can "defer."  This will
 ;; have that the placeholder will be able to get rewritten as needed
 (def-base-rexpr memoization-placeholder [:unchecked name
-                                         :var-list args-map])
+                                         :var-map args-map])
 ;; if this should expand the memoization-placeholder or just leave it as is.
 (def ^{:private true :dynamic true} *expand-memoization-placeholder* true)
 
@@ -199,7 +199,6 @@
                                                                                       []
                                                                                       (make-multiplicity mult)))]
                  (context/bind-context cctx
-                                       (debug-repl "simp top")
                                        (simplify-top orig-rexpr)))]
         (debug-repl "refresh for key")
         (???)))
@@ -371,7 +370,8 @@
                                        (fn [dat]
                                          (assoc dat
                                                 :memoized-rexpr-assumption (make-assumption)
-                                                :memoized-rexpr (make-memoization-placeholder term-name variable-list))))
+                                                :memoized-rexpr (make-memoization-placeholder term-name (zipmap (map #(make-variable (str "$" %)) (range))
+                                                                                                                variable-list)))))
         ;; second we will generate the Real memo tables (there might be multiple tables which are combined together depending on the structure of the R-expr
         [old2 new2] (update-user-term! term-name
                                        (fn [dat]
@@ -400,11 +400,14 @@
                                                                                                                       #_(last variable-list) ;; result of aggregation goes here....though this might not be used by the aggregator
                                                                                                                       (make-assumption)
                                                                                                                       (atom [true nil (PrefixTrie. (- (count variable-list) 1)
-                                                                                                                                                   0 {})])))]
+                                                                                                                                                   0 {})])))
+                                                                                                         nr (make-memoized-access container (vec (drop-last variable-list)))]
                                                                                                      ;(debug-repl "tt")
                                                                                                      ;(vswap! new-containers conj container)
                                                                                                      ;; the variable list might not want to contain the resulting variable...
-                                                                                                     (make-memoized-access container (vec (drop-last variable-list))))))
+                                                                                                     (when-not (= (exposed-variables nr) (exposed-variables rr))
+                                                                                                       (debug-repl "exposed failed"))
+                                                                                                     nr)))
                                                ]
                                            (assoc dat
                                                   :memoized-rexpr rexpr-with-memos))))]
@@ -528,11 +531,11 @@
                                                                                 (:is-memoized-null dat2))
                                                              :memoized-rexpr (if (or (:null modes) (:unk modes))
                                                                                (make-memoization-placeholder call-name
-                                                                                                             (into [] (for [i (range (+ 1 (count args)))]
+                                                                                                             #_(into [] (for [i (range (+ 1 (count args)))]
                                                                                                                         (make-variable (str "$" i))))
-                                                                                                             #_(into {} (for [i (range (+ 1 (count args)))
-                                                                                                                            :let [v (make-variable (str "$" i))]]
-                                                                                                                        [v v])))
+                                                                                                             (into {} (for [i (range (+ 1 (count args)))
+                                                                                                                              :let [v (make-variable (str "$" i))]]
+                                                                                                                          [v v])))
                                                                                ;(make-multiplicity 0)
                                                                                ;; if this is only :none, then there is no memoized R-expr
                                                                                nil))]
