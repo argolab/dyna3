@@ -14,7 +14,7 @@
   (:require [dyna.prefix-trie :refer :all])
   (:require [dyna.rexpr-aggregators-optimized :refer [*aggregator-op-contribute-value*]])
   (:require [clojure.set :refer [union difference]])
-  (:import [dyna DynaUserError IDynaAgendaWork DynaTerm InvalidAssumption])
+  (:import [dyna DynaUserError IDynaAgendaWork DynaTerm InvalidAssumption UnificationFailure])
   (:import [dyna.assumptions Watcher Assumption])
   (:import [dyna.prefix_trie PrefixTrie])
   (:import [clojure.lang IFn]))
@@ -178,9 +178,18 @@
             (= control-setting :defer) #{}
 
             (= (first control-setting) :lookup)
-            (let []
-              (debug-repl "memo get iterator lookup")
-              (???)))))
+            (let [lookup-key (drop-last (second control-setting))
+                  [valid has-computed memoized-values] @data
+                  has-key (is-key-contained? has-computed lookup-key)]
+              (if has-key
+                (do
+                  (debug-repl "memo get iterator lookup")
+                  (???))
+
+                (do
+                  ;; then we have not computed this key yet.
+                  ;; this should enqueue the work for this to perform the computation.
+                  #{}))))))
 
   (memo-setup-new-table [this]
     (let [deps (flatten (map get-tables-from-rexpr (filter #(or (is-memoization-placeholder? %) (is-memoized-access? %))
@@ -189,21 +198,33 @@
         (add-watcher! (memo-get-assumption d) this))))
 
   (memo-refresh-value-for-key [this key]
-    (let [cctx (context/make-empty-context orig-rexpr)]
-      (doseq [[var val] (zipseq argument-variables key)
-              :when (not (nil? val))]
-        (ctx-set-value! cctx var val))
-      (let [rr (binding [*aggregator-op-contribute-value* (fn [value mult]
-                                                            (debug-repl "agg contrib")
-                                                            (make-aggregator-op-inner (make-constant value)
-                                                                                      []
-                                                                                      (make-multiplicity mult)))]
-                 (context/bind-context cctx
-                                       (simplify-top orig-rexpr)))]
-        (debug-repl "refresh for key")
-        (???)))
+    (loop []
+      (let [[valid _ current-memoized-values] @data
+            [compute-assumpt [cctx ret-rexpr]]
+            (compute-with-assumption
+             (let [cctx (context/make-empty-context orig-rexpr)]
+               (doseq [[var val] (zipseq argument-variables key)
+                       :when (not (nil? val))]
+                 (ctx-set-value! cctx var val))
+               (let [rr (binding [*aggregator-op-contribute-value* (fn [value mult]
+                                        ;(debug-repl "agg contrib")
+                                                                     (make-aggregator-op-inner (make-constant value)
+                                                                                               []
+                                                                                               (make-multiplicity mult)))]
+                          (context/bind-context cctx
+                                                (try (simplify-fully orig-rexpr)
+                                                     (catch UnificationFailure e (make-multiplicity 0)))))]
+                 (debug-repl "refresh for key")
+                 [cctx rr]))
+             )]
+        ;; we only care about the current-memoized-values changing.  The other
+        ;; fields of @data could change while we are performing a computation
+        ;;
+        ;; I suppose that we actually only care about the
+        (let [did-update (volatile! false)]
+          (???))
 
-    ))
+        ))))
 
 
 

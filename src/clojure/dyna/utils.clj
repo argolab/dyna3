@@ -124,6 +124,15 @@
        (when (>= @~isym ~ntimes)
          ~@body))))
 
+(def ^{:dynamic true} *debug-block-enabled* false)
+(defmacro debug-block [& block]
+  `(binding [*debug-block-enabled* true]
+     ~@block))
+
+(defmacro debug-in-block [& args]
+  `(when *debug-block-enabled*
+     (debug-repl ~@args)))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

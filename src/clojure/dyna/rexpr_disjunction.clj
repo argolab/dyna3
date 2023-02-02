@@ -194,7 +194,7 @@
               (try (ctx-set-value! child-context dv djv)
                    (catch UnificationFailure e
                      (do (debug-repl "bad") ;; in this case, we should stop processing, but this is not going to have set the value somewhere yet.  This is going to need to figure out what the issue is and skip it
-                       (???)))))))
+                         (???)))))))
         (context/bind-context-raw child-context
                                   (let [new-child-rexpr (try (simplify child)
                                                              (catch UnificationFailure e (make-multiplicity 0)))]
