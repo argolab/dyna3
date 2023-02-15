@@ -255,7 +255,8 @@
 (declare run-trie-iterator-from-node
          run-trie-iterator-from-node-unconsolidated)
 
-(defn- trie-diterator-instance [remains node variable-order]
+;; this function is also used by memoization_v2
+(defn trie-diterator-instance [remains node variable-order]
   (reify DIterator
     (iter-run-cb [this cb-fn]
       (doseq [v (iter-run-iterable this)]

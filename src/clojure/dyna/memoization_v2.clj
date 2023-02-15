@@ -14,8 +14,9 @@
   (:require [dyna.rexpr-builtins :refer [meta-free-dummy-free-value]])
   (:require [dyna.prefix-trie :refer :all])
   (:require [dyna.rexpr-aggregators-optimized :refer [*aggregator-op-contribute-value*]])
+  (:require [dyna.rexpr-disjunction :refer [trie-diterator-instance]])
   (:require [clojure.set :refer [union difference]])
-  (:import [dyna DynaUserError IDynaAgendaWork DynaTerm InvalidAssumption UnificationFailure])
+  (:import [dyna DynaUserError IDynaAgendaWork DynaTerm InvalidAssumption UnificationFailure DIterable])
   (:import [dyna.assumptions Watcher Assumption])
   (:import [dyna.prefix_trie PrefixTrie])
   (:import [clojure.lang IFn]))
@@ -52,8 +53,16 @@
                                  :var-list variable-mapping])
 (def ^{:private true :dynamic true} *lookup-memoized-values* true)
 
+
+(def ^{:private true :dynamic true} *memoization-forward-placeholder-bindings* nil)
 (def-base-rexpr memoization-filled-in-values-placeholder [:var-list variable-mapping])
 
+(def-rewrite
+  :match {:rexpr (memoization-filled-in-values-placeholder (:unchecked var-mapping))
+          :check (not (nil? *memoization-forward-placeholder-bindings*))}
+  ;; this might not be the most efficient way to go about this?  Suppose it should go into the context?
+  (make-conjunct (vec (for [[var val] (zipseq var-mapping *memoization-forward-placeholder-bindings*)]
+                        (make-unify var (make-constant val))))))
 
 
 (deftype AgendaReprocessWork [^IMemoContainer memo-container term ^double priority]
@@ -123,7 +132,7 @@
   (notify-message! [this watching message]
     ;; there can be many things that we depend on.  These will each have their one assumption.  In the case that
     (let [update-handler (or (get @updating-data watching)
-                             (get (swap! updating-data assoc watching (make-update-handler-function this watching))))]
+                             (get (swap! updating-data assoc watching (make-update-handler-function this watching)) watching))]
       (update-handler this watching message)))
 
   IMemoContainer
@@ -187,10 +196,22 @@
                   [valid has-computed memoized-values] @data
                   has-key (is-key-contained? has-computed lookup-key)]
               (if has-key
-                (do
-                  (debug-repl "memo get iterator lookup")
-                  (???))
 
+                (let [contains-wildcard (.contains-wildcard ^PrefixTrie memoized-values)]
+                  (when (not= contains-wildcard (- (bit-shift-left 1 (count variables)) 1)) ;; when there is something which is not wildcard
+                    #{(reify DIterable
+                        (iter-what-variables-bound [this]
+                          (into #{} (for [[idx var] (zipseq (range) variables)
+                                          :when (and (= 0 (bit-and contains-wildcard (bit-shift-left 1 idx)))
+                                                     (is-variable? var))]
+                                      var)))
+                        (iter-variable-binding-order [this]
+                          [variables])
+                        (iter-create-iterator [this which-binding]
+                          (assert (.contains (iter-variable-binding-order this) which-binding))
+                          ;; this is using the same code as the optimized disjunct to create an iterator, as they are both just looping through
+                          ;; the values of the prefix trie
+                          (trie-diterator-instance (count variables) (.root ^PrefixTrie memoized-values) variables)))}))
                 (do
                   ;; then we have not computed this key yet.
                   ;; this should enqueue the work for this to perform the computation.
@@ -272,7 +293,8 @@
                 (do
                   ;; this needs to send messages which should notify anything that is downstream to make changes
                   (doseq [msg @messages-to-send]
-                    (send-message! assumption msg))
+                    (send-message! assumption {:kind :refresh
+                                               :key msg}))
                   nil)))))))))
 
 (defn- replace-assumptions-with-placeholder [rexpr assumption]
@@ -280,19 +302,41 @@
                                       (when (= assumption (memo-get-assumption c))
                                         ;; then this rexpr matches the assumption that we are looking for
                                         [(make-memoization-filled-in-values-placeholder (:variable-mapping rexpr))]))
-        (is-memoization-placeholder? rexpr) (???) ;; then this needs to look up
-                                                  ;; the memoization on the term
-                                                  ;; for this.  Also needs to
-                                                  ;; depend on the assumptions
-                                                  ;; as this could change?
-                                                  ;; Though that might be
-                                                  ;; handled by something else
-                                                  ;; also in this case.
-        (or (is-disjunct-op? rexpr) (is-disjunct? rexpr)) (???)
+        (is-memoization-placeholder? rexpr) (let [t (get-user-term (:name rexpr))]
+                                              (depend-on-assumption (:memoized-rexpr-assumption t))
+                                              (let [r (:memoized-rexpr t)]
+                                                (assert (not= r rexpr))
+                                                (replace-assumptions-with-placeholder r assumption)))
+
+        (is-disjunct? rexpr) (remove empty? (map #(replace-assumptions-with-placeholder % assumption) (get-children rexpr)))
+        (is-disjunct-op? rexpr) (let [djvars (:disjunction-variables rexpr)]
+                                  (doall (for [[vassign rexpr] (trie-get-values (:rexprs rexpr) nil)
+                                               :let [ra (replace-assumptions-with-placeholder rexpr assumption)]
+                                               :when (not (empty? ra))
+                                               rr ra]
+                                           (let [res (make-conjunct (conj (for [[val var] (zipseq vassign djvars)
+                                                                                :when (not (nil? val))]
+                                                                            (make-unify var (make-constant val)))
+                                                                          rr))]
+                                             res
+                                             #_(do (debug-repl "disjunct found something")
+                                                 (???))))))
+        (or (is-disjunct-op? rexpr) (is-disjunct? rexpr)) (let []
+                                                            (debug-repl "replace disjunct")
+                                                            (???))
         ;; A disjunct should not need to reprocess everything?  Only the
         ;; branches which contain the value.  Though this is going to find that there are some values which need to
-        :else (let []))
-  )
+        :else (doall (for [child (get-children rexpr)
+                           :let [ra (replace-assumptions-with-placeholder child assumption)]
+                           :when (not (empty? ra))
+                           rr ra]
+                       (let [res (rewrite-rexpr-children rexpr (fn [r]
+                                                                 (if (identical? r child)
+                                                                   rr
+                                                                   r)))]
+                         res
+                         #_(do (debug-repl "replace rr")
+                             (???)))))))
 
 #_(defn- get-rexprs-which-match-assumption [rexpr assumption]
   (for [r (get-all-children rexpr)
@@ -304,11 +348,63 @@
   ;; to handling the message.  This could also have state using its own atoms/voliates!
   (let [orig-rexpr (.orig-rexpr container)
         aggregator-op (.aggregator-op container)
-        placeholder-rexpr (replace-assumptions-with-placeholder orig-rexpr triggering-assumption)]
-    (debug-repl "make update handler function")
+        placeholder-rexprs (vec (replace-assumptions-with-placeholder orig-rexpr triggering-assumption))]
+    ;(debug-repl "make update handler function")
     (fn [^MemoContainerTrieStorageAggregatorContributions container ^Assumption triggering-assumption message]
-      (debug-repl "inside handler")
-      (???))))
+      ;; this needs to identify all of the values on the R-expr which need to get recomputed, and do that
+
+      ;; TODO: message needs more structure, as there could be different types
+      ;; of messages that are sent.  If there is just a notification message,
+      ;; then it is bindings for which variables have changed?  Or is this going
+      ;; to be that some of the values might
+      (assert (= (:kind message) :refresh))
+      (let [data (.data container)
+            arg-vars (.argument-variables container)
+            values-to-recompute (volatile! {})
+            [valid has-computed memoized-values] @data]
+        (doseq [pr placeholder-rexprs]
+          (binding [*memoization-forward-placeholder-bindings* (:key message)]
+            (let [ctx (context/make-empty-context pr)
+                  result (context/bind-context ctx (try (simplify-fully pr)
+                                                        (catch UnificationFailure e (make-multiplicity 0))))
+                  ;; for now going to do a simpler version where it only handles a single value of the variables.  This will need to handle
+                  ;; the case where it needs to get an iterator over the R-expr which is returned.  Such that it will get all of the bindings
+                  var-bindings (doall (map #(get-value-in-context % ctx) arg-vars))
+                  ]
+              (vswap! values-to-recompute assoc-in var-bindings true)
+              #_(run-iterator
+               :rexpr-in result
+               :rexpr-result iter-result
+               :simplify simplify-fully
+               )
+              ;(debug-repl "inside handler")
+              )))
+        (let [to-compute-set (volatile! #{})
+              new-values (volatile! {})]
+          ((fn rec [so-far m]
+             (if (= true m)
+               (vswap! to-compute-set conj (reverse so-far))
+               (if (contains? m nil) ;; then there is a wild card in the binding of this variable
+                 (if (= (get m nil) true)
+                   (rec (cons nil so-far) true)
+                   (rec (cons nil so-far) (apply merge (vals m))))
+                 (doseq [[k v] m]
+                   (rec (cons k so-far) v))))
+             ) () @values-to-recompute)
+          (doseq [to-compute @to-compute-set]
+            (let [ctx (context/make-empty-context orig-rexpr)]
+              (doseq [[var val] (zipseq arg-vars to-compute)
+                      :when (not (nil? val))]
+                (ctx-set-value! ctx var val))
+              (let [result (context/bind-context ctx (try (simplify-fully orig-rexpr)
+                                                          (catch UnificationFailure e (make-multiplicity 0))))]
+                (debug-repl "new result")
+                )
+              )
+
+            )))
+
+      )))
 
 (def-rewrite
   :match {:rexpr (memoization-placeholder (:unchecked name) (:unchecked args-map))

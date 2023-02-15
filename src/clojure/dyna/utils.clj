@@ -182,7 +182,7 @@
 ;; a macro for overriding functions in the body which also appear in the opts
 ;; this shoudl allow us to make it such that there is a generic function which
 ;; is called, but also something which will cause the values of the expression to corresponds
-(defmacro override-functions [opts & bodies]
+#_(defmacro override-functions [opts & bodies]
   (debug-repl)
   bodies)
 
