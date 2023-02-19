@@ -293,7 +293,8 @@
                 (do
                   ;; this needs to send messages which should notify anything that is downstream to make changes
                   (doseq [msg @messages-to-send]
-                    (send-message! assumption {:kind :refresh
+                    (send-message! assumption {:kind :value-changed
+                                               :from-memo-table this
                                                :key msg}))
                   nil)))))))))
 
@@ -357,11 +358,12 @@
       ;; of messages that are sent.  If there is just a notification message,
       ;; then it is bindings for which variables have changed?  Or is this going
       ;; to be that some of the values might
-      (assert (= (:kind message) :refresh))
+      (assert (= (:kind message) :value-changed))
       (let [data (.data container)
             arg-vars (.argument-variables container)
             values-to-recompute (volatile! {})
             [valid has-computed memoized-values] @data]
+        ;; Step 1: Identify all of the values in our memo table that need to get recomputed
         (doseq [pr placeholder-rexprs]
           (binding [*memoization-forward-placeholder-bindings* (:key message)]
             (let [ctx (context/make-empty-context pr)
@@ -379,6 +381,7 @@
                )
               ;(debug-repl "inside handler")
               )))
+        ;; Step 2: deduplicate the list of values which need to be recomputed.  If there is a wild card then it will back off the values to just the wildcard value
         (let [to-compute-set (volatile! #{})
               new-values (volatile! {})]
           ((fn rec [so-far m]
@@ -391,20 +394,43 @@
                  (doseq [[k v] m]
                    (rec (cons k so-far) v))))
              ) () @values-to-recompute)
+          ;; Step 3: Do the actual computation for the new values
           (doseq [to-compute @to-compute-set]
             (let [ctx (context/make-empty-context orig-rexpr)]
               (doseq [[var val] (zipseq arg-vars to-compute)
                       :when (not (nil? val))]
                 (ctx-set-value! ctx var val))
-              (let [result (context/bind-context ctx (try (simplify-fully orig-rexpr)
-                                                          (catch UnificationFailure e (make-multiplicity 0))))]
-                (debug-repl "new result")
-                )
-              )
+              (let [result (context/bind-context-raw ctx (try (simplify-fully orig-rexpr)
+                                                              (catch UnificationFailure e (make-multiplicity 0))))]
+                (vswap! new-values assoc to-compute result))))
 
-            )))
+          ;; Step 4: Update the values in the memo table.  If something else has already changed the value, then we might have to requeue some refresh of this new value
+          (debug-repl "do table update")
+          (swap! data (fn [[valid has-computed c-memoized-values]]
+                        (if-not valid
+                          [valid has-computed memoized-values] ;; if not valid, do not change anything
+                          (do
+                            (assert (identical? memoized-values c-memoized-values)) ;; otherwise something else has concurrently modified this, we need to handle that case
+                            [valid has-computed (loop [mv (loop [mv c-memoized-values
+                                                                 dels (seq @to-compute-set)]
+                                                            (let [[f & r] dels
+                                                                  d (trie-delete-matched mv f)]
+                                                              (if (empty? r)
+                                                                d
+                                                                (recur d r))))
+                                                       adding (seq @new-values)]
+                                                  (let [[[key val] & r] adding]
+                                                    (let [n (trie-insert-val mv key val)]
+                                                      (if (empty? r)
+                                                        n
+                                                        (recur n r)))))]))))
+          (debug-repl "after update")
 
-      )))
+          ;; Step 5: send update messages for the keys that have changed in the table
+          (doseq [])
+
+          (???)
+          )))))
 
 (def-rewrite
   :match {:rexpr (memoization-placeholder (:unchecked name) (:unchecked args-map))

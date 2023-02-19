@@ -439,7 +439,10 @@
              ;(debug-repl)
              (if-not (nil? it-bound) ;; if the binding failed, then the iterator should return nil to indicate that there is nothing here
                (rec it-bound r rexpr)
-               (debug-repl "it-bound fail")))
+               (do
+                 ;; in the case that a binding failed, this just means that the iterator does not support this value, hence the multiplicity
+                 ;; of the resulting rexpr would be zero.  In this case, we can just do nothing
+                 )))
            (if (some #{v} can-bind-variables) ;(contains? can-bind-variables v)
              (doseq [val (iter-run-iterable iter)]
                (let [dctx (context/make-nested-context-disjunct rexpr)] ;; this should take the context as an argument?

@@ -233,21 +233,24 @@
                  (merge-map-arity arity root (.root other))))
 
   (trie-delete-matched [this key]
-    (???)
-    #_(if (or (nil? key) (every? nil? key))
-        (PrefixTrie. arity nil) ;; just delete everything, so return something that is new
-      (do
-        (assert (= arity (count key)))
-        (PrefixTrie. arity (fn rec [key-query node]
-                             (if (or (empty? key-query) (every? nil? key-query))
-                               node
-                               ;; then we have to filter out the map
-                               (let [kf (first key-query)
-                                     kt (rest key-query)]
-                                 (into {} (map (fn [[k v]]
-                                                 (???)))))
-                               ))))
-      ))
+    (if (or (nil? key) (every? nil? key))
+      (PrefixTrie. arity 0 nil) ;; this matches everything, so return an empty trie
+      (PrefixTrie. arity 0 ((fn rec [key-query node]
+                              (if (empty? key-query)
+                                nil
+                                (let [[f & r] key-query]
+                                  (if (nil? f)
+                                    (into {} (remove nil? (for [[k v] node]
+                                                            (let [e (rec r v)]
+                                                              (when-not (nil? e)
+                                                                [k e])))))
+                                    (into {} (remove nil? (for [[k v] node]
+                                                            (if (= k f)
+                                                              (let [e (rec r v)]
+                                                                (when-not (nil? e)
+                                                                  [k e]))
+                                                              [k v]))))))))
+                            key root))))
 
   (trie-progressive-iterator [this key0]
     (let [key (if (nil? key0) (repeat arity nil) key0)]
@@ -355,3 +358,23 @@
 ;;   nil ;; return some iterator over the two tries at the same time
 ;;   ;; tihs will need to
 ;;   )
+
+
+(defn tries-differences [^PrefixTrie a ^PrefixTrie b]
+  (assert (= (.arity a) (.arity b)) )
+  (let [aroot (.root a)
+        broot (.root b)]
+    ((fn rec [remains an bn]
+       (if (or (identical? an bn) (= an bn))
+         ()
+         (if (= remains 0)
+           [() an bn]
+           (concat (for [[k v] an
+                         ]
+                       )
+                   (for [[k v] bn
+                         :when (not (contained? an k))]
+
+                     ))))
+       )
+     (.arity a) aroot broot)))

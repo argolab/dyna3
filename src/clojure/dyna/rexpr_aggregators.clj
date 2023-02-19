@@ -445,7 +445,7 @@
                           ;; there is something that is not processed yet, so we are going to
                           ;; have to construct an aggregator to wrap the remaining expressions
                           (let [unfinished-rexpr-vec (persistent! unfinished-rexprs)
-                                zzzz (debug-repl)
+                                ;zzzz (debug-repl)
                                 unfinished-rexpr-vec2 (if (and (:add-to-in-rexpr aop) (not= @current-value (:identity aop)))
                                                         (let [af (:add-to-in-rexpr aop)
                                                               ur (for [u unfinished-rexpr-vec]
