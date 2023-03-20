@@ -149,7 +149,6 @@ StringConstBrackets
 
 junk3: ;
 
-// if we want to support multilined strings in the future or something, we can just do that here
 stringConst returns[String t] locals [String vv]
     : a=StringConst { $vv = $a.getText(); $t = $vv.substring(1, $vv.length() - 1); }
     | a=StringConst2 { $vv = $a.getText(); $t = $vv.substring(1, $vv.length() - 1); }
@@ -158,8 +157,6 @@ stringConst returns[String t] locals [String vv]
     ;
 
 primitive returns[Object v]
-    // TODO: automatically choose the correct representation size for these objects depending on what value they are
-    // this should parse as a bigint, and then check if it size is with in the range of a 64 bit int.
     : neg='-'? a=NumberInt {
       BigInteger b = new BigInteger($a.getText());
       if($neg != null) b = b.negate();
@@ -181,7 +178,7 @@ primitive returns[Object v]
     // or if there should be some special signal such as `0.0f`
     | neg='-'? a=NumberFloat { $v = ($neg != null ? -1 : 1) * java.lang.Double.valueOf($a.getText()); }
     | b=stringConst { $v = $b.t; }
-    | 'true' { $v = java.lang.Boolean.valueOf(true); } // these possibly get confused as aggregators if used like true=
+    | 'true' { $v = java.lang.Boolean.valueOf(true); }
     | '$true' { $v = java.lang.Boolean.valueOf(true); }
     | 'false' { $v = java.lang.Boolean.valueOf(false); }
     | '$false' { $v = java.lang.Boolean.valueOf(false); }

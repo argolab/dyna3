@@ -27,6 +27,7 @@
 ;(def rexpr-containers (atom #{}))
 (def rexpr-constructors (atom {}))
 (def rexpr-containers-signature (atom {}))
+(def rexpr-containers-class-name (atom {}))
 
 
 ;; functions which are used to perform matchings against a given Rexpr
@@ -441,6 +442,7 @@
        (swap! rexpr-rewrites-func           assoc ~(symbol rname) (fn ~'[a b] (~(symbol "dyna.rexpr-constructors" (str "simplify-" name)) ~'a ~'b)))
        (swap! rexpr-rewrites-construct-func assoc ~(symbol rname) (fn ~'[a b] (~(symbol "dyna.rexpr-constructors" (str "simplify-construct-" name)) ~'a ~'b)))
        (swap! rexpr-rewrites-inference-func assoc ~(symbol rname) (fn ~'[a b] (~(symbol "dyna.rexpr-constructors" (str "simplify-inference-" name)) ~'a ~'b)))
+       (swap! rexpr-containers-class-name assoc (quote ~(symbol name)) (.getName ~(symbol rname)))
 
        ;; (swap! rexpr-rewrites-func assoc ~(symbol (str name "-rexpr")) identity)
        ;; (swap! rexpr-rewrites-construct-func assoc ~(symbol (str name "-rexpr")) identity)
@@ -926,8 +928,21 @@
                  )
     (assert (subset? (keys matcher) #{:rexpr :context :check})
             "matcher map contains unexepxected key")
-    `(when (~(symbol (str "is-" rexpr-type-matched "?")) ~source-variable)
-       (let [~(vec (map cdar match-args)) (get-arguments ~source-variable)]  ;; would be nice if get values was more "efficient" than destructing?
+    `(when ;(~(symbol (str "is-" rexpr-type-matched "?")) ~source-variable)
+       (instance? ~(symbol (strict-get @rexpr-containers-class-name (symbol rexpr-type-matched))) ~source-variable)
+
+       (let ;[~(vec (map cdar match-args)) (get-arguments ~source-variable)]  ;; would be nice if get values was more "efficient" than destructing?
+           [;; this version is going to do field access directly on the class to
+            ;; get the fields it is going to match against (should be easy for
+            ;; the JVM compiler to handle this)
+            ~@(apply concat (zipseq (map cdar match-args)
+                                    (let [rexpr-sig (get @rexpr-containers-signature (symbol rexpr-type-matched))
+                                          rcname (strict-get @rexpr-containers-class-name (symbol rexpr-type-matched))]
+                                      (for [lname rexpr-sig]
+                                        (list '.
+                                              (with-meta source-variable {:tag rcname})
+                                              (symbol (munge (last lname))))))))]
+
          (when (and ~@(remove true? (map car match-args)))
            ~(if (not (nil? context-matcher))
               (make-context-matching-function present-variables context-matcher generate-body)

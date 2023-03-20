@@ -77,8 +77,14 @@ class DynaTerm(metaclass=_DynaTermMetaClass):
         return DynaTerm(*args, **kwargs)
 
 
-
 __all__ = [
     'Dyna',
     'DynaTerm',
 ]
+
+
+try:
+    from . import dyna_ipython_magic
+except (ImportError,NameError):
+    # if ipython is not being used, then the import of this will fail
+    pass

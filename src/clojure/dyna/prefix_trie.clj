@@ -361,20 +361,23 @@
 
 
 (defn tries-differences [^PrefixTrie a ^PrefixTrie b]
-  (assert (= (.arity a) (.arity b)) )
-  (let [aroot (.root a)
-        broot (.root b)]
-    ((fn rec [remains an bn]
-       (if (or (identical? an bn) (= an bn))
-         ()
-         (if (= remains 0)
-           [() an bn]
-           (concat (for [[k v] an
-                         ]
-                       )
-                   (for [[k v] bn
-                         :when (not (contained? an k))]
+  ;; return the elements that are contained in one trie but not the other
+  ;; I suppose that this is going to have to respect the filter as well?  Otherwise this is not going to find which of the
+  (assert (= (.arity a) (.arity b)))
+  ((fn rec [remains an bn]
+     (cond
+       (or (identical? an bn) (= an bn))  ()
+       (= remains 0)  [[() an bn]]
+       (nil? bn) [[() an nil]]
+       (nil? an) [[() nil bn]]
 
-                     ))))
-       )
-     (.arity a) aroot broot)))
+       :else
+       (concat (for [[k v] an
+                     [kp av bv] (rec (- remains 1) v (get bn k))]
+                 [(cons k kp) av bv])
+               (for [[k v] bn
+                     :when (not (contains? an k))
+                     [kp av bv] (rec (- remains 1) nil v)]
+                 [(cons k kp) av bv])))
+     )
+   (.arity a) (.root a) (.root b)))

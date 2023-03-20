@@ -405,31 +405,35 @@
                 (vswap! new-values assoc to-compute result))))
 
           ;; Step 4: Update the values in the memo table.  If something else has already changed the value, then we might have to requeue some refresh of this new value
-          (debug-repl "do table update")
-          (swap! data (fn [[valid has-computed c-memoized-values]]
-                        (if-not valid
-                          [valid has-computed memoized-values] ;; if not valid, do not change anything
-                          (do
-                            (assert (identical? memoized-values c-memoized-values)) ;; otherwise something else has concurrently modified this, we need to handle that case
-                            [valid has-computed (loop [mv (loop [mv c-memoized-values
-                                                                 dels (seq @to-compute-set)]
-                                                            (let [[f & r] dels
-                                                                  d (trie-delete-matched mv f)]
-                                                              (if (empty? r)
-                                                                d
-                                                                (recur d r))))
-                                                       adding (seq @new-values)]
-                                                  (let [[[key val] & r] adding]
-                                                    (let [n (trie-insert-val mv key val)]
-                                                      (if (empty? r)
-                                                        n
-                                                        (recur n r)))))]))))
-          (debug-repl "after update")
+          ;(debug-repl "do table update")
+          (let [[[_ _ old-memoized-values] [valid _ new-memoized-values]]
+                (swap-vals! data (fn [[valid has-computed c-memoized-values]]
+                              (if-not valid
+                                [valid has-computed memoized-values] ;; if not valid, do not change anything
+                                (do
+                                  (assert (identical? memoized-values c-memoized-values)) ;; otherwise something else has concurrently modified this, we need to handle that case
+                                  [valid has-computed (loop [mv (loop [mv c-memoized-values
+                                                                       dels (seq @to-compute-set)]
+                                                                  (let [[f & r] dels
+                                                                        d (trie-delete-matched mv f)]
+                                                                    (if (empty? r)
+                                                                      d
+                                                                      (recur d r))))
+                                                             adding (seq @new-values)]
+                                                        (let [[[key val] & r] adding]
+                                                          (let [n (trie-insert-val mv key val)]
+                                                            (if (empty? r)
+                                                              n
+                                                              (recur n r)))))]))))]
+            (debug-repl "after update")
+            (when valid ;; if the table is not valid, then we are not going to lok for anything to up
 
-          ;; Step 5: send update messages for the keys that have changed in the table
-          (doseq [])
+              ;; Step 5: send update messages for the keys that have changed in the table
+              (doseq [[key vals-old vals-new] (tries-differences old-memoized-values new-memoized-values)]
+                (debug-repl "found difference")
+                ))
 
-          (???)
+            (???))
           )))))
 
 (def-rewrite
