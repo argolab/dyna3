@@ -424,17 +424,19 @@
                                                           (let [n (trie-insert-val mv key val)]
                                                             (if (empty? r)
                                                               n
-                                                              (recur n r)))))]))))]
-            (debug-repl "after update")
+                                                              (recur n r)))))]))))
+                sending-message-assumption (.assumption container)]
+            ;(debug-repl "after update")
             (when valid ;; if the table is not valid, then we are not going to lok for anything to up
 
               ;; Step 5: send update messages for the keys that have changed in the table
               (doseq [[key vals-old vals-new] (tries-differences old-memoized-values new-memoized-values)]
-                (debug-repl "found difference")
-                ))
-
-            (???))
-          )))))
+                (assert (= (count key) (.arity ^PrefixTrie new-memoized-values))) ;; TODO: fix tries-differences, or figure out what is oging to happen in the case that we do not have all of the keys
+                (let [message-to-send {:kind :value-changed
+                                       :from-memo-table container
+                                       :key key}]
+                  (debug-repl "found difference")
+                  (send-message! sending-message-assumption message-to-send))))))))))
 
 (def-rewrite
   :match {:rexpr (memoization-placeholder (:unchecked name) (:unchecked args-map))
