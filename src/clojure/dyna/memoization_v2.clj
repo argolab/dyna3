@@ -170,6 +170,10 @@
                                                                [a (assoc-in b lookup-key true) c])))]
                     (when (or (identical? (second old-dat) has-computed) ;; this first check is just an optimization, we really care about if the we were the ones to add the new lookup key, which means it wasn't in old
                               (not (is-key-contained? (second old-dat) lookup-key)))
+                      (when (< (first lookup-key) -3)
+                        (debug-repl "very neg"))
+                      (when (= (first lookup-key) -1)
+                        (debug-repl "neg1 lookup"))
                       (memo-push-recompute-key this lookup-key))
                     (make-multiplicity 0) ;; return 0, as we currently do not have anything for this value
                     )
@@ -182,8 +186,7 @@
                                                           )))
                         ]
                     (when
-                      (when (< (first lookup-key) -10)
-                        (debug-repl "very neg"))
+
 
                       (system/push-agenda-work (AgendaReprocessWork. this (doall lookup-key) prio)))
                     (make-multiplicity 0))
@@ -263,6 +266,7 @@
                           (context/bind-context cctx
                                                 (try (simplify-fully orig-rexpr)
                                                      (catch UnificationFailure e (make-multiplicity 0)))))]
+                 (println "TODO: the resulting memoized R-expr has extra unifies that are not necessary, need to remove from the expression")
                  ;(debug-repl "refresh for key")
                  [cctx rr]))
              )]
