@@ -106,16 +106,17 @@
        ~@args)))
 
 (defn push-agenda-work [work]
-  (.push_work ^DynaAgenda work-agenda
-              (if (instance? IDynaAgendaWork work)
-                work
-                (reify IDynaAgendaWork
-                  (run [this] (work))
-                  ;; there should be some fixed priority configured for which
-                  ;; internal tasks run at.  Then some stuff could run before it
-                  ;; when it wants, but the internal stuff should probably be
-                  ;; let to run first?
-                  (priority [this] 1e16)))))
+  (if (instance? IDynaAgendaWork work)
+    #_(if (= (.priority ^IDynaAgendaWork work) ##Inf)
+      (.run ^IDynaAgendaWork work))
+    (.push_work ^DynaAgenda work-agenda work) ;; if something is inf, it should just get popped first, there is no need to run it during the pushing stage, which might end up in weird orderings of the tasks
+    (.push_work ^DynaAgenda work-agenda (reify IDynaAgendaWork
+                                          (run [this] (work))
+                                          ;; there should be some fixed priority configured for which
+                                          ;; internal tasks run at.  Then some stuff could run before it
+                                          ;; when it wants, but the internal stuff should probably be
+                                          ;; let to run first?
+                                          (priority [this] 1e16)))))
 
 (defn run-agenda []
   (.process_agenda ^DynaAgenda work-agenda))

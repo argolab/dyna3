@@ -78,11 +78,22 @@ assert fact(2) = 2.
 
 
 (str-test memoization-v2 "
+fact(N) := fact(N-1)*N for N > 0.
 fact(0) := 1.
-fact(N) := fact(N-1)*N.
+
 
 $memo(fact[N:$ground]) = \"unk\".
 
-assert fact(10) = 55.
+assert fact(10) = 3628800.
+")
 
+;; check that we can have the aggregator not go back and compute negative numbers
+(str-test memoization-v2-t2 "
+fact(N) := fact(N-1)*N.
+fact(0) := 1.
+
+
+$memo(fact[N:$ground]) = \"unk\".
+
+assert fact(10) = 3628800.
 ")

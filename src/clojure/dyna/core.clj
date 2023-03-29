@@ -17,7 +17,9 @@
   (:require [dyna.memoization-v1])
   (:require [dyna.rexpr-disjunction])
   (:require [dyna.rexpr-aggregators-optimized])
- ; (:require [dyna.rexpr-jit])
+  (:require [dyna.memoization-v2]) ;; requires disjunct opt and aggregators opt
+
+  ;; (:require [dyna.rexpr-jit])
   (:require [dyna.ast-to-rexpr :refer [parse-string
                                        import-file-url
                                        eval-string
@@ -28,8 +30,7 @@
 
 (defn init-system []
   ;;(println "----------->>>>>>>>>>>>>>>>>>>>>>>>> init method on current system")
-  (import-file-url (resource "dyna/prelude.dyna"))
-  )
+  (import-file-url (resource "dyna/prelude.dyna")))
 
 (defn exit-system []
   ;; there should be something for when the system is going to be destroyed.
@@ -46,7 +47,7 @@
   ;; load the prelude file into the runtime before we start loading stuff
   ;;(import-file-url (resource "dyna/prelude.dyna"))
 
-  (let [run-file (atom nil)
+  (let [run-file (volatile! nil)
         other-args (transient [])]
     (loop [i 0]
       (when (< i (count args))
@@ -71,10 +72,10 @@
                            (eval-ast (make-term ("$compiler_expression" ("export_csv" term-name (int term-arity) file-name))))
                            (recur (+ i 3)))
           "--run" (let [fname (get args (+ i 1))]
-                    (when-not (nil? run-file)
+                    (when-not (nil? @run-file)
                       (println "the --run argument is specified more than once")
                       (System/exit 1))
-                    (reset! run-file fname)
+                    (vreset! run-file fname)
                     (recur (+ i 2)))
           (do ;; just collect the other arguments into an array
             (conj! other-args (get args i))
@@ -83,7 +84,7 @@
     (let [other-args (persistent! other-args)]
       (if (or (not (empty? other-args)) (not (nil? @run-file)))
         (let [[run-file args] (if-not (nil? @run-file)
-                                 [run-file other-args]
+                                 [@run-file other-args]
                                  [(get other-args 0) (vec (drop 1 other-args))])
               run-filef (file run-file)]
           (when-not (.isFile run-filef)
@@ -113,10 +114,7 @@
 
           (if system/status-counters
             (StatusCounters/print_counters))
-          ))))
-
-  ;(println "End of main function for dyna")
-  )
+          )))))
 
 (defn main [args]
   (try

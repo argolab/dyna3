@@ -37,8 +37,6 @@
    :is-memoized-unk (make-invalid-assumption)
 
    :memoization-mode :none  ;; should either be :none, :null or :unk depending
-   :memoization-subscribed-downstream #{} ;; things that need to get notified in the case that *we* change
-   :memoization-subscribed-upstream #{} ;; then that will notify *us* in the case that they change
 
 
    ;:optimized-assumption (make-assumption) ;; the assumption that there is no more optimized version of this term
@@ -214,7 +212,7 @@
                                (simplify-top unopt-rexpr)))])
   (debug-repl "optimize user term")
   (???)
-  (assoc term-rep
+  #_(assoc term-rep
          ))
 
 (defn user-rexpr-combined-no-memo [term-rep]
@@ -332,3 +330,13 @@
           result-rexpr (context/bind-context-raw ctx (simplify-fully rexpr))]
       (assert (= (make-multiplicity 1) (result-rexpr)))
       (ctx-get-value ctx result-var))))
+
+
+(swap! debug-useful-variables assoc
+       'get-term (fn []
+                   (fn
+                     ([name] (first (filter #(= (str name) (:name (:term-name %))) (vals @system/user-defined-terms))))
+                     ([name arity] (first (filter #(and
+                                                    (= (str name) (:name (:term-name %)))
+                                                    (= arity (:arity (:term-name %))))
+                                                  (vals @system/user-defined-terms)))))))

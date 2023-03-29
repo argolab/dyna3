@@ -39,7 +39,8 @@
   (memo-setup-new-table [])
 
   ;;
-  (memo-refresh-value-for-key [key]))
+  (memo-refresh-value-for-key [key])
+  (memo-push-recompute-key [key]))
 
 ;; the placeholder will lookup the memoization container associated with a given
 ;; name.  This is an extra step of indirection which we can "defer."  This will
@@ -68,6 +69,7 @@
 (deftype AgendaReprocessWork [^IMemoContainer memo-container term ^double priority]
   IDynaAgendaWork
   (run [this]
+    (println "running agenda work" term)
     (memo-refresh-value-for-key memo-container term))
   (priority [this]
     priority)
@@ -123,7 +125,7 @@
                                                           ;result-variable
                                                           ^Assumption assumption
                                                           data ;; (atom [valid has-computed (PrefixTrie memoized-values)])
-                                                          updating-data ;; an atom which is used to hold metadata for processing updates
+                                                          updating-data ;; an (atom {}) which is used to hold metadata for processing updates
                                                           ]
   Watcher
   (notify-invalidated! [this watching]
@@ -131,12 +133,20 @@
     (invalidate! assumption))
   (notify-message! [this watching message]
     ;; there can be many things that we depend on.  These will each have their one assumption.  In the case that
-    (let [update-handler (or (get @updating-data watching)
-                             (get (swap! updating-data assoc watching (make-update-handler-function this watching)) watching))]
-      (update-handler this watching message)))
+    (let [[handler-assumpt update-handler] (or (get @updating-data watching)
+                                               (get (swap! updating-data assoc watching (compute-with-assumption (make-update-handler-function this watching))) watching))]
+      (if-not (is-valid? handler-assumpt)
+        (do
+          (swap! updating-data dissoc watching) ;; delete from the map the old handler as the assumption for it is no longer valid
+          (recur watching message)) ;; reprocesses this and create a new handler
+        (update-handler this watching message))))
 
   IMemoContainer
   (memo-get-assumption [this] assumption)
+  (memo-push-recompute-key [this key]
+    (let [kk (doall key)
+          prio (memo-priority-function kk)]
+      (system/push-agenda-work (AgendaReprocessWork. this kk prio))))
   (memo-rewrite-access [this variables variable-values]
     (let [control-arg (conj (vec (map #(if (nil? %) meta-free-dummy-free-value %) variable-values)) nil)
           control-setting (memo-controller control-arg)]
@@ -153,42 +163,55 @@
                 (throw (InvalidAssumption. "memo table no longer valid")))
               (let [lookup-key (drop-last (second control-setting))
                     has-key (is-key-contained? has-computed lookup-key)]
-                (when-not has-key
-                  (let [prio (memo-priority-function variable-values)  ;; the priority of this compute operation.  though this is different
+                (if-not has-key
+                  (let [[old-dat new-dat] (swap-vals! data (fn [[a b c]]
+                                                             (if-not a
+                                                               [a b c] ;; not valid, do not change
+                                                               [a (assoc-in b lookup-key true) c])))]
+                    (when (or (identical? (second old-dat) has-computed) ;; this first check is just an optimization, we really care about if the we were the ones to add the new lookup key, which means it wasn't in old
+                              (not (is-key-contained? (second old-dat) lookup-key)))
+                      (memo-push-recompute-key this lookup-key))
+                    (make-multiplicity 0) ;; return 0, as we currently do not have anything for this value
+                    )
+
+                  #_(let [prio (memo-priority-function variable-values)  ;; the priority of this compute operation.  though this is different
                         [old-dat new-dat] (swap-vals! data (fn [[a b c]]
                                                         (if-not a
                                                           [a b c]
                                                           [a (assoc-in b lookup-key true) c] ;; record that this value is going to get computed
                                                           )))
                         ]
-                    (when (or (identical? (second old-dat) has-computed) (not (is-key-contained? (second old-dat) lookup-key)))
-                      (system/push-agenda-work (AgendaReprocessWork. this lookup-key prio)))
-                    ;(debug-repl "need to compute for key")
-                    ))
+                    (when
+                      (when (< (first lookup-key) -10)
+                        (debug-repl "very neg"))
 
-                ;; this should return the result for this expression
-                (when has-key
-                  ;; TODO: this needs to return the right values for this.  In which case, it will need to be represented as a memo table
-                  (???))
-                (let [
-                      ;rr (make-disjunct-op argument-variables memoized-values)
-                      ]
+                      (system/push-agenda-work (AgendaReprocessWork. this (doall lookup-key) prio)))
+                    (make-multiplicity 0))
 
-                  )
-                (make-multiplicity 0)
-                ))
+                  ;; has-key is true, so we are going to return the matched values from the data trie
+                  (let [;has-nil (some nil? variable-values)
+                        lrexpr (make-disjunct-op argument-variables memoized-values) ;; build a disjunct opt which holds the current memoized values
+                        lcontext (context/make-empty-context lrexpr)]
+                        (doseq [[var val] (zipseq argument-variables variable-values)]
+                          ;; set all of the incoming variables to their respected value
+                          (ctx-set-value! lcontext var val))
+                        (let [res (context/bind-context lcontext (simplify-fully lrexpr))]
+                          ;(debug-repl "returning")
+                          res)))))
 
-            :else (???) ;; this should not happen, means that it returned something that was unexpected
+            :else
+            (do ;(debug-repl "should not happen")
+                (???)) ;; this should not happen, means that it returned something that was unexpected
             )))
   (memo-get-iterator [this variables variable-values]
     (let [control-arg (conj (vec (map #(if (nil? %) meta-free-dummy-free-value %) variable-values)) nil)
           control-setting (memo-controller control-arg)]
       (cond (= control-setting :fallthrough) #{} ;; in the fallthrough case this
-                                                 ;; should just rewrite as the
-                                                 ;; orig-rexpr, so just let that
-                                                 ;; happen rather than having to
-                                                 ;; deal with the "iterator
-                                                 ;; remapping mess"
+            ;; should just rewrite as the
+            ;; orig-rexpr, so just let that
+            ;; happen rather than having to
+            ;; deal with the "iterator
+            ;; remapping mess"
             (= control-setting :defer) #{}
 
             (= (first control-setting) :lookup)
@@ -243,6 +266,7 @@
                  ;(debug-repl "refresh for key")
                  [cctx rr]))
              )]
+        ;(debug-repl "in refresh")
         ;; we only care about the current-memoized-values changing.  The other
         ;; fields of @data could change while we are performing a computation
         ;;
@@ -278,15 +302,13 @@
                                                        current-trie mv]
                                                   (let [[[[key rexprs] mult] & r] to-add
                                                         t (trie-update-collection current-trie key (fn [c]
-                                                                                                     (concat (or c []) rexprs)))]
+                                                                                                     (vec (concat (or c []) rexprs))))]
                                                     (vswap! messages-to-send conj key) ;; I suppose that the messages will just be what keys have changed
                                                     (if (empty? r)
                                                       t
                                                       (recur r t))))]
-
                                       (vreset! need-to-redo false)
-                                      ;(debug-repl "need to update")
-                                      [valid has mv]))))
+                                      [valid has ftrie]))))
                               [valid has mv])))
               (if @need-to-redo
                 (recur)
@@ -298,21 +320,22 @@
                                                :key msg}))
                   nil)))))))))
 
-(defn- replace-assumptions-with-placeholder [rexpr assumption]
-  (cond (is-memoized-access? rexpr) (let [c (:memoization-container rexpr)]
-                                      (when (= assumption (memo-get-assumption c))
+(defn- replace-memo-reads-with-placeholder [rexpr assumption]
+  (cond (is-memoized-access? rexpr) (let [cc (:memoization-container rexpr)]
+                                      (when (= assumption (memo-get-assumption cc))
                                         ;; then this rexpr matches the assumption that we are looking for
                                         [(make-memoization-filled-in-values-placeholder (:variable-mapping rexpr))]))
         (is-memoization-placeholder? rexpr) (let [t (get-user-term (:name rexpr))]
                                               (depend-on-assumption (:memoized-rexpr-assumption t))
                                               (let [r (:memoized-rexpr t)]
                                                 (assert (not= r rexpr))
-                                                (replace-assumptions-with-placeholder r assumption)))
+                                                (for [rr (replace-memo-reads-with-placeholder r assumption)]
+                                                  (remap-variables rr (:args-map rexpr)))))
 
-        (is-disjunct? rexpr) (remove empty? (map #(replace-assumptions-with-placeholder % assumption) (get-children rexpr)))
+        (is-disjunct? rexpr) (remove empty? (map #(replace-memo-reads-with-placeholder % assumption) (get-children rexpr)))
         (is-disjunct-op? rexpr) (let [djvars (:disjunction-variables rexpr)]
                                   (doall (for [[vassign rexpr] (trie-get-values (:rexprs rexpr) nil)
-                                               :let [ra (replace-assumptions-with-placeholder rexpr assumption)]
+                                               :let [ra (replace-memo-reads-with-placeholder rexpr assumption)]
                                                :when (not (empty? ra))
                                                rr ra]
                                            (let [res (make-conjunct (conj (for [[val var] (zipseq vassign djvars)
@@ -322,22 +345,44 @@
                                              res
                                              #_(do (debug-repl "disjunct found something")
                                                  (???))))))
-        (or (is-disjunct-op? rexpr) (is-disjunct? rexpr)) (let []
-                                                            (debug-repl "replace disjunct")
-                                                            (???))
+
+
+        ;; (or (is-disjunct-op? rexpr) (is-disjunct? rexpr)) (let []
+        ;;                                                     (debug-repl "replace disjunct")
+        ;;                                                     (???))
         ;; A disjunct should not need to reprocess everything?  Only the
         ;; branches which contain the value.  Though this is going to find that there are some values which need to
-        :else (doall (for [child (get-children rexpr)
-                           :let [ra (replace-assumptions-with-placeholder child assumption)]
-                           :when (not (empty? ra))
-                           rr ra]
-                       (let [res (rewrite-rexpr-children rexpr (fn [r]
-                                                                 (if (identical? r child)
-                                                                   rr
-                                                                   r)))]
-                         res
-                         #_(do (debug-repl "replace rr")
-                             (???)))))))
+
+        :else
+        ;; this version should use the index of the rexpr in the expression
+        ;; being rewritten.  This will ensure that if something is duplicated,
+        ;; that it will get processed twice
+        (let [children (transient [])]
+          (rewrite-rexpr-children rexpr (fn [r] (conj! children r) r))
+          (for [[idx child] (zipseq (range) (persistent! children))
+                rr (replace-memo-reads-with-placeholder child assumption)
+                :let [idc (volatile! -1)]]
+            (rewrite-rexpr-children rexpr (fn [r]
+                                            (vswap! idc inc)
+                                            (if (= @idc idx)
+                                              rr
+                                              r)))))
+
+
+        ;; :else (doall (for [child (get-children rexpr)  ;; if the same child appears in the arguments twice, this is going to cause an issue
+        ;;                    :let [ra (replace-memo-reads-with-placeholder child assumption)]
+        ;;                    :when (not (empty? ra))
+        ;;                    rr ra]
+        ;;                (let [res (rewrite-rexpr-children rexpr (fn [r]
+        ;;                                                          (if (identical? r child)
+        ;;                                                            rr
+        ;;                                                            r)))]
+        ;;                  res
+        ;;                  #_(do (debug-repl "replace rr")
+        ;;                        (???)))))
+
+
+        ))
 
 #_(defn- get-rexprs-which-match-assumption [rexpr assumption]
   (for [r (get-all-children rexpr)
@@ -349,7 +394,7 @@
   ;; to handling the message.  This could also have state using its own atoms/voliates!
   (let [orig-rexpr (.orig-rexpr container)
         aggregator-op (.aggregator-op container)
-        placeholder-rexprs (vec (replace-assumptions-with-placeholder orig-rexpr triggering-assumption))]
+        placeholder-rexprs (vec (replace-memo-reads-with-placeholder orig-rexpr triggering-assumption))]
     ;(debug-repl "make update handler function")
     (fn [^MemoContainerTrieStorageAggregatorContributions container ^Assumption triggering-assumption message]
       ;; this needs to identify all of the values on the R-expr which need to get recomputed, and do that
@@ -373,6 +418,8 @@
                   ;; the case where it needs to get an iterator over the R-expr which is returned.  Such that it will get all of the bindings
                   var-bindings (doall (map #(get-value-in-context % ctx) arg-vars))
                   ]
+              ;(debug-repl "rr")  ;; TODO: this needs to run an iterator
+              ;(assert (is-multiplicity? result))
               (vswap! values-to-recompute assoc-in var-bindings true)
               #_(run-iterator
                :rexpr-in result
@@ -381,6 +428,8 @@
                )
               ;(debug-repl "inside handler")
               )))
+
+
         ;; Step 2: deduplicate the list of values which need to be recomputed.  If there is a wild card then it will back off the values to just the wildcard value
         (let [to-compute-set (volatile! #{})
               new-values (volatile! {})]
@@ -394,49 +443,59 @@
                  (doseq [[k v] m]
                    (rec (cons k so-far) v))))
              ) () @values-to-recompute)
-          ;; Step 3: Do the actual computation for the new values
+
           (doseq [to-compute @to-compute-set]
-            (let [ctx (context/make-empty-context orig-rexpr)]
-              (doseq [[var val] (zipseq arg-vars to-compute)
-                      :when (not (nil? val))]
-                (ctx-set-value! ctx var val))
-              (let [result (context/bind-context-raw ctx (try (simplify-fully orig-rexpr)
-                                                              (catch UnificationFailure e (make-multiplicity 0))))]
-                (vswap! new-values assoc to-compute result))))
+            ;; this is going to push to the agenda work
+            (let []
+              (memo-push-recompute-key container to-compute)
+              ))
 
-          ;; Step 4: Update the values in the memo table.  If something else has already changed the value, then we might have to requeue some refresh of this new value
-          ;(debug-repl "do table update")
-          (let [[[_ _ old-memoized-values] [valid _ new-memoized-values]]
-                (swap-vals! data (fn [[valid has-computed c-memoized-values]]
-                              (if-not valid
-                                [valid has-computed memoized-values] ;; if not valid, do not change anything
-                                (do
-                                  (assert (identical? memoized-values c-memoized-values)) ;; otherwise something else has concurrently modified this, we need to handle that case
-                                  [valid has-computed (loop [mv (loop [mv c-memoized-values
-                                                                       dels (seq @to-compute-set)]
-                                                                  (let [[f & r] dels
-                                                                        d (trie-delete-matched mv f)]
-                                                                    (if (empty? r)
-                                                                      d
-                                                                      (recur d r))))
-                                                             adding (seq @new-values)]
-                                                        (let [[[key val] & r] adding]
-                                                          (let [n (trie-insert-val mv key val)]
-                                                            (if (empty? r)
-                                                              n
-                                                              (recur n r)))))]))))
-                sending-message-assumption (.assumption container)]
-            ;(debug-repl "after update")
-            (when valid ;; if the table is not valid, then we are not going to lok for anything to up
+          (when false
 
-              ;; Step 5: send update messages for the keys that have changed in the table
-              (doseq [[key vals-old vals-new] (tries-differences old-memoized-values new-memoized-values)]
-                (assert (= (count key) (.arity ^PrefixTrie new-memoized-values))) ;; TODO: fix tries-differences, or figure out what is oging to happen in the case that we do not have all of the keys
-                (let [message-to-send {:kind :value-changed
-                                       :from-memo-table container
-                                       :key key}]
-                  (debug-repl "found difference")
-                  (send-message! sending-message-assumption message-to-send))))))))))
+            ;; Step 3: Do the actual computation for the new values
+            (doseq [to-compute @to-compute-set]
+              (let [ctx (context/make-empty-context orig-rexpr)]
+                (doseq [[var val] (zipseq arg-vars to-compute)
+                        :when (not (nil? val))]
+                  (ctx-set-value! ctx var val))
+                (let [result (context/bind-context-raw ctx (try (simplify-fully orig-rexpr)
+                                                                (catch UnificationFailure e (make-multiplicity 0))))]
+                  (vswap! new-values assoc to-compute result))))
+
+            ;; Step 4: Update the values in the memo table.  If something else has already changed the value, then we might have to requeue some refresh of this new value
+                                        ;(debug-repl "do table update")
+            (let [[[_ _ old-memoized-values] [valid _ new-memoized-values]]
+                  (swap-vals! data (fn [[valid has-computed c-memoized-values]]
+                                     (if-not valid
+                                       [valid has-computed memoized-values] ;; if not valid, do not change anything
+                                       (do
+                                         (assert (identical? memoized-values c-memoized-values)) ;; otherwise something else has concurrently modified this, we need to handle that case
+                                         [valid has-computed (loop [mv (loop [mv c-memoized-values
+                                                                              dels (seq @to-compute-set)]
+                                                                         (let [[f & r] dels
+                                                                               d (trie-delete-matched mv f)]
+                                                                           (if (empty? r)
+                                                                             d
+                                                                             (recur d r))))
+                                                                    adding (seq @new-values)]
+                                                               (let [[[key val] & r] adding]
+                                                                 (let [n (trie-insert-val mv key val)]
+                                                                   (if (empty? r)
+                                                                     n
+                                                                     (recur n r)))))]))))
+                  sending-message-assumption (.assumption container)]
+                                        ;(debug-repl "after update")
+              (when valid ;; if the table is not valid, then we are not going to lok for anything to up
+
+                ;; Step 5: send update messages for the keys that have changed in the table
+                (doseq [[key vals-old vals-new] (tries-differences old-memoized-values new-memoized-values)]
+                  (assert (= (count key) (.arity ^PrefixTrie new-memoized-values))) ;; TODO: fix tries-differences, or figure out what is oging to happen in the case that we do not have all of the keys
+                  (let [message-to-send {:kind :value-changed
+                                         :from-memo-table container
+                                         :key key}]
+                    (send-message! sending-message-assumption message-to-send)))
+                (println "after sending messages")
+                ))))))))
 
 (def-rewrite
   :match {:rexpr (memoization-placeholder (:unchecked name) (:unchecked args-map))
@@ -803,3 +862,7 @@
                                                      (assoc dat :memoization-priorty-method (str (gensym '$priority_controller_)))
                                                      dat)))]
       (add-to-user-term source-file dynabase (:memoization-priorty-method new) 1 rexpr))))
+
+
+(swap! debug-useful-variables assoc
+       'work-agenda (fn [] system/work-agenda))
