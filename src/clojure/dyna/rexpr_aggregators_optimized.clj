@@ -63,14 +63,14 @@
     ;([value] (r value 1))
 
 
-(def ^{:private true :dynamic true} *aggregator-op-additional-constraints*
+(def ^{:dynamic true} *aggregator-op-additional-constraints*
   ;; additional constraints that can be added to the R-expr in the case that it
   ;; would not be resolved, this can take into account the current value known
   ;; to the aggregator
   (fn [incoming-variable]
     (make-multiplicity 1)))
 
-(def ^{:private true :dynamic true} *aggregator-op-saturated*
+(def ^{:dynamic true} *aggregator-op-saturated*
   ;; if the current bindings to variables are sautrated, meaning that the
   ;; contributed values are done, then we can avoid continuing to process other stuff
   (fn [] false))

@@ -364,6 +364,12 @@
                        :when (#{:rexpr-list} (car v))]
                    `(apply min (map #(check-rexpr-basecases % ~'stack) ~(cdar v))))))
 
+         (~'simplify-fast-rexprl ~'[this simplify]
+          (???))
+
+         (~'simplify-inference-rexprl ~'[this simplify]
+          (???))
+
          Object
          (~'equals ~'[this other]
            (or (identical? ~'this ~'other)
@@ -1150,8 +1156,9 @@
     (.value ^constant-value-rexpr variable)
     (ctx-get-value (context/get-context) variable)))
 
+(def ^{:dynamic true} *memoization-make-guesses* false)  ;; if this is false, then the memos should not make any guesses, and just "remain" in hopes they will be eleminated by some other conjunct
 
-(defn simplify [rexpr]
+(defn simplify-fast [rexpr]
   (debug-binding
    [*current-simplify-stack* (conj *current-simplify-stack* rexpr)
     *current-simplify-running* simplify]
@@ -1165,7 +1172,7 @@
          ;(ctx-add-rexpr! (context/get-context) ret)
          ret)))))
 
-(def simplify-fast simplify)
+(def simplify simplify-fast)
 
 (swap! debug-useful-variables assoc
        'simplify (fn [] simplify)
@@ -1196,7 +1203,7 @@
              (ctx-add-rexpr! ctx ret)
              ret))))))
 
-(defn simplify-fully [rexpr]
+(defn simplify-fully-no-guess [rexpr]
   (loop [cri rexpr]
     (let [nri (loop [cr cri]
                 (let [nr (debug-binding [*current-top-level-rexpr* cr]
@@ -1209,6 +1216,15 @@
       (if (not= nrif nri)
         (recur nrif)
         nrif))))
+
+(defn simplify-fully [rexpr]
+  (loop [cri rexpr]
+    (let [nri (simplify-fully-no-guess cri)
+          nri2 (binding [*memoization-make-guesses* true]
+                 (simplify-fast nri))]
+      (if (= nri nri2)
+        nri
+        (recur nri2)))))
 
 (defn simplify-top [rexpr]
   (let [ctx (context/make-empty-context rexpr)]

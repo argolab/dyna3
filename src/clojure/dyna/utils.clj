@@ -316,7 +316,11 @@
                 (. ~(with-meta this-var {:tag class-name})
                    ~(symbol (munge (first m)))
                    ~@(second m))))
-         ~name)))
+         #_(intern *ns* (quote ~name) {:on (quote ~(symbol class-name))
+                                     :on-interface (Class/forName ~class-name)})
+         #_(intern *ns* (quote ~name) {:on (quote ~(symbol class-name))
+                                     :on-interface (quote ~(symbol class-name))})
+         name)))
 
 (defn- get-superclass-methods [^Class cls]
   (let [r (reflect cls)
@@ -340,9 +344,9 @@
        ;(defonce ~interface-name {})
        ~@(for [[name arity] methods-to-create
                :let [param-list (vec (repeatedly arity gensym))]]
-             ;; the method name will have to become unmunged.  additionally, this is going to find that there are
+             ;; the method name will have to become unmunged.
            (when-not (resolve (symbol (demunge name)))
-              ;; because of the different arit of functions, this might not work if it has the same signature with different values
+              ;; because of the different arity of functions, this might not work if it has the same signature with different values
               ;; maybe we should collect this into a name/arity collection
              `(defn ~(symbol (demunge name))
                 {:inline (fn [~this-var & args#]

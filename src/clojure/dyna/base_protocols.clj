@@ -1,5 +1,5 @@
 (ns dyna.base-protocols
-  (:require [dyna.utils :refer [import-interface-methods]])
+  (:require [dyna.utils :refer [import-interface-methods defsimpleinterface]])
   (:import [dyna DIterable DIterator DIteratorInstance Dynabase]))
 
 ;; this file defines the base protocols (interfaces) which are referenced
@@ -63,7 +63,11 @@
   ;;    1 this uses indirect calls somewhere so we can not be sure if this will have a base cases as a result of the indirection
   ;;    2 there is some recursion, but there is also a base case that could maybe get hit
   ;;    3 there is no recursion
-  (check-rexpr-basecases [this stack]))
+  (check-rexpr-basecases [this stack])
+
+
+  (simplify-fast-rexprl [this simplify])
+  (simplify-inference-rexprl [this simplify]))
 
   ;; (visit-rexpr-children [this remap-function]) ;; this will visit any nested R-exprs on the expression, and return a new expression of the same type with
   ;(visit-all-children [this remap-function]) ;; this will visit
@@ -149,32 +153,7 @@
     (iter-debug-which-variable-bound [this] nil)))
 
 
-(comment
-  (defsimpleinterface DIterable
-    (iter-what-variables-bound []) ;; return a set of which variables can be bound
-    (iter-variable-binding-order []) ;; return a list of lists, where the second list represents which order the variables will get bound in
-
-    ;; maybe this should instead select which option it will be going for
-
-    (iter-create-iterator [which-binding])) ;; create an iterator which can do the binding of different variables
-
-
-  (defsimpleinterface DIterator
-    (iter-run-cb [^clojure.lang.IFn cb-fun]) ;; the function will get passed the value
-
-    (iter-bind-value [value]))
-
-
-  ;; this can just be a seq in clojure
-  (defsimpleinterface DIteratorVariable
-    (^boolean iter-has-next [])
-    (iter-next []))
-
-
-  ;; this could just be returned as a pair.  It does not have to be its own class?
-  (defsimpleinterface DIteratorInstance
-    (iter-variable-value []) ;; return the value for which an expression has been bound
-    (iter-continuation []))) ;; return the next iterator in the sequence of binding multiple values
+ ;; return the next iterator in the sequence of binding multiple values
 
 
 ;; (defrecord MemoizationContainer [RConditional

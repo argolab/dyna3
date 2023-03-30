@@ -13,7 +13,7 @@
   (:require [dyna.user-defined-terms :refer [add-to-user-term user-rexpr-combined-no-memo]])
   (:require [dyna.rexpr-builtins :refer [meta-free-dummy-free-value]])
   (:require [dyna.prefix-trie :refer :all])
-  (:require [dyna.rexpr-aggregators-optimized :refer [*aggregator-op-contribute-value*]])
+  (:require [dyna.rexpr-aggregators-optimized :refer [*aggregator-op-contribute-value* *aggregator-op-additional-constraints* *aggregator-op-saturated*]])
   (:require [dyna.rexpr-disjunction :refer [trie-diterator-instance]])
   (:require [clojure.set :refer [union difference]])
   (:import [dyna DynaUserError IDynaAgendaWork DynaTerm InvalidAssumption UnificationFailure DIterable])
@@ -252,24 +252,47 @@
   (memo-refresh-value-for-key [this key]
     (loop []
       (let [[valid _ current-memoized-values] @data
-            [compute-assumpt [cctx ret-rexpr]]
+            [compute-assumpt [cctx ret-rexpr accumulated-agg-values]]
             (compute-with-assumption
              (let [cctx (context/make-empty-context orig-rexpr)]
                (doseq [[var val] (zipseq argument-variables key)
                        :when (not (nil? val))]
                  (ctx-set-value! cctx var val))
-               (let [rr (binding [*aggregator-op-contribute-value* (fn [value mult]
-                                        ;(debug-repl "agg contrib")
-                                                                     (make-aggregator-op-inner (make-constant value)
+               (debug-repl "do refresh")
+               (let [accumulator (volatile! nil)
+                     rr (binding [*aggregator-op-contribute-value* (fn [value mult]
+                                                                     (let [kvals (map get-value argument-variables)]
+                                                                       (vswap! accumulator update-in kvals (fn [old]
+                                                                                                             (if (nil? old)
+                                                                                                               ((:many-items aggregator-op) value mult)
+                                                                                                               ((:combine-mult aggregator-op) old value mult)))))
+                                                                     (make-multiplicity 0)
+                                                                     #_(make-aggregator-op-inner (make-constant value)
                                                                                                []
-                                                                                               (make-multiplicity mult)))]
+                                                                                               (make-multiplicity mult)))
+                                  *aggregator-op-additional-constraints* (fn [incoming-variable] ;; TODO: this needs to handle the case
+                                                                           (make-multiplicity 1))
+                                  *aggregator-op-saturated* (if (:saturate aggregator-op)
+                                                              (let [sf (:saturate aggregator-op)]
+                                                                (fn []
+                                                                  (let [kvals (map get-value argument-variables)
+                                                                        cur-val (if (empty? kvals)
+                                                                                  (get @accumulator nil)
+                                                                                  (get-in @accumulator kvals))]
+                                                                    (when-not (nil? cur-val)
+                                                                      (sf cur-val)))))
+                                                              (fn [] false))
+                                  ]
                           (context/bind-context cctx
                                                 (try (simplify-fully orig-rexpr)
                                                      (catch UnificationFailure e (make-multiplicity 0)))))]
                  (println "TODO: the resulting memoized R-expr has extra unifies that are not necessary, need to remove from the expression")
                  ;(debug-repl "refresh for key")
-                 [cctx rr]))
+                 [cctx rr @accumulator]))
              )]
+        (when-not (nil? accumulated-agg-values)
+          (debug-repl "handled accum")
+          (???))
         ;(debug-repl "in refresh")
         ;; we only care about the current-memoized-values changing.  The other
         ;; fields of @data could change while we are performing a computation
