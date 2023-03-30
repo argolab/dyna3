@@ -1,12 +1,15 @@
 (ns dyna.base-protocols
   (:require [dyna.utils :refer [import-interface-methods defsimpleinterface]])
-  (:import [dyna DIterable DIterator DIteratorInstance Dynabase]))
+  (:import [dyna DIterable DIterator DIteratorInstance Dynabase
+            Rexpr RContext RexprValue
+            ]))
 
 ;; this file defines the base protocols (interfaces) which are referenced
 ;; throughout the rest of the project in different files.  The implementations
 ;; for these methods are scattered around
 
-(defprotocol Rexpr
+(import-interface-methods Rexpr)
+#_(defprotocol Rexpr
   (primitive-rexpr [this]) ;; return a primitive r-expr for the expression
   ;;(replace-expressions [this expressions-map]) ;; replace a given nested expression
   (get-variables [this])  ;; get the variables from the current rexpr
@@ -74,8 +77,8 @@
 
 
 
-;; should change this to an interface...
-(defprotocol RexprValue
+(import-interface-methods RexprValue)
+#_(defprotocol RexprValue
   (get-value [this])
   (get-value-in-context [this ctx])
   (get-representation-in-context [this ctx])
@@ -85,7 +88,8 @@
   (all-variables [this]))
 
 
-(defprotocol RContext
+(import-interface-methods RContext)
+#_(defprotocol RContext
   (ctx-get-rexpr [this])
   (ctx-get-value [this variable])
   (ctx-is-bound? [this variable])

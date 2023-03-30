@@ -258,7 +258,7 @@
                (doseq [[var val] (zipseq argument-variables key)
                        :when (not (nil? val))]
                  (ctx-set-value! cctx var val))
-               (debug-repl "do refresh")
+               ;(debug-repl "do refresh")
                (let [accumulator (volatile! nil)
                      rr (binding [*aggregator-op-contribute-value* (fn [value mult]
                                                                      (let [kvals (map get-value argument-variables)]
@@ -270,8 +270,19 @@
                                                                      #_(make-aggregator-op-inner (make-constant value)
                                                                                                []
                                                                                                (make-multiplicity mult)))
-                                  *aggregator-op-additional-constraints* (fn [incoming-variable] ;; TODO: this needs to handle the case
-                                                                           (make-multiplicity 1))
+                                  *aggregator-op-additional-constraints*
+                                  (if (:add-to-in-rexpr aggregator-op)
+                                    (let [ati (:add-to-in-rexpr aggregator-op)]
+                                      (fn [incoming-variable]
+                                        (let [kvals (map get-value argument-variables)
+                                              cur-val (if (empty? kvals)
+                                                        (get @accumulator nil)
+                                                        (get-in @accumulator kvals))]
+                                          (if-not (nil? cur-val)
+                                            (ati cur-val incoming-variable)
+                                            (make-multiplicity 1)))))
+                                    (fn [incoming-variable]
+                                      (make-multiplicity 1)))
                                   *aggregator-op-saturated* (if (:saturate aggregator-op)
                                                               (let [sf (:saturate aggregator-op)]
                                                                 (fn []
@@ -289,7 +300,22 @@
                  (println "TODO: the resulting memoized R-expr has extra unifies that are not necessary, need to remove from the expression")
                  ;(debug-repl "refresh for key")
                  [cctx rr @accumulator]))
-             )]
+             )
+            ;; this is a new trie which will contain all of the new R-expr values which are represented
+            ;; how this will encode the different values will mean that
+            accum-vals-wrapped (if (empty? accumulated-agg-values)
+                                 (make-multiplicity 0)
+                                 (if (empty? argument-variables)
+                                   (make-aggregator-op-inner (make-constant (get accumulated-agg-values nil))
+                                                             [] (make-multiplicity 1))
+                                   ((fn rec [depth node]
+                                      (if (= depth 0)
+                                        (make-aggregator-op-inner (make-constant node) [] (make-multiplicity 1))
+                                        (into {} (for [[k v] node]
+                                                   [k (rec (- depth 1) v)]))))
+                                    (count argument-variables) accumulated-agg-values)))
+            trie-with-new-values ()
+            ]
         (when-not (nil? accumulated-agg-values)
           (debug-repl "handled accum")
           (???))
@@ -639,7 +665,10 @@
 
     ))
 
+
 (defn- convert-user-term-to-have-memos [rexpr mapf]
+  ;; this takes an R-expr and adds one or more memo tables to the R-expr such that it will support memoization
+  ;; I suppose that it will
   (debug-binding
    [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
    (if (is-aggregator-op-outer? rexpr)
@@ -710,7 +739,7 @@
                                                                                                                       priority-function
                                                                                                                       agg-op
                                                                                                                       rr
-                                                                                                                      (drop-last variable-list) ;; the argument variables
+                                                                                                                      (vec (drop-last variable-list)) ;; the argument variables
                                         ;agg-result  ;; this is the local variable which is used
                                                                                                                       #_(last variable-list) ;; result of aggregation goes here....though this might not be used by the aggregator
                                                                                                                       (make-assumption)

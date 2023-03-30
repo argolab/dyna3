@@ -2,7 +2,7 @@
   (:require [dyna.utils :refer :all])
   (:require [dyna.base-protocols :refer :all])
   (:require [clojure.set :refer [union intersection difference]])
-  (:import (dyna UnificationFailure))
+  (:import [dyna UnificationFailure RContext])
   (:require [dyna.rexpr-constructors :refer :all]))
 
 
@@ -222,7 +222,7 @@
   ;; this should remap any call to get-context to whatever is the new variable
 
   `(let [new-ctx# ~val]
-     (dyna-assert (and (satisfies? RContext new-ctx#)
+     (dyna-assert (and (instance? RContext new-ctx#)
                        (not (nil? new-ctx#))))
      (let [resulting-rexpr# (binding [*context* new-ctx#]
                               ~@args)]
@@ -231,7 +231,7 @@
 
 (defmacro bind-context-raw [val & args]
   `(let [new-ctx# ~val]
-     (dyna-assert (and (satisfies? RContext new-ctx#)
+     (dyna-assert (and (instance? RContext new-ctx#)
                        (not (nil? new-ctx#))))
      (binding [*context* new-ctx#]
        ~@args)))

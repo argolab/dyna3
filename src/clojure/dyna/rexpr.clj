@@ -8,7 +8,7 @@
   (:require [clojure.set :refer [union difference subset?]])
   (:require [clojure.string :refer [trim]])
   (:require [aprint.core :refer [aprint]])
-  (:import [dyna UnificationFailure DynaTerm StatusCounters]))
+  (:import [dyna UnificationFailure DynaTerm StatusCounters Rexpr RexprValue RContext]))
 
 (defn simplify-identity [a b] a)
 
@@ -485,7 +485,7 @@
   (get-value-in-context [this ctx] (ctx-get-value ctx this))
   (set-value! [this value]
     (ctx-set-value! (context/get-context) this value))
-  (is-bound? [this]  (context/need-context (ctx-is-bound? (context/get-context) this)))
+  (is-bound? [this] (boolean (context/need-context (ctx-is-bound? (context/get-context) this))))
   (is-bound-in-context? [this context] (ctx-is-bound? context this))
   (all-variables [this] #{this})
   (get-representation-in-context [this ctx]
@@ -570,14 +570,14 @@
 ;; (defn make-structured-rexpr [name arguments]
 ;;   (???) ;; not used anymore
 ;;   (assert (string? name))
-;;   (assert (every? (partial satisfies? RexprValue) arguments))
+;;   (assert (every? (partial instance? RexprValue) arguments))
 ;;   (structured-rexpr. name arguments))
 
 ;; (defmethod print-method structured-rexpr [^structured-rexpr this ^java.io.Writer w]
 ;;   (.write w (.toString ^Object this)))
 
 ;; (defn make-structured-value [name values]
-;;   (assert (every? (partial satisfies? RexprValue) values))
+;;   (assert (every? (partial instance? RexprValue) values))
 ;;   (assert (string? name))
 ;;   (structured-rexpr. name values))
 
@@ -588,7 +588,7 @@
 (intern 'dyna.rexpr-constructors 'is-variable? is-variable?)
 
 (defn rexpr? [rexpr]
-  (and (satisfies? Rexpr rexpr)
+  (and (instance? Rexpr rexpr)
        (not (or (is-variable? rexpr) (is-constant? rexpr)))))
 
 
@@ -596,19 +596,19 @@
 (defn check-argument-mult [x] (or (and (int? x) (>= x 0)) (= ##Inf x)))
 (defn check-argument-rexpr [x] (rexpr? x))
 (defn check-argument-rexpr-list [x] (and (seqable? x) (every? rexpr? x) (not (instance? clojure.lang.LazySeq x))))
-(defn check-argument-var [x] (satisfies? RexprValue x)) ;; a variable or constant of a single value.  Might want to remove is-constant? from this
+(defn check-argument-var [x] (instance? RexprValue x)) ;; a variable or constant of a single value.  Might want to remove is-constant? from this
 (defn check-argument-var-list [x] (and (seqable? x) (every? check-argument-var x)))
 (defn check-argument-var-map [x] (and (map? x) (every? (fn [[a b]] (and (check-argument-var a)
                                                                         (check-argument-var b)))
                                                        x)))
 (defn check-argument-var-set-map [x] (and (set? x) (every? check-argument-var-map x)))
 (defn check-argument-call-parent-map [x] (and (map? x) (every? #(and (set? %) (every? check-argument-var-map %)) (vals x))))
-(defn check-argument-value [x] (satisfies? RexprValue x)) ;; something that has a get-value method (possibly a structure)  I think that this is not used anymore
+(defn check-argument-value [x] (instance? RexprValue x)) ;; something that has a get-value method (possibly a structure)  I think that this is not used anymore
 (defn check-argument-hidden-var [x] (check-argument-var x))
 (defn check-argument-str [x] (string? x))
 (defn check-argument-unchecked [x] true)
 (defn check-argument-opaque-constant [x] ;; something that is not in the R-expr language
-  (not (or (satisfies? Rexpr x) (satisfies? RexprValue x))))
+  (not (or (instance? Rexpr x) (instance? RexprValue x))))
 (defn check-argument-boolean [x] (boolean? x))
 (defn check-argument-file-name [x]
   (or (nil? x)
