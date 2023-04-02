@@ -264,13 +264,15 @@
                                   (if (:add-to-in-rexpr aggregator-op)
                                     (let [ati (:add-to-in-rexpr aggregator-op)]
                                       (fn [incoming-variable]
-                                        (let [kvals (vec (map get-value argument-variables))
-                                              cur-val (get @accumulator kvals)]
-                                          (if-not (nil? cur-val)
-                                            (let [rr (ati cur-val incoming-variable)]
-                                              (debug-repl "rr")
-                                              rr)
-                                            (make-multiplicity 1)))))
+                                        (if-not *simplify-with-inferences*
+                                          (make-multiplicity 1)
+                                          (let [kvals (vec (map get-value argument-variables))
+                                                cur-val (get @accumulator kvals)]
+                                            (if-not (nil? cur-val)
+                                              (let [rr (ati cur-val incoming-variable)]
+                                                (debug-repl "rr")
+                                                (simplify-inference rr))
+                                              (make-multiplicity 1))))))
                                     (fn [incoming-variable]
                                       (make-multiplicity 1)))
                                   *aggregator-op-saturated* (if (:saturate aggregator-op)

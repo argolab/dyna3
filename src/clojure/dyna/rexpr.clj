@@ -1158,6 +1158,8 @@
 
 (def ^{:dynamic true} *memoization-make-guesses* false)  ;; if this is false, then the memos should not make any guesses, and just "remain" in hopes they will be eleminated by some other conjunct
 
+(def ^{:dynamic true} *simplify-with-inferences* false)
+
 (defn simplify-fast [rexpr]
   (debug-binding
    [*current-simplify-stack* (conj *current-simplify-stack* rexpr)
@@ -1214,7 +1216,8 @@
                     (recur nr)
                     nr)))
           nrif (debug-binding [*current-top-level-rexpr* nri]
-                              (simplify-inference nri))]
+                              (binding [*simplify-with-inferences* true]
+                                (simplify-inference nri)))]
       (if (not= nrif nri)
         (recur nrif)
         nrif))))

@@ -13,7 +13,7 @@
 ;; global variable which sets the full-context variable on the context.  The
 ;; full context tracks /all/ conjunctive constraints rather than just the easy
 ;; constraints
-(def ^{:dynamic true :private true} *use-full-context* false)
+;(def ^{:dynamic true :private true} *use-full-context* false)
 
 (defn- make-variable-assignment-conjunct [value-map]
   (make-conjunct (into [] (for [[k v] value-map]
@@ -25,7 +25,7 @@
 
 (deftype context
     [parent
-     full-context ; if true, then this is tracking all conjuncts, otherwise this is just the assignments to variables
+     ;full-context ; if true, then this is tracking all conjuncts, otherwise this is just the assignments to variables
                   ; this is currently getting ignored, so we are essentially always having the full context
      context-kind
      root-rexpr
@@ -77,13 +77,13 @@
   ;; these methods are likely inefficient, currently just placeholder implementations here
   (ctx-intersect [this other]
     (assert (identical? parent (.-parent ^context other)))
-    (context. parent full-context context-kind nil ;; if there are two rexprs here, then there is no root-rexpr for this
+    (context. parent context-kind nil ;; if there are two rexprs here, then there is no root-rexpr for this
               (intersection rexprs (.-rexprs ^context other))
               (into {} (intersection (into #{} (seq value-map))
                                      (into #{} (seq (.-value-map ^context other)))))))
   (ctx-subtract [this other]  ;; return this - other.  Meaning that parent should be the other
     (assert (identical? parent (.-parent ^context other)))
-    (context. parent full-context context-kind nil ;; what is the r-rexpr which is represented here?
+    (context. parent context-kind nil ;; what is the r-rexpr which is represented here?
               (difference rexprs (.-rexprs ^context other))
               (into {} (difference (into #{} (seq value-map))
                                    (into #{} (seq (.-value-map ^context other)))))))
@@ -98,11 +98,11 @@
       ;; the root context is the top level, when we exit, this is either getting stored or returned to the user
       (= context-kind :root) (make-conjunct [(make-variable-assignment-conjunct value-map)
                                              resulting-rexpr])
-      (and (= context-kind :disjunct) (not full-context)) (if-not (empty? value-map)
-                                                            ;; then we have to save the value of these variables into the R-expr
-                                                            (make-conjunct [(make-variable-assignment-conjunct value-map)
-                                                                            resulting-rexpr])
-                                                            resulting-rexpr)  ;; there is nothing to add to this expression
+      (= context-kind :disjunct) (if-not (empty? value-map)
+                                   ;; then we have to save the value of these variables into the R-expr
+                                   (make-conjunct [(make-variable-assignment-conjunct value-map)
+                                                   resulting-rexpr])
+                                   resulting-rexpr)  ;; there is nothing to add to this expression
 
       (= context-kind :proj) (let [proj-var (:var root-rexpr)]
                                (assert (empty? (dissoc value-map proj-var))) ;; all of the other variable assignments should have already been propagated out
@@ -120,10 +120,9 @@
                                                    (doseq [[var val] value-map]
                                                      (when (not= incoming-var var)
                                                        (ctx-set-value! parent var val)))
-                                                   (when full-context
-                                                     (doseq [rx rexprs]
-                                                       (when-not (contains? (get-variables rx) incoming-var)
-                                                         (ctx-add-rexpr! parent rx)))))
+                                                   (doseq [rx rexprs]
+                                                     (when-not (contains? (get-variables rx) incoming-var)
+                                                       (ctx-add-rexpr! parent rx))))
                                                  resulting-rexpr)
       (= context-kind :memo-expr-conditional) resulting-rexpr  ;; I suppose this will just reset after it runs
       (= context-kind :aggregator-op-inner) (do
@@ -168,24 +167,24 @@
 
 
 (defn make-empty-context [rexpr]
-  (context. nil *use-full-context* :root rexpr #{rexpr} {}))
+  (context. nil  :root rexpr #{rexpr} {}))
 
 (defn make-nested-context-disjunct [rexpr]
   (assert (bound? #'*context*))
-  (context. *context* *use-full-context* :disjunct rexpr #{rexpr} {}))
+  (context. *context*  :disjunct rexpr #{rexpr} {}))
 
 (defn make-nested-context-proj [rexpr variables]
   (assert (bound? #'*context*))
-  (context. *context* *use-full-context* :proj rexpr #{rexpr} (into {} (map (fn [x] [x nil]) variables))))
+  (context. *context* :proj rexpr #{rexpr} (into {} (map (fn [x] [x nil]) variables))))
 
 (defn make-nested-context-if-conditional [rexpr]
   (assert (bound? #'*context*))
-  (context. *context* *use-full-context* :if-expr-conditional rexpr #{rexpr} {}))
+  (context. *context* :if-expr-conditional rexpr #{rexpr} {}))
 
 (defn make-nested-context-aggregator [rexpr incoming-var is-conjunctive-aggregator]
   (assert (bound? #'*context*))
   (let [pcontext *context*]
-    (context. pcontext *use-full-context*
+    (context. pcontext
               (if is-conjunctive-aggregator
                 :aggregator-conjunctive  ;; this would mean that we can push through assignments of variables to variables which are outside of this expression.  If something is
                 :aggregator)
@@ -200,11 +199,11 @@
 
 (defn make-nested-context-memo-conditional [rexpr]
   (assert (bound? #'*context*))
-  (context. *context* *use-full-context* :memo-expr-conditional rexpr #{rexpr} {}))
+  (context. *context* :memo-expr-conditional rexpr #{rexpr} {}))
 
 (defn make-nested-context-aggregator-op-outer [rexpr]
   (let [c *context*]
-    (context. c *use-full-context* :aggregator-op-outer rexpr #{rexpr}
+    (context. c  :aggregator-op-outer rexpr #{rexpr}
               {}
               #_(into {} (for [v exposed-vars
                              :when (not (is-bound-in-context? v c))]
@@ -213,7 +212,7 @@
                          [v nil])))))
 
 (defn make-nested-context-aggregator-op-inner [rexpr projected-vars incoming-var]
-  (context. *context* *use-full-context* :aggregator-op-inner rexpr #{rexpr} (into {incoming-var nil} (for [v projected-vars] [v nil]))))
+  (context. *context* :aggregator-op-inner rexpr #{rexpr} (into {incoming-var nil} (for [v projected-vars] [v nil]))))
 
 (defmethod print-method context [this ^java.io.Writer w]
   (.write w (.toString ^Object this)))

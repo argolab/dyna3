@@ -928,3 +928,10 @@
           :context (colon-line-tracking (:ground idx2) _ res)}
   :run-at :inference
   :check (>= (get-value idx2) (get-value idx)))
+
+(def-rewrite
+  :match {:rexpr (colon-line-tracking-min (:ground idx) (:free res))
+          :context (colon-line-tracking-min (:ground idx2) res)
+          :check (>= (get-value idx2) (get-value idx))}
+  :run-at :inference
+  (make-multiplicity 1))
