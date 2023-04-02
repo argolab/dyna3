@@ -267,7 +267,9 @@
                                         (let [kvals (vec (map get-value argument-variables))
                                               cur-val (get @accumulator kvals)]
                                           (if-not (nil? cur-val)
-                                            (ati cur-val incoming-variable)
+                                            (let [rr (ati cur-val incoming-variable)]
+                                              (debug-repl "rr")
+                                              rr)
                                             (make-multiplicity 1)))))
                                     (fn [incoming-variable]
                                       (make-multiplicity 1)))
@@ -291,7 +293,7 @@
                                                                      [(make-aggregator-op-inner (make-constant x) [] (make-multiplicity 1))]))
             new-values (if (is-empty-rexpr? ret-rexpr)
                          accum-vals-wrapped
-                         (update-in accum-vals-wrapped key (fn [x] (conj (or x []) ret-rexpr))))
+                         (update accum-vals-wrapped key (fn [x] (conj (or x []) ret-rexpr))))
             new-values-freq (frequencies new-values)
             ]
         ;(debug-repl "rr")
@@ -336,12 +338,13 @@
                                                        (if (empty? kvs)
                                                          cmv
                                                          (let [[kk re] (first kvs)]
+                                                           (debug-repl)
                                                            #_(when-not (= mult 1)
                                                                (debug-repl "mult?"))
                                                            ;; TODO: this needs to check that
                                                            (vswap! messages-to-send conj kk)
                                                            (recur (trie-update-collection cmv kk (fn [c]
-                                                                                                   (when-not (empty? c)
+                                                                                                   (when-not (nil? c)
                                                                                                      ;; TODO: this "replace" c instead of adding it to the
                                                                                                      ;; collection.  This means that it also does not have
                                                                                                      ;; to

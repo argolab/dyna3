@@ -14,13 +14,20 @@
 ;(in-ns 'dyna.rexpr)
 
 (defn  get-variables-in-expression [expression]
-  (if (symbol? expression)
+  (cond
+    (symbol? expression)
     (if (re-matches #"v[0-9]+" (str expression))
       #{ expression }
       #{ }) ; this does not match a variable expression
-    (if (seq? expression)
+
+    (seq? expression)
       (reduce union (map get-variables-in-expression (cdr expression)))
-      #{ })))
+
+    (vector? expression)
+    (reduce union (map get-variables-in-expression expression))
+
+    :else
+    #{}))
 
 (defn construct-rewrite-for-expression [name nargs body]
   (let [all-vars (map #(symbol (str "v" %)) (range nargs))
@@ -904,3 +911,20 @@
   :run-at :inference ;; this is indended to delay this a bit such that it has time to check if this is truly a free variable
   :assigns-variable result
   true)
+
+
+(def-builtin-rexpr colon-line-tracking 3
+  (:allground (= v2 (DynaTerm. "$colon_line_tracking" [v0 v1])))
+  (v2 (DynaTerm. "$colon_line_tracking" [v0 v1])))
+
+(def-user-term "$colon_line_tracking" 2 (make-colon-line-tracking v0 v1 v2))
+
+(def-builtin-rexpr colon-line-tracking-min 2
+  (:allground (and (= "$colon_line_tracking" (:name v1))
+                   (> (get v1 0) v0))))
+
+(def-rewrite
+  :match {:rexpr (colon-line-tracking-min (:ground idx) (:free res))
+          :context (colon-line-tracking (:ground idx2) _ res)}
+  :run-at :inference
+  :check (>= (get-value idx2) (get-value idx)))

@@ -4,7 +4,7 @@
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.rexpr-builtins :refer [make-lessthan make-lessthan-eq
                                          make-add make-times make-min make-max make-lor make-land
-                                         make-not-equals]])
+                                         make-not-equals make-colon-line-tracking-min]])
   (:require [dyna.context :as context])
   (:require [dyna.iterators :refer [run-iterator make-skip-variables-iterator]])
   (:import (dyna UnificationFailure DynaTerm DynaUserError ParserUtils))
@@ -244,7 +244,12 @@
                  (and
                   (instance? DynaTerm x)
                   (= "$colon_line_tracking" (.name ^DynaTerm x))))
-  :add-to-in-rexpr (let [linevar (make-variable (gensym)) ;; this is currently not used by anything
+  :add-to-in-rexpr (fn [current-value incoming-variable]
+                     (if (= (:name current-value) "$colon_line_tracking")
+                       (make-colon-line-tracking-min (make-constant (get current-value 0)) incoming-variable)
+                       (make-multiplicity 1)))
+
+  #_(let [linevar (make-variable (gensym)) ;; this is currently not used by anything
                          valvar (make-variable (gensym))]
                      (fn [current-value incoming-variable]
                        (let [[line val] (.arguments ^DynaTerm current-value)]

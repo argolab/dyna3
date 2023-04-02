@@ -365,9 +365,9 @@ termBody[String aname] returns[DynaTerm rterm]
             $rterm = DynaTerm.create("\$with_key", $rterm, $with_key);
         }
         if(":=".equals($aname)) {
-            $rterm = DynaTerm.create("\$quote1", DynaTerm.create("\$colon_line_tracking",
-                                                                 DynaTerm.create("\$constant", colon_line_counter()),
-                                                                 $rterm));
+            $rterm = DynaTerm.create("\$colon_line_tracking",
+                                     DynaTerm.create("\$constant", colon_line_counter()),
+                                     $rterm);
         }
       }
     ;
