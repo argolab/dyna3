@@ -1208,6 +1208,8 @@
     (let [nri (loop [cr cri]
                 (let [nr (debug-binding [*current-top-level-rexpr* cr]
                                         (simplify cr))]
+                  (debug-delay-ntimes 200
+                                      (debug-repl "delayed"))
                   (if (not= cr nr)
                     (recur nr)
                     nr)))

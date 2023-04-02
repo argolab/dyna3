@@ -164,32 +164,22 @@
               (let [lookup-key (drop-last (second control-setting))
                     has-key (is-key-contained? has-computed lookup-key)]
                 (if-not has-key
-                  (let [[old-dat new-dat] (swap-vals! data (fn [[a b c]]
-                                                             (if-not a
-                                                               [a b c] ;; not valid, do not change
-                                                               [a (assoc-in b lookup-key true) c])))]
-                    (when (or (identical? (second old-dat) has-computed) ;; this first check is just an optimization, we really care about if the we were the ones to add the new lookup key, which means it wasn't in old
-                              (not (is-key-contained? (second old-dat) lookup-key)))
-                      (when (< (first lookup-key) -3)
-                        (debug-repl "very neg"))
-                      (when (= (first lookup-key) -1)
-                        (debug-repl "neg1 lookup"))
-                      (memo-push-recompute-key this lookup-key))
-                    (make-multiplicity 0) ;; return 0, as we currently do not have anything for this value
+                  (if *memoization-make-guesses* ;; making a "bad guess" can cause this to not terminate
+                    (let [[old-dat new-dat] (swap-vals! data (fn [[a b c]]
+                                                               (if-not a
+                                                                 [a b c] ;; not valid, do not change
+                                                                 [a (assoc-in b lookup-key true) c])))]
+                      (when (or (identical? (second old-dat) has-computed) ;; this first check is just an optimization, we really care about if the we were the ones to add the new lookup key, which means it wasn't in old
+                                (not (is-key-contained? (second old-dat) lookup-key)))
+                        (when (< (first lookup-key) -3)
+                          (debug-repl "very neg"))
+                        (when (= (first lookup-key) -1)
+                          (debug-repl "neg1 lookup"))
+                        (memo-push-recompute-key this lookup-key))
+                      (make-multiplicity 0) ;; return 0, as this is the current "guess" for this value and there is currently nothing there
+                      )
+                    nil ;; return nil as we have to defer this "lookup" as we don't have anything and we are defering the guess operation (for now)
                     )
-
-                  #_(let [prio (memo-priority-function variable-values)  ;; the priority of this compute operation.  though this is different
-                        [old-dat new-dat] (swap-vals! data (fn [[a b c]]
-                                                        (if-not a
-                                                          [a b c]
-                                                          [a (assoc-in b lookup-key true) c] ;; record that this value is going to get computed
-                                                          )))
-                        ]
-                    (when
-
-
-                      (system/push-agenda-work (AgendaReprocessWork. this (doall lookup-key) prio)))
-                    (make-multiplicity 0))
 
                   ;; has-key is true, so we are going to return the matched values from the data trie
                   (let [;has-nil (some nil? variable-values)
@@ -259,13 +249,13 @@
                        :when (not (nil? val))]
                  (ctx-set-value! cctx var val))
                ;(debug-repl "do refresh")
-               (let [accumulator (volatile! nil)
+               (let [accumulator (volatile! nil) ;; this is a "flat" map from tuples to values (not a trie)
                      rr (binding [*aggregator-op-contribute-value* (fn [value mult]
-                                                                     (let [kvals (map get-value argument-variables)]
-                                                                       (vswap! accumulator update-in kvals (fn [old]
-                                                                                                             (if (nil? old)
-                                                                                                               ((:many-items aggregator-op) value mult)
-                                                                                                               ((:combine-mult aggregator-op) old value mult)))))
+                                                                     (let [kvals (vec (map get-value argument-variables))]
+                                                                       (vswap! accumulator update kvals (fn [old]
+                                                                                                          (if (nil? old)
+                                                                                                            ((:many-items aggregator-op) value mult)
+                                                                                                            ((:combine-mult aggregator-op) old value mult)))))
                                                                      (make-multiplicity 0)
                                                                      #_(make-aggregator-op-inner (make-constant value)
                                                                                                []
@@ -274,10 +264,8 @@
                                   (if (:add-to-in-rexpr aggregator-op)
                                     (let [ati (:add-to-in-rexpr aggregator-op)]
                                       (fn [incoming-variable]
-                                        (let [kvals (map get-value argument-variables)
-                                              cur-val (if (empty? kvals)
-                                                        (get @accumulator nil)
-                                                        (get-in @accumulator kvals))]
+                                        (let [kvals (vec (map get-value argument-variables))
+                                              cur-val (get @accumulator kvals)]
                                           (if-not (nil? cur-val)
                                             (ati cur-val incoming-variable)
                                             (make-multiplicity 1)))))
@@ -286,10 +274,8 @@
                                   *aggregator-op-saturated* (if (:saturate aggregator-op)
                                                               (let [sf (:saturate aggregator-op)]
                                                                 (fn []
-                                                                  (let [kvals (map get-value argument-variables)
-                                                                        cur-val (if (empty? kvals)
-                                                                                  (get @accumulator nil)
-                                                                                  (get-in @accumulator kvals))]
+                                                                  (let [kvals (vec (map get-value argument-variables))
+                                                                        cur-val (get @accumulator kvals)]
                                                                     (when-not (nil? cur-val)
                                                                       (sf cur-val)))))
                                                               (fn [] false))
@@ -297,34 +283,89 @@
                           (context/bind-context cctx
                                                 (try (simplify-fully orig-rexpr)
                                                      (catch UnificationFailure e (make-multiplicity 0)))))]
-                 (println "TODO: the resulting memoized R-expr has extra unifies that are not necessary, need to remove from the expression")
-                 ;(debug-repl "refresh for key")
                  [cctx rr @accumulator]))
              )
             ;; this is a new trie which will contain all of the new R-expr values which are represented
             ;; how this will encode the different values will mean that
-            accum-vals-wrapped (if (empty? accumulated-agg-values)
-                                 (make-multiplicity 0)
-                                 (if (empty? argument-variables)
-                                   (make-aggregator-op-inner (make-constant (get accumulated-agg-values nil))
-                                                             [] (make-multiplicity 1))
-                                   ((fn rec [depth node]
-                                      (if (= depth 0)
-                                        (make-aggregator-op-inner (make-constant node) [] (make-multiplicity 1))
-                                        (into {} (for [[k v] node]
-                                                   [k (rec (- depth 1) v)]))))
-                                    (count argument-variables) accumulated-agg-values)))
-            trie-with-new-values ()
+            accum-vals-wrapped (update-vals accumulated-agg-values (fn [x]
+                                                                     [(make-aggregator-op-inner (make-constant x) [] (make-multiplicity 1))]))
+            new-values (if (is-empty-rexpr? ret-rexpr)
+                         accum-vals-wrapped
+                         (update-in accum-vals-wrapped key (fn [x] (conj (or x []) ret-rexpr))))
+            new-values-freq (frequencies new-values)
             ]
+        ;(debug-repl "rr")
         (when-not (nil? accumulated-agg-values)
-          (debug-repl "handled accum")
-          (???))
+          (debug-repl "handled accum"))
         ;(debug-repl "in refresh")
         ;; we only care about the current-memoized-values changing.  The other
         ;; fields of @data could change while we are performing a computation
         ;;
         ;; I suppose that we actually only care about the
-        (let [[cvalid _ memoized-values] @data
+        (let [need-to-redo (volatile! false)
+              messages-to-send (volatile! nil)]
+          (swap! data (fn [[valid has-computed mv]]
+                        (if-not valid
+                          [valid has-computed mv] ;; then just don't do anything as this is already invalidated, so we are not going to update
+                          (if-not (identical? mv current-memoized-values)
+                            ;; we only care about the current-memoized-values
+                            ;; chainging.  The has-computed could change while
+                            ;; we are performing a computation and that is fine.
+                            ;; As such do not directly use swap! on the atom
+                            ;; when performing this update.
+
+                            (do (vreset! need-to-redo true)
+                                [valid has-computed mv])
+                            (let [existing-values (frequencies (trie-get-values-collection mv key))
+                                  ]
+                              (if (= existing-values new-values-freq)
+                                (do ;; then this is the same, so we do not have to do anything here
+                                  [valid has-computed mv])
+                                (do (vreset! messages-to-send nil)
+                                    (let [with-deleted (loop [cmv mv
+                                                              kks (keys existing-values)]
+                                                         (if (empty? kks) cmv
+                                                             (let [[kk _] (first kks)]
+                                                               (if (contains? new-values kk)
+                                                                 (recur cmv (next kks))
+                                                                 (do
+                                                                   (vswap! messages-to-send conj kk)
+                                                                   (recur (trie-delete-matched cmv kk) (next kks)))))))
+                                          with-added (loop [cmv with-deleted
+                                                            kvs (seq new-values)]
+                                                       (if (empty? kvs)
+                                                         cmv
+                                                         (let [[kk re] (first kvs)]
+                                                           #_(when-not (= mult 1)
+                                                               (debug-repl "mult?"))
+                                                           ;; TODO: this needs to check that
+                                                           (vswap! messages-to-send conj kk)
+                                                           (recur (trie-update-collection cmv kk (fn [c]
+                                                                                                   (when-not (empty? c)
+                                                                                                     ;; TODO: this "replace" c instead of adding it to the
+                                                                                                     ;; collection.  This means that it also does not have
+                                                                                                     ;; to
+                                                                                                     (???))
+                                                                                                   (vec (concat (or c []) re))))
+                                                                  (next kvs)))))]
+                                      ;(debug-repl "todo")
+                                      [valid has-computed with-added]
+                                      ;(???)
+                                      ))) ;; TODO
+                              ))
+                          )))
+          (if @need-to-redo
+            (recur)
+            (do
+              (doseq [msg @messages-to-send]
+                (debug-repl "todo msg")
+                (send-message! assumption {:kind :value-changed
+                                           :from-memo-table this
+                                           :key msg})
+                ;(???)
+                ))))
+
+        #_(let [[cvalid _ memoized-values] @data
               messages-to-send (volatile! nil)]
           (if-not cvalid
             nil ;; then this is just done, this structure is not relevant any more, so we are not going to attempt to update this

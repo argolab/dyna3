@@ -12,6 +12,19 @@
 
   (:require [clojure.set :refer [subset?]]))
 
+(defrecord Aggregator [^String name
+                       ^clojure.lang.IFn combine           ;; (f a b) == a + b
+                       ^clojure.lang.IFn combine-mult      ;; (f a b mul) == a + b * mult
+                       ^clojure.lang.IFn many-items        ;; (f a mul) == a * mul
+                       ^clojure.lang.IFn rexpr-binary-op   ;; (f (make-variable 'a) (make-variable 'b) (make-variable 'result)) == result = a+b
+                       identity
+                       ^clojure.lang.IFn lower-value
+                       ^boolean allows-with-key
+                       ^clojure.lang.IFn add-to-in-rexpr
+                       ^clojure.lang.IFn add-to-out-rexpr
+                       ^clojure.lang.IFn saturate
+                       ])
+
 (def aggregators (atom {}))
 
 (defn is-aggregator-defined? [^String name]
@@ -42,7 +55,9 @@
 
     ;; this should construct the other functions if they don't already exist, so that could mean that there are some defaults for everything
     ;; when the aggregator is created, it can have whatever oeprations are
-    (swap! aggregators assoc name args5)))
+    (swap! aggregators assoc name (map->Aggregator (merge {:allows-with-key false
+                                                           :lower-value identity}
+                                                          args5)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -342,7 +357,7 @@
                                            disj))))]
            (if (empty? body1)
              (do ;(debug-repl)
-               (make-unify result-variable (make-constant ((:lower-value aop identity) @agg-val))))  ;; there is nothing else
+               (make-unify result-variable (make-constant ((:lower-value aop) @agg-val))))  ;; there is nothing else
              ;; that remains, so just
              ;; return the result of aggregation
              ;; make a new aggregator with the body which has combined expressions together

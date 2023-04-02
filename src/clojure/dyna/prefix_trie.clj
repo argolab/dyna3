@@ -71,6 +71,7 @@
   (trie-merge [^dyna.prefix_trie.IPrefixTrie other])
 
   (trie-delete-matched [key])
+  (trie-delete-key [key])
 
   ;; this is going to have to return an iterator of the subset of values which map to something
   ;; if there is something about wehich expression might have this
@@ -235,22 +236,38 @@
   (trie-delete-matched [this key]
     (if (or (nil? key) (every? nil? key))
       (PrefixTrie. arity 0 nil) ;; this matches everything, so return an empty trie
-      (PrefixTrie. arity 0 ((fn rec [key-query node]
-                              (if (empty? key-query)
-                                nil
-                                (let [[f & r] key-query]
-                                  (if (nil? f)
-                                    (into {} (remove nil? (for [[k v] node]
-                                                            (let [e (rec r v)]
-                                                              (when-not (nil? e)
-                                                                [k e])))))
-                                    (into {} (remove nil? (for [[k v] node]
-                                                            (if (= k f)
-                                                              (let [e (rec r v)]
-                                                                (when-not (nil? e)
-                                                                  [k e]))
-                                                              [k v]))))))))
-                            key root))))
+      (PrefixTrie. arity contains-wildcard
+                   ((fn rec [key-query node]
+                      (if (empty? key-query)
+                        nil
+                        (let [[f & r] key-query]
+                          (if (nil? f)
+                            (into {} (remove nil? (for [[k v] node]
+                                                    (let [e (rec r v)]
+                                                      (when-not (nil? e)
+                                                        [k e])))))
+                            (into {} (remove nil? (for [[k v] node]
+                                                    (if (= k f)
+                                                      (let [e (rec r v)]
+                                                        (when-not (nil? e)
+                                                          [k e]))
+                                                      [k v]))))))))
+                    key root))))
+
+  (trie-delete-key [this key]
+    (assert (= arity (count key)))
+    (PrefixTrie. arity contains-wildcard
+                 ((fn rec [key-query node]
+                    (if (empty? key-query)
+                      nil)
+                    (if-not (contains? node (first key-query))
+                      node
+                      (let [kk (first key-query)
+                            nv (rec (next key-query) (get node kk))
+                            nm (if (nil? nv) (dissoc node kk) (assoc node kk nv))]
+                        (when-not (empty? nm)
+                          nm))))
+                  key root)))
 
   (trie-progressive-iterator [this key0]
     (let [key (if (nil? key0) (repeat arity nil) key0)]
