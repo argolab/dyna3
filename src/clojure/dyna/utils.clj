@@ -10,6 +10,8 @@
 (def debug-statements
   (= "true" (System/getProperty "dyna.debug" "true")))
 
+(def dummy-namespace (create-ns 'dyna.dummy-namespace))
+
 ;; make functions like car caar cdr etc
 
 (defn- make-cr-function-body [args]

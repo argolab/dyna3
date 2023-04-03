@@ -267,10 +267,12 @@
                                                  (assoc x rexpr v)))))
                   @vv))]
     (let [convert-fn (if @is-new
-                       (do (eval `(do
-                                    (ns dyna.rexpr-jit)
-                                    ~(:make-rexpr-type rtype)))
-                           (let [f (eval (:conversion-function-expr rtype))]
+                       (do (binding [*ns* dummy-namespace]
+                             (eval `(do
+                                      (ns dyna.rexpr-jit)
+                                      ~(:make-rexpr-type rtype))))
+                           (let [f (binding [*ns* dummy-namespace]
+                                     (eval (:conversion-function-expr rtype)))]
                              (swap! rexpr-convert-to-jit-functions assoc rexpr f)
                              f))
                        (get @rexpr-convert-to-jit-functions rexpr))]
@@ -679,8 +681,9 @@
       (swap! rexpr-rewrites-constructed conj signature) ;; record that we are going to construct this rewrite
       (let [rewrite-code (apply synthize-rewrite-cljcode rexpr vargs)]
         (when rewrite-code
-          (eval `(do (ns dyna.rexpr-jit)
-                     ~rewrite-code)))))))
+          (binding [*ns* dummy-namespace]
+            (eval `(do (ns dyna.rexpr-jit)
+                       ~rewrite-code))))))))
 
 
 (def-rewrite

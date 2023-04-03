@@ -18,7 +18,7 @@ echo "   \                                          / /      \                  
 echo "    \                                        / /        \                    "
 echo "     \     Impelemented by                  / /          \                   "
 echo "      \       Matthew Francis-Landau       / /            \                  "
-echo "       \                  (2020-2022)     / /              \                 "
+echo "       \                  (2020-2023)     / /              \                 "
 echo "        \                                / /                \                "
 echo "         \                              / /                  \               "
 echo "          \                            / /                    \              "
@@ -28,7 +28,7 @@ echo "             \                      / /                          \        
 echo "              \                    / /                            \          "
 echo "               \                  / /                              \         "
 echo "                \                / /                                \        "
-echo "                 \              / /                                  \       "
+echo "                 \              / /         http://dyna.org          \       "
 echo "                  \            / /                                    \      "
 echo "                   \          / /                                      \     "
 echo "                    \        / /    https://github.com/argolab/dyna3    \    "
@@ -208,7 +208,8 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-jvm_args+="-Xmx$memory -Dclojure.compiler.direct-linking=true -Ddyna.print_rewrites_performed=$debug_mode -Ddyna.debug=$debug_mode -Ddyna.trace_rexpr_construction=$debug_mode -Ddyna.debug_repl=$debug_mode"
+jvm_args+="-Xmx$memory -Dclojure.compiler.direct-linking=true -Ddyna.print_rewrites_performed=$debug_mode -Ddyna.debug=$debug_mode -Ddyna.trace_rexpr_construction=$debug_mode -Ddyna.debug_repl=$debug_mode -XX:-StackTraceInThrowable"
+# -XX:-StackTraceInThrowable  # disable stack traces entirely
 
 if [ -z "$dyna_args" ]; then
     welcome_message
@@ -221,4 +222,4 @@ exec $DYNA_JVM $jvm_args "-Ddyna.runtimejar=$self" -jar "$self" $import_args $dy
 exit 1  # should not get to this line
 
 # what follows is the dyna implementation compiled into a jar
-##################################################
+#############################################################

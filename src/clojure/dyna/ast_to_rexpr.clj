@@ -516,7 +516,8 @@
                                                                                            variable-name-mapping
                                                                                            source-file)])]
                                                (assert (empty? variable-name-mapping))
-                                               (let [rr (simplify-top ret)]
+                                               (let [rr (system/converge-agenda
+                                                         (simplify-top ret))]
                                                  (assert (= (make-multiplicity 1) rr))
                                                  #_(debug-repl "compiler expression macro")
                                                  rr)))
@@ -821,8 +822,12 @@
                                variable-map (into {} (for [v all-variable-names] [v (make-variable v)]))
                                rexpr (convert-from-ast expression result-variable variable-map source-file)
                                agenda-run-zzz (system/maybe-run-agenda)
-                               ctx (context/make-empty-context rexpr)
-                               result (context/bind-context-raw ctx (simplify-fully rexpr))
+                               [ctx result] (system/converge-agenda
+                                             (let [ctx (context/make-empty-context rexpr)
+                                                   rr (context/bind-context-raw ctx (simplify-fully rexpr))]
+                                               [ctx rr]))
+                               ;; result (context/bind-context-raw ctx (system/converge-agenda
+                               ;;                                       (simplify-fully rexpr)))
                                rel-path (if (instance? URL source-file)
                                           (str (.relativize current-dir-path (Paths/get (.toURI source-file))))
                                           (str source-file))]
@@ -840,7 +845,7 @@
                                      variable-map (into {} (for [v all-variable-names] [v (make-variable v)]))
                                      rexpr (convert-from-ast expression result-variable variable-map source-file)
                                      ctx (context/make-empty-context rexpr)
-                                     result (context/bind-context-raw ctx (simplify-fully rexpr))]
+                                     result (context/bind-context-raw ctx (simplify-top rexpr))]
                                  (debug-repl "user program debug repl")
                                  (make-unify out-variable (make-constant true)))
 

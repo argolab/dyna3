@@ -201,7 +201,7 @@
                               (get @accumulator nil)
                               (get-in @accumulator kvals))]
                 (if-not (nil? cur-val)
-                  (ati cur-val incoming-variable)
+                  (simplify-inference (ati cur-val incoming-variable))
                   (make-multiplicity 1)))))
           (fn [incoming-variable] ;; there is no additional constriants which can be added, so return mult 1
             (make-multiplicity 1)))

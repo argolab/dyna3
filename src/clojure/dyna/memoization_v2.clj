@@ -270,7 +270,7 @@
                                                 cur-val (get @accumulator kvals)]
                                             (if-not (nil? cur-val)
                                               (let [rr (ati cur-val incoming-variable)]
-                                                (debug-repl "rr")
+                                                ;(debug-repl "rr")
                                                 (simplify-inference rr))
                                               (make-multiplicity 1))))))
                                     (fn [incoming-variable]
@@ -299,7 +299,7 @@
             new-values-freq (frequencies new-values)
             ]
         ;(debug-repl "rr")
-        (when-not (nil? accumulated-agg-values)
+        #_(when-not (nil? accumulated-agg-values)
           (debug-repl "handled accum"))
         ;(debug-repl "in refresh")
         ;; we only care about the current-memoized-values changing.  The other
@@ -326,7 +326,13 @@
                                 (do ;; then this is the same, so we do not have to do anything here
                                   [valid has-computed mv])
                                 (do (vreset! messages-to-send nil)
-                                    (let [with-deleted (loop [cmv mv
+                                    (let [with-deleted
+                                          #_(reduce-kv (fn [[kk _]]))
+                                          ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+                                          ;; TODO: change these to use reduce-kv instead of seq the map, as it seems that running seq on the map is causing
+                                          ;; it to have some kind of slow iterator in this
+
+                                          (loop [cmv mv
                                                               kks (keys existing-values)]
                                                          (if (empty? kks) cmv
                                                              (let [[kk _] (first kks)]
@@ -340,7 +346,7 @@
                                                        (if (empty? kvs)
                                                          cmv
                                                          (let [[kk re] (first kvs)]
-                                                           (debug-repl)
+                                                           ;(debug-repl)
                                                            #_(when-not (= mult 1)
                                                                (debug-repl "mult?"))
                                                            ;; TODO: this needs to check that
@@ -363,7 +369,7 @@
             (recur)
             (do
               (doseq [msg @messages-to-send]
-                (debug-repl "todo msg")
+                ;(debug-repl "todo msg")
                 (send-message! assumption {:kind :value-changed
                                            :from-memo-table this
                                            :key msg})
@@ -666,7 +672,7 @@
              (= 1 (count (:memoization-argument-modes info)))
              (not (:memoization-has-non-trivial-constraint info)))
         (let [f `(do
-                   (ns dyna.memoization-v2)
+                   (in-ns 'dyna.memoization-v2)
                    (fn [~'args] ;; the function that is generated could be cached and reused in many cases, as there are unlikely to be lots of different kinds of functions here?
                      ~(cond
                         (= :unk (:memoization-mode info))
@@ -687,7 +693,8 @@
 
                         (= :none (:memoization-mode info))
                         `:fallthrough)))
-              r (eval f)
+              r (binding [*ns* dummy-namespace] ;; work around *ns* binding issues
+                  (eval f))
               ]
                     r)
         ;; TODO: this should handle slightly more complex functions in the case

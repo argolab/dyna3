@@ -95,6 +95,8 @@ fact(0) := 1.
 
 $memo(fact[N:$ground]) = \"unk\".
 
+print fact(100).
+
 %assert fact(10) = 3628800.
 assert fact(4) = 24.
 ")
