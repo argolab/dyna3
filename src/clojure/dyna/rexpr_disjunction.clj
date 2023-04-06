@@ -123,7 +123,7 @@
                     (if (= n 0)
                       s
                       (recur (- n 1) {nil s})))
-        base-trie (PrefixTrie. (count dj-vars)
+        base-trie (make-PrefixTrie (count dj-vars)
                                (if-not (empty? non-tries)
                                  (- (bit-shift-left 1 (count dj-vars)) 1)
                                  0)
@@ -150,7 +150,7 @@
   :match (disjunct-op (:any-list dj-vars) (:unchecked rexprs))
   :run-at [:standard :inference]
   (let [outer-context (context/get-context)
-        ret-children (volatile! (PrefixTrie. (count dj-vars) 0 nil))
+        ret-children (volatile! (make-PrefixTrie (count dj-vars) 0 nil))
         num-children (volatile! 0)
         var-map (map get-value dj-vars)
         child-var-values (transient (vec (repeat (count dj-vars) not-seen-in-trie)))

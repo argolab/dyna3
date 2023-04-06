@@ -1,7 +1,7 @@
 (ns dyna.memoization-v2
   (:require [dyna.utils :refer :all])
   (:require [dyna.rexpr :refer :all])
-  (:require [dyna.rexpr-constructors :refer [is-meta-is-free? is-meta-is-ground? make-disjunct-op
+  (:require [dyna.rexpr-constructors :refer [is-meta-is-free? is-meta-is-ground? make-disjunct-op make-no-simp-disjunct-op
                                              is-aggregator-op-outer? is-aggregator-op-inner?
                                              make-aggregator-op-outer make-aggregator-op-inner
                                              is-disjunct-op?]])
@@ -176,14 +176,16 @@
                         (when (= (first lookup-key) -1)
                           (debug-repl "neg1 lookup"))
                         (memo-push-recompute-key this lookup-key))
-                      (make-multiplicity 0) ;; return 0, as this is the current "guess" for this value and there is currently nothing there
+                      (do
+                        (throw (UnificationFailure. "empty memo (making guess)")) ;; we could be more efficient about stopping the evaluation by throwing unification failure
+                        (make-multiplicity 0)) ;; return 0, as this is the current "guess" for this value and there is currently nothing there
                       )
                     nil ;; return nil as we have to defer this "lookup" as we don't have anything and we are defering the guess operation (for now)
                     )
 
                   ;; has-key is true, so we are going to return the matched values from the data trie
                   (let [;has-nil (some nil? variable-values)
-                        lrexpr (make-disjunct-op argument-variables memoized-values) ;; build a disjunct opt which holds the current memoized values
+                        lrexpr (make-no-simp-disjunct-op argument-variables memoized-values) ;; build a disjunct opt which holds the current memoized values
                         lcontext (context/make-empty-context lrexpr)]
                         (doseq [[var val] (zipseq argument-variables variable-values)]
                           ;; set all of the incoming variables to their respected value
@@ -796,7 +798,7 @@
                                         ;agg-result  ;; this is the local variable which is used
                                                                                                                       #_(last variable-list) ;; result of aggregation goes here....though this might not be used by the aggregator
                                                                                                                       (make-assumption)
-                                                                                                                      (atom [true nil (PrefixTrie. (- (count variable-list) 1)
+                                                                                                                      (atom [true nil (make-PrefixTrie (- (count variable-list) 1)
                                                                                                                                                    0 {})])
                                                                                                                       (atom nil)))
                                                                                                          nr (make-memoized-access container (vec (drop-last variable-list)))]

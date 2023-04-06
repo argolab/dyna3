@@ -84,11 +84,15 @@
 
 (defn check-argument-prefix-trie [x] (instance? IPrefixTrie x))
 
+(declare make-PrefixTrie)
+
 (deftype PrefixTrie [^int arity
                      ^long contains-wildcard
                      ;; ^int filter-arity
                      ;; filter ;; a tuple of which keys are already known or the value nil indicating that there is nothing
-                     root]
+                     root
+                     ^{:tag int :unsynchronized-mutable true} hashCodeCache
+                     ]
   IPrefixTrie
   (trie-get-values-collection [this key]
     (let [key (if (nil? key) (repeat arity nil) key)]
@@ -152,7 +156,7 @@
                                                              ))
                                                          node))))))
                       () key root)]
-        (PrefixTrie. arity contains-wildcard new-root))))
+        (make-PrefixTrie arity contains-wildcard new-root))))
 
   (trie-map-values [this key map-fn]
     (trie-map-collection this key (fn [rk col]
@@ -181,7 +185,7 @@
                                                             [k r])))))))))
                       () key root)]
         ;; technically the contains wildcard could get remapped here
-        (PrefixTrie. arity contains-wildcard new-root))))
+        (make-PrefixTrie arity contains-wildcard new-root))))
 
   (trie-map-values-subset [this key map-fn]
     (trie-map-collection-subset this key (fn [rk col]
@@ -211,11 +215,11 @@
                           ;; then this is going to
                           )
                       () key root)]
-        (PrefixTrie. arity contains-wildcard new-root))))
+        (make-PrefixTrie arity contains-wildcard new-root))))
 
   (trie-update-collection [this key update-fn]
     (assert (and (= (count key) arity)))
-    (PrefixTrie. arity
+    (make-PrefixTrie arity
                  (reduce bit-or contains-wildcard (map (fn [[idx v]] (if (nil? v) (bit-shift-left 1 idx) 0))
                                                        (zipmap (range) key)))
                  (if (> arity 0)
@@ -229,14 +233,14 @@
 
   (trie-merge [this other]
     (assert (= arity (.arity other)))
-    (PrefixTrie. arity
+    (make-PrefixTrie arity
                  (bit-or contains-wildcard (.contains-wildcard other))
                  (merge-map-arity arity root (.root other))))
 
   (trie-delete-matched [this key]
     (if (or (nil? key) (every? nil? key))
-      (PrefixTrie. arity 0 nil) ;; this matches everything, so return an empty trie
-      (PrefixTrie. arity contains-wildcard
+      (make-PrefixTrie arity 0 nil) ;; this matches everything, so return an empty trie
+      (make-PrefixTrie arity contains-wildcard
                    ((fn rec [key-query node]
                       (if (empty? key-query)
                         nil
@@ -256,7 +260,7 @@
 
   (trie-delete-key [this key]
     (assert (= arity (count key)))
-    (PrefixTrie. arity contains-wildcard
+    (make-PrefixTrie arity contains-wildcard
                  ((fn rec [key-query node]
                     (if (empty? key-query)
                       nil)
@@ -312,7 +316,7 @@
         (doseq [[key col] (trie-get-values-collection this nil)]
           (let [new-key (vec (map (fn [i] (if (nil? i) nil (nth key i))) new-order))]
             (vswap! new-root assoc-in new-key col)))
-        (PrefixTrie. (count new-order) new-contains-wildcard @new-root))))
+        (make-PrefixTrie (count new-order) new-contains-wildcard @new-root))))
 
   Object
   (toString [this]
@@ -327,7 +331,9 @@
              (equal-tries arity root (.root ^PrefixTrie other)))))
 
   (hashCode [this]
-    (unchecked-add-int arity (hash-tries arity root)))
+    (when (= hashCodeCache 0)
+      (set! hashCodeCache (unchecked-add-int arity (hash-tries arity root))))
+    hashCodeCache)
 
   clojure.lang.ILookup
   (valAt [this key] (.valAt this key nil))
@@ -354,8 +360,11 @@
   (assoc [this key val]
     (trie-insert-val this key val)))
 
+(defn make-PrefixTrie [arity wildcard root]
+  (PrefixTrie. arity wildcard root 0))
+
 (defmethod print-dup PrefixTrie [^PrefixTrie this ^java.io.Writer w]
-  (.write w (str "(dyna.prefix-trie/PrefixTrie. "
+  (.write w (str "(dyna.prefix-trie/make-PrefixTrie "
                  (.arity this) " "
                  (.contains-wildcard this) " "))
   (print-dup (.root this) w)

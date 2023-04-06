@@ -130,10 +130,10 @@ while [ $# -gt 0 ]; do
             # this will turn off overflow checking on the math operators, which will make the runtime faster
             jvm_args+="-Ddyna.unchecked_math=true "
             ;;
-        --fast)
-            # maybe should just set this at the same time as debug
-            jvm_arg+="-Ddyna.check_rexprs_args=false "
-            ;;
+        # --fast)
+        #     # maybe should just set this at the same time as debug
+        #     jvm_arg+="-Ddyna.check_rexprs_args=false "
+        #     ;;
 
 
         --import|--run)
@@ -208,7 +208,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-jvm_args+="-Xmx$memory -Dclojure.compiler.direct-linking=true -Ddyna.print_rewrites_performed=$debug_mode -Ddyna.debug=$debug_mode -Ddyna.trace_rexpr_construction=$debug_mode -Ddyna.debug_repl=$debug_mode -XX:-StackTraceInThrowable"
+jvm_args+="-Xmx$memory -Dclojure.compiler.direct-linking=true -Ddyna.print_rewrites_performed=$debug_mode -Ddyna.debug=$debug_mode -Ddyna.trace_rexpr_construction=$debug_mode -Ddyna.debug_repl=$debug_mode -Ddyna.check_rexprs_args=$debug_mode"
 # -XX:-StackTraceInThrowable  # disable stack traces entirely
 
 if [ -z "$dyna_args" ]; then

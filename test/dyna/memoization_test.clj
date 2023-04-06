@@ -100,3 +100,12 @@ print fact(100).
 %assert fact(10) = 3628800.
 assert fact(4) = 24.
 ")
+
+(str-test memoization-v2-iter "
+f(X) := X*3 for range(0,10,X).
+
+$memo(f[X]) := \"null\".
+
+g += f(X).
+assert g = 135.
+")

@@ -129,7 +129,7 @@
         save-proj-vars (for [[idx var] (zipseq (range) disjunction-variables)
                              :when (pjv var)]
                          [idx var])
-        resulting-trie (volatile! (PrefixTrie. (count new-trie-vars) 0 nil))]
+        resulting-trie (volatile! (trie/make-PrefixTrie (count new-trie-vars) 0 nil))]
     (doseq [[var-binding children] (trie/trie-get-values-collection trie-Rs nil)]
       (let [income-val (if (nil? incoming-idx)
                          (get-value incoming)
@@ -241,13 +241,13 @@
                        (recur (conj ret (make-unify (first ev) (make-constant (first (keys trie)))))
                               (rest ev)
                               (first (vals trie)))
-                       (conj ret (make-disjunct-op (conj (vec ev) result-variable) (PrefixTrie. (+ 1 (count ev)) 0 (convert-to-trie-mul1 (count ev) trie (:lower-value operator identity))))))))))))
+                       (conj ret (make-disjunct-op (conj (vec ev) result-variable) (trie/make-PrefixTrie (+ 1 (count ev)) 0 (convert-to-trie-mul1 (count ev) trie (:lower-value operator identity))))))))))))
           (if (nil? @accumulator)
             (make-aggregator-op-outer operator result-variable ret)
             (let [accum-vals (if (empty? exposed-vars)
                                (make-aggregator-op-inner (make-constant (get @accumulator nil)) [] (make-multiplicity 1))
                                (make-disjunct-op exposed-vars
-                                                 (PrefixTrie. (count exposed-vars) 0 (convert-to-trie-agg (count exposed-vars) @accumulator))))
+                                                 (trie/make-PrefixTrie (count exposed-vars) 0 (convert-to-trie-agg (count exposed-vars) @accumulator))))
                   ;; this will merge the tries due to rewrites on the disjunction construction
                   rr (make-aggregator-op-outer operator result-variable (make-disjunct [accum-vals
                                                                                         ret]))

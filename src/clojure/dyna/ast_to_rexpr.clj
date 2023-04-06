@@ -320,6 +320,17 @@
                          ;; map from a list of arguments to their values represented as variables in R-exprs
                          (map get-value args))
         ]
+    (when (= (make-constant true) out-variable)
+      (match-term ast ("$variable" name)
+                  (dyna-warning "There is a variable unified with TRUE.  This likely means that you have written an expression like:
+1) g += X, f(X).
+2) g += f(X) for X:range(10).
+This is most likely not what you want."))
+      (match-term ast ("$constant" value)
+                  (when-not (= value true)
+                    (dyna-warning "You have a non-TRUE constant unified with TRUE.
+This will cause the rule to never work.
+This is most likely not what you want."))))
     (let [constructed-rexpr
           (case [(.name ast) (.arity ast)] ;; this should match on name and arity
             ["$compiler_expression" 1] (let [^DynaTerm arg1 (get ast 0)]
