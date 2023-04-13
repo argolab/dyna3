@@ -171,10 +171,6 @@
                                                                  [a (assoc-in b lookup-key true) c])))]
                       (when (or (identical? (second old-dat) has-computed) ;; this first check is just an optimization, we really care about if the we were the ones to add the new lookup key, which means it wasn't in old
                                 (not (is-key-contained? (second old-dat) lookup-key)))
-                        (when (< (first lookup-key) -3)
-                          (debug-repl "very neg"))
-                        (when (= (first lookup-key) -1)
-                          (debug-repl "neg1 lookup"))
                         (memo-push-recompute-key this lookup-key))
                       (do
                         (throw (UnificationFailure. "empty memo (making guess)")) ;; we could be more efficient about stopping the evaluation by throwing unification failure
@@ -187,12 +183,14 @@
                   (let [;has-nil (some nil? variable-values)
                         lrexpr (make-no-simp-disjunct-op argument-variables memoized-values) ;; build a disjunct opt which holds the current memoized values
                         lcontext (context/make-empty-context lrexpr)]
-                        (doseq [[var val] (zipseq argument-variables variable-values)]
-                          ;; set all of the incoming variables to their respected value
-                          (ctx-set-value! lcontext var val))
-                        (let [res (context/bind-context lcontext (simplify-fully lrexpr))]
-                          ;(debug-repl "returning")
-                          res)))))
+                    (doseq [[var val] (zipseq argument-variables variable-values)
+                            :when (not (nil? val))]
+                      ;; set all of the incoming variables to their respected value
+                      (ctx-set-value! lcontext var val))
+                    ;(debug-repl "pre return")
+                    (let [res (context/bind-context lcontext (simplify-fully lrexpr))]
+                      (debug-repl "returning")
+                      res)))))
 
             :else
             (do ;(debug-repl "should not happen")
@@ -201,22 +199,24 @@
   (memo-get-iterator [this variables variable-values]
     (let [control-arg (conj (vec (map #(if (nil? %) meta-free-dummy-free-value %) variable-values)) nil)
           control-setting (memo-controller control-arg)]
+      #_(when-not (= :defer control-setting)
+        (debug-repl "get iter"))
       (cond (= control-setting :fallthrough) #{} ;; in the fallthrough case this
             ;; should just rewrite as the
             ;; orig-rexpr, so just let that
             ;; happen rather than having to
             ;; deal with the "iterator
             ;; remapping mess"
-            (= control-setting :defer) #{}
+            (= control-setting :defer) #{}  ;; in defer, there is nothing that we are going to do
 
             (= (first control-setting) :lookup)
             (let [lookup-key (drop-last (second control-setting))
                   [valid has-computed memoized-values] @data
                   has-key (is-key-contained? has-computed lookup-key)]
               (if has-key
-
                 (let [contains-wildcard (.contains-wildcard ^PrefixTrie memoized-values)]
                   (when (not= contains-wildcard (- (bit-shift-left 1 (count variables)) 1)) ;; when there is something which is not wildcard
+                    (debug-repl "g1")
                     #{(reify DIterable
                         (iter-what-variables-bound [this]
                           (into #{} (for [[idx var] (zipseq (range) variables)
@@ -658,8 +658,7 @@
                   (if (every? #(not= meta-free-dummy-free-value %) (drop-last signature))
                     [:lookup (conj (vec (drop-last signature)) nil)]
                     :defer)
-                  (throw (DynaUserError. "$memo returned something other than none, null or unk"))
-                  ))))
+                  (throw (DynaUserError. "$memo returned something other than none, null or unk"))))))
           (if (= (make-multiplicity 0) res)
             :fallthrough
             (do
@@ -687,9 +686,10 @@
                         `(if (and ~@(for [[i mode] (zipseq (range) (first (:memoization-argument-modes info)))
                                           :when (= :ground mode)]
                                       `(not= (get ~'args ~i) meta-free-dummy-free-value)))
-                           [:lookup [~@(for [[i mode] (zipseq (range) (first (:memoization-argument-modes info)))
-                                             :when (= :ground mode)]
-                                         `(get ~'args ~i))
+                           [:lookup [~@(for [[i mode] (zipseq (range) (first (:memoization-argument-modes info)))]
+                                         (if (= :ground mode)
+                                           `(get ~'args ~i)
+                                           nil))
                                      nil]]
                            :defer)
 
@@ -698,7 +698,7 @@
               r (binding [*ns* dummy-namespace] ;; work around *ns* binding issues
                   (eval f))
               ]
-                    r)
+          r)
         ;; TODO: this should handle slightly more complex functions in the case
         ;; that all of the constraints are trivial, though if there is
         ;; overrides, the order might be different atm?  I supose that the
@@ -846,19 +846,31 @@
       (throw (DynaUserError. "$memo does not support wildcard matchin, it should have a term name matched for its first argument.  E.g. `$memo(foo[X]) = \"null\".`")))
     (when-not (dnil? (get-value (:dynabase term-structure)))
       (throw (DynaUserError. "$memo does not support dynabases (yet)")))
+    (when-not (and (is-aggregator? rexpr) (= "=" (:operator rexpr)))
+      ;; this might work ok with := in some cases, but there are some bugs which need to get worked out
+      ;; easier to just disable non `=` aggregators
+      (throw (DynaUserError. "$memo can only be defined using the `=` aggregator")))
     (let [term-name (:name term-structure)
           args (:arguments term-structure)
           ;; the name of the term that we are going to enable memoization on
           call-name {:name term-name
                      :arity (count args)
                      :source-file source-file}
-          [memo-mode memo-mode-rexpr] (when (is-aggregator? rexpr)
-                                        (let [incoming (:incoming rexpr)]
+          [memo-mode memo-mode-rexpr] (when (is-aggregator? rexpr) ;; this is just going to fail if this is not an aggregator, so it might as well just assert this?
+                                        ;; I suppose that this could attempt to simplify the body of the expression first, bu then it will potentially have that this picks up assumptions etc
+                                        ;; if we don't allow for := in the first place with $memo, then it could have that it would simplify the unk vs null stuff as it would only work with
+                                        (let [incoming (:incoming rexpr)
+                                              get-value-const (fn [x]
+                                                                (let [v (get-value x)]
+                                                                  ;; TODO: := is broken on $memo currently
+                                                                  (if (and (instance? DynaTerm v) (= (.name ^DynaTerm v) "$colon_line_tracking"))
+                                                                    (get v 1)
+                                                                    v)))]
                                           (if (is-constant? incoming)
-                                            [(keyword (get-value incoming)) nil]
+                                            [(keyword (get-value-const incoming)) nil]
                                             (or (only (for [[projected-vars rr] (all-conjunctive-rexprs rexpr)
                                                             :when (and (is-unify? rr) (= (:a rr) incoming))]
-                                                        [(keyword (get-value (:b rr))) rr]))
+                                                        [(keyword (get-value-const (:b rr))) rr]))
                                                 [nil nil]))))
           argument-signatures (into [] (for [arg args] ;; identify constraints on the arguments variables. such as $free or $ground
                                          (filter #(let [r (get % 1)]
@@ -870,7 +882,10 @@
                                                  (all-conjunctive-rexprs rexpr))))
           argument-modes (into [] (for [s argument-signatures]
                                     (case (count s) ;; if there is more than 1 constraint, then this might be something else?
-                                      0 :ground  ;; if there are no constraints on the variables, then we are going to default to ground?  This will mean that it must be present for
+                                      0 (do
+                                          ;; if there are no constraints on the variables, then we are going to default to ground?  This will mean that it must be present for
+                                          (dyna-warning "$memo variables should be annotated with $free or $ground (e.g. X:$free)")
+                                          :ground)
                                       1 (let [r (cadar s)]
                                           (cond (and (is-meta-is-ground? r) (= true (get-value (:result r)))) :ground
                                                 (and (is-meta-is-free? r) (= true (get-value (:result r)))) :free))
@@ -892,6 +907,7 @@
       (when-not (#{:null :unk :none} memo-mode)
         ;; the memoization mode values should be a constant value.
         ;; if the memoized value comes from
+        (debug-repl "memo mode")
         (throw (DynaUserError. "$memo mode unrecogninzed, should be a string of: \"null\", \"unk\" or \"none\".")))
 
       (when (= "$memo" term-name)

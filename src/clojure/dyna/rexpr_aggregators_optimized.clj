@@ -165,16 +165,25 @@
 
 (defn- convert-to-trie-mul1 [cnt trie lower-value]
   (if (= cnt 0)
-    (try {(lower-value trie) [(make-multiplicity 1)]}
-         (catch UnificationFailure err {})) ;; if there is a unification failure by lower, then this is just empty
-    (into {} (for [[k v] trie]
-               [k (convert-to-trie-mul1 (- cnt 1) v lower-value)]))))
+    (try (let [key (lower-value trie)]
+           [{key [(make-multiplicity 1)]} (if (nil? key) 1 0)])
+         (catch UnificationFailure err [{} 0])) ;; if there is a unification failure by lower, then this is just empty
+    (let [contains-wildcard (volatile! 0)
+          n (into {} (for [[k v] trie
+                           :let [[n2 wildcard] (convert-to-trie-mul1 (- cnt 1) v lower-value)]]
+                       (do (vswap! contains-wildcard bit-or wildcard)
+                           [k n2])))]
+      [n (bit-or (bit-shift-left @contains-wildcard 1) (if (contains? n nil) 1 0))])))
 
 (defn- convert-to-trie-agg [cnt trie]
   (if (= cnt 0)
-    [(make-aggregator-op-inner (make-constant trie) [] (make-multiplicity 1))]
-    (into {} (for [[k v] trie]
-               [k (convert-to-trie-agg (- cnt 1) v)]))))
+    [[(make-aggregator-op-inner (make-constant trie) [] (make-multiplicity 1))] 0]
+    (let [contains-wildcard (volatile! 0)
+          n (into {} (for [[k v] trie
+                           :let [[n2 wildcard] (convert-to-trie-agg (- cnt 1) v)]]
+                       (do (vswap! contains-wildcard bit-or wildcard)
+                           [k n2])))]
+      [n (bit-or (bit-shift-left @contains-wildcard 1) (if (contains? n nil) 1 0))])))
 
 (def-rewrite
   :match (aggregator-op-outer (:unchecked operator) (:any result-variable) (:rexpr Rbody))
@@ -241,13 +250,19 @@
                        (recur (conj ret (make-unify (first ev) (make-constant (first (keys trie)))))
                               (rest ev)
                               (first (vals trie)))
-                       (conj ret (make-disjunct-op (conj (vec ev) result-variable) (trie/make-PrefixTrie (+ 1 (count ev)) 0 (convert-to-trie-mul1 (count ev) trie (:lower-value operator identity))))))))))))
+                       (conj ret (make-disjunct-op
+                                  (conj (vec ev) result-variable)
+                                  (let [[trie-root trie-wildcard] (convert-to-trie-mul1 (count ev) trie (:lower-value operator identity))]
+                                    (trie/make-PrefixTrie (+ 1 (count ev))
+                                                          trie-wildcard
+                                                          trie-root)))))))))))
           (if (nil? @accumulator)
             (make-aggregator-op-outer operator result-variable ret)
             (let [accum-vals (if (empty? exposed-vars)
                                (make-aggregator-op-inner (make-constant (get @accumulator nil)) [] (make-multiplicity 1))
                                (make-disjunct-op exposed-vars
-                                                 (trie/make-PrefixTrie (count exposed-vars) 0 (convert-to-trie-agg (count exposed-vars) @accumulator))))
+                                                 (let [[trie-root trie-wildcard] (convert-to-trie-agg (count exposed-vars) @accumulator)]
+                                                   (trie/make-PrefixTrie (count exposed-vars) trie-wildcard trie-root))))
                   ;; this will merge the tries due to rewrites on the disjunction construction
                   rr (make-aggregator-op-outer operator result-variable (make-disjunct [accum-vals
                                                                                         ret]))

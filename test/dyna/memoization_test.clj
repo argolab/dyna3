@@ -104,8 +104,9 @@ assert fact(4) = 24.
 (str-test memoization-v2-iter "
 f(X) := X*3 for range(0,10,X).
 
-$memo(f[X]) := \"null\".
+$memo(f[X:$free]) = \"null\".
 
 g += f(X).
+print g.
 assert g = 135.
 ")

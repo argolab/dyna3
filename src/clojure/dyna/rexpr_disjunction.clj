@@ -284,15 +284,18 @@
 
 ;; return a lazy sequence over bindings
 (defn- run-trie-iterator-from-node [remains trie-node variable-order]
-  (dyna-assert (not (contains? trie-node nil))) ;; if this happens, this means that it is trying to iterate over something which would
+  (dyna-assert (not (contains? trie-node nil))) ;; if this happens, this means
+                                                ;; that it is trying to iterate
+                                                ;; over something which would
+                                                ;; not be able to ground the
+                                                ;; variable
   (for [[key next-node] trie-node]
     (reify DIteratorInstance
       (iter-variable-value [this] key)
       (iter-continuation [this]
         (if (= 0 remains)
           nil  ;; there are going to be more disjuncts here
-          (trie-diterator-instance (- remains 1) next-node (next variable-order)))
-        ))))
+          (trie-diterator-instance (- remains 1) next-node (next variable-order)))))))
 
 (defn- run-trie-iterator-from-node-unconsolidated [remains trie-node variable-order]
   (for [[key next-node] trie-node]

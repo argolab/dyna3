@@ -121,7 +121,7 @@
                                                      (when (not= incoming-var var)
                                                        (ctx-set-value! parent var val)))
                                                    (doseq [rx rexprs]
-                                                     (when-not (contains? (get-variables rx) incoming-var)
+                                                     (when-not (some #{incoming-var} (get-variables rx))
                                                        (ctx-add-rexpr! parent rx))))
                                                  resulting-rexpr)
       (= context-kind :memo-expr-conditional) resulting-rexpr  ;; I suppose this will just reset after it runs
