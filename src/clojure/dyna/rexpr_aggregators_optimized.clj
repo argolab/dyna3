@@ -75,6 +75,14 @@
   ;; contributed values are done, then we can avoid continuing to process other stuff
   (fn [] false))
 
+(def ^{:dynamic true} *aggregator-op-get-variable-value*
+  ;; aggregator uses get-value by default to get the value of a variable from
+  ;; the context we might need to override that in some cases---such as
+  ;; memoization where the variables have been renamed, but we might not be
+  ;; using the new names, or in the jit generated code
+
+  get-value)
+
 
 (def-rewrite
   :match {:rexpr (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable)
@@ -194,7 +202,8 @@
         contrib-func (fn [value mult]
                        (assert (>= mult 1))
                        (dyna-assert (not (nil? value)))
-                       (let [kvals (vec (map get-value exposed-vars))]
+                       (let [kvals (vec (map *aggregator-op-get-variable-value* exposed-vars))]
+                         ;(debug-in-block "contrib")
                          (vswap! accumulator update-in kvals (fn [old]
                                                                (if (nil? old)
                                                                  ((:many-items operator) value mult)
@@ -205,7 +214,7 @@
         (if (and (= simplify simplify-inference) (:add-to-in-rexpr operator))
           (let [ati (:add-to-in-rexpr operator)]
             (fn [incoming-variable]
-              (let [kvals (vec (map get-value exposed-vars))
+              (let [kvals (vec (map *aggregator-op-get-variable-value* exposed-vars))
                     cur-val (if (empty? exposed-vars)
                               (get @accumulator nil)
                               (get-in @accumulator kvals))]
@@ -218,7 +227,7 @@
         (if (:saturate operator)
           (let [sf (:saturate operator)]
             (fn []
-              (let [kvals (vec (map get-value exposed-vars))
+              (let [kvals (vec (map *aggregator-op-get-variable-value* exposed-vars))
                    cur-val (if (empty? exposed-vars)
                               (get @accumulator nil)
                               (get-in @accumulator kvals))]
@@ -284,6 +293,7 @@
      (let [exposed (exposed-variables rexpr) ;; if all of the exposed are ground, then we should just go ahead and compute the value
            nR (try (simplify Rbody)
                    (catch UnificationFailure e (make-multiplicity 0)))]
+       ;(debug-in-block "op top")
        (cond
          (is-empty-rexpr? nR) (make-multiplicity 0)
 
@@ -336,7 +346,9 @@
 
            (if (empty? @result-rexprs)
              ;; then everything has been processed, so there is no need for this to remain
-             (make-multiplicity 0)
+             (do
+             ;  (debug-repl "agg inner 0")
+               (make-multiplicity 0))
              ;; there exists some branches which could not be fully resolved, so this is going to remain
              (make-disjunct (vec @result-rexprs))))
 
@@ -350,6 +362,7 @@
                new-projected (vec (filter #(not (is-bound-in-context? % ctx)) projected-vars))
                new-body (remap-variables nR remapping-map)
                ret (make-aggregator-op-inner new-incoming new-projected new-body)]
+           ;(debug-in-block "aoi ret3")
                                         ;(debug-repl "aoi ret3")
            ret))))))
 

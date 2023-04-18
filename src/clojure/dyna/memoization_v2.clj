@@ -13,7 +13,10 @@
   (:require [dyna.user-defined-terms :refer [add-to-user-term user-rexpr-combined-no-memo]])
   (:require [dyna.rexpr-builtins :refer [meta-free-dummy-free-value]])
   (:require [dyna.prefix-trie :refer :all])
-  (:require [dyna.rexpr-aggregators-optimized :refer [*aggregator-op-contribute-value* *aggregator-op-additional-constraints* *aggregator-op-saturated*]])
+  (:require [dyna.rexpr-aggregators-optimized :refer [*aggregator-op-contribute-value*
+                                                      *aggregator-op-additional-constraints*
+                                                      *aggregator-op-saturated*
+                                                      *aggregator-op-get-variable-value*]])
   (:require [dyna.rexpr-disjunction :refer [trie-diterator-instance]])
   (:require [clojure.set :refer [union difference]])
   (:import [dyna DynaUserError IDynaAgendaWork DynaTerm InvalidAssumption UnificationFailure DIterable])
@@ -182,14 +185,19 @@
                   ;; has-key is true, so we are going to return the matched values from the data trie
                   (let [;has-nil (some nil? variable-values)
                         lrexpr (make-no-simp-disjunct-op argument-variables memoized-values) ;; build a disjunct opt which holds the current memoized values
-                        lcontext (context/make-empty-context lrexpr)]
+                        lcontext (context/make-empty-context lrexpr)
+                        variables-map (zipmap variables argument-variables)]
                     (doseq [[var val] (zipseq argument-variables variable-values)
                             :when (not (nil? val))]
                       ;; set all of the incoming variables to their respected value
                       (ctx-set-value! lcontext var val))
                     ;(debug-repl "pre return")
-                    (let [res (context/bind-context lcontext (simplify-fully lrexpr))]
-                      (debug-repl "returning")
+                    (let [res (context/bind-context lcontext
+                                                    (binding [*memoization-make-guesses* false
+                                                              *aggregator-op-get-variable-value* (fn [variable]
+                                                                                                   (get-value (get variables-map variable variable)))]
+                                                      (simplify-fully-no-guess lrexpr)))]
+                      ;(debug-repl "returning")
                       res)))))
 
             :else
