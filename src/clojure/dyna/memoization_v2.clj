@@ -16,7 +16,8 @@
   (:require [dyna.rexpr-aggregators-optimized :refer [*aggregator-op-contribute-value*
                                                       *aggregator-op-additional-constraints*
                                                       *aggregator-op-saturated*
-                                                      *aggregator-op-get-variable-value*]])
+                                                      *aggregator-op-get-variable-value*
+                                                      *aggregator-op-should-eager-run-iterators*]])
   (:require [dyna.rexpr-disjunction :refer [trie-diterator-instance]])
   (:require [clojure.set :refer [union difference]])
   (:import [dyna DynaUserError IDynaAgendaWork DynaTerm InvalidAssumption UnificationFailure DIterable])
@@ -197,7 +198,6 @@
                                                               *aggregator-op-get-variable-value* (fn [variable]
                                                                                                    (get-value (get variables-map variable variable)))]
                                                       (simplify-fully-no-guess lrexpr)))]
-                      ;(debug-repl "returning")
                       res)))))
 
             :else
@@ -224,7 +224,6 @@
               (if has-key
                 (let [contains-wildcard (.contains-wildcard ^PrefixTrie memoized-values)]
                   (when (not= contains-wildcard (- (bit-shift-left 1 (count variables)) 1)) ;; when there is something which is not wildcard
-                    (debug-repl "g1")
                     #{(reify DIterable
                         (iter-what-variables-bound [this]
                           (into #{} (for [[idx var] (zipseq (range) variables)
@@ -280,7 +279,6 @@
                                                 cur-val (get @accumulator kvals)]
                                             (if-not (nil? cur-val)
                                               (let [rr (ati cur-val incoming-variable)]
-                                                ;(debug-repl "rr")
                                                 (simplify-inference rr))
                                               (make-multiplicity 1))))))
                                     (fn [incoming-variable]
@@ -293,6 +291,7 @@
                                                                     (when-not (nil? cur-val)
                                                                       (sf cur-val)))))
                                                               (fn [] false))
+                                  *aggregator-op-should-eager-run-iterators* true
                                   ]
                           (context/bind-context cctx
                                                 (try (simplify-fully orig-rexpr)
@@ -372,68 +371,15 @@
                                       ;(debug-repl "todo")
                                       [valid has-computed with-added]
                                       ;(???)
-                                      ))) ;; TODO
+                                      )))
                               ))
                           )))
           (if @need-to-redo
             (recur)
-            (do
-              (doseq [msg @messages-to-send]
-                ;(debug-repl "todo msg")
-                (send-message! assumption {:kind :value-changed
-                                           :from-memo-table this
-                                           :key msg})
-                ;(???)
-                ))))
-
-        #_(let [[cvalid _ memoized-values] @data
-              messages-to-send (volatile! nil)]
-          (if-not cvalid
-            nil ;; then this is just done, this structure is not relevant any more, so we are not going to attempt to update this
-            (let [need-to-redo (volatile! false)]
-              (swap! data (fn [[valid has mv]]
-                            (vreset! messages-to-send nil)
-                            (if valid
-                              (if-not (identical? mv current-memoized-values)
-                                (do (vreset! need-to-redo true)
-                                    [valid has mv])
-                                (let [existing-values (frequencies (trie-get-values-collection mv key))
-                                      new-values (cond
-                                                   (is-empty-rexpr? ret-rexpr) {}
-                                                   (is-disjunct-op? ret-rexpr) (do
-                                                                                 (debug-repl "handle disjunct op")
-                                                                                 (???))
-                                                   :else (do
-                                                           ;; this is going to have convert this into a map.  If this is a disjunct
-                                                           ;; it should have that it can expand the values rather than leaving it as an opaque R-expr
-                                                           {[key [ret-rexpr]] 1}))]
-                                  ;; this needs to perform some update
-                                  (if (= existing-values new-values)
-                                    (do ;; we do not have to update anything, as the current representation is the same as what is stored
-                                      [valid has mv])
-                                    ;; there is some change, so we need to "delete" the old stuff and add in the new stuff
-                                    ;; then we are going to have to send a notification that this stuff has changed also..
-                                    (let [ftrie (loop [to-add (seq new-values)
-                                                       current-trie mv]
-                                                  (let [[[[key rexprs] mult] & r] to-add
-                                                        t (trie-update-collection current-trie key (fn [c]
-                                                                                                     (vec (concat (or c []) rexprs))))]
-                                                    (vswap! messages-to-send conj key) ;; I suppose that the messages will just be what keys have changed
-                                                    (if (empty? r)
-                                                      t
-                                                      (recur r t))))]
-                                      (vreset! need-to-redo false)
-                                      [valid has ftrie]))))
-                              [valid has mv])))
-              (if @need-to-redo
-                (recur)
-                (do
-                  ;; this needs to send messages which should notify anything that is downstream to make changes
-                  (doseq [msg @messages-to-send]
-                    (send-message! assumption {:kind :value-changed
-                                               :from-memo-table this
-                                               :key msg}))
-                  nil)))))))))
+            (doseq [msg @messages-to-send]
+              (send-message! assumption {:kind :value-changed
+                                         :from-memo-table this
+                                         :key msg}))))))))
 
 (defn- replace-memo-reads-with-placeholder [rexpr assumption]
   (cond (is-memoized-access? rexpr) (let [cc (:memoization-container rexpr)]
@@ -481,28 +427,7 @@
                                             (vswap! idc inc)
                                             (if (= @idc idx)
                                               rr
-                                              r)))))
-
-
-        ;; :else (doall (for [child (get-children rexpr)  ;; if the same child appears in the arguments twice, this is going to cause an issue
-        ;;                    :let [ra (replace-memo-reads-with-placeholder child assumption)]
-        ;;                    :when (not (empty? ra))
-        ;;                    rr ra]
-        ;;                (let [res (rewrite-rexpr-children rexpr (fn [r]
-        ;;                                                          (if (identical? r child)
-        ;;                                                            rr
-        ;;                                                            r)))]
-        ;;                  res
-        ;;                  #_(do (debug-repl "replace rr")
-        ;;                        (???)))))
-
-
-        ))
-
-#_(defn- get-rexprs-which-match-assumption [rexpr assumption]
-  (for [r (get-all-children rexpr)
-        ]
-    ))
+                                              r)))))))
 
 (defn ^{:private true} make-update-handler-function [^MemoContainerTrieStorageAggregatorContributions container ^Assumption triggering-assumption]
   ;; this should look at the orig-rexpr and do some preprocessing against the expression so that this can be a bit more efficient when it comes

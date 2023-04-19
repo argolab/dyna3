@@ -83,6 +83,12 @@
 
   get-value)
 
+(def ^{:dynamic true} *aggregator-op-should-eager-run-iterators*
+  ;; if we want to eagerly run iterators.  This is something that we want to do
+  ;; in the case of memoization, as that corresponds with doing work ahead of
+  ;; time (before it will get put into the memo table)
+  false)
+
 
 (def-rewrite
   :match {:rexpr (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable)
@@ -238,7 +244,8 @@
           (fn [] false))]
     (binding [*aggregator-op-contribute-value* contrib-func
               *aggregator-op-additional-constraints* additional-constraint-func
-              *aggregator-op-saturated* check-saturated-func]
+              *aggregator-op-saturated* check-saturated-func
+              *aggregator-op-should-eager-run-iterators* false]
       (let [ret (context/bind-context ctx (try (simplify Rbody)
                                                (catch UnificationFailure e (make-multiplicity 0))))]
         (if (is-empty-rexpr? ret)
@@ -304,7 +311,7 @@
            ret)
 
 
-         (every? is-ground? exposed)
+         (or (every? is-ground? exposed) *aggregator-op-should-eager-run-iterators*)
          (let [iterators (find-iterators nR)
                result-rexprs (volatile! nil)]
            ;; will loop over assignments to all of the variables
