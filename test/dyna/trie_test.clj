@@ -3,7 +3,8 @@
   (:require [dyna.core])
   (:require [dyna.utils :refer :all])
   (:require [dyna.prefix-trie :refer :all])
-  (:import [dyna.prefix_trie IPrefixTrie PrefixTrie]))
+  (:import [dyna.prefix_trie IPrefixTrie PrefixTrie])
+  (:import [dyna ClojureUnorderedVector]))
 
 
 
@@ -70,3 +71,12 @@
                 :c [4 6]}
             nil {:b [8]
                  :d [10]}}))))
+
+
+(deftest unordered-vector-test
+  (let [v (ClojureUnorderedVector. [1 2 3 4])
+        v2 (ClojureUnorderedVector. [3 4 2 1])
+        v3 (into ClojureUnorderedVector/EMPTY (range 100))]
+    (assert (= 3 (get v 2)))
+    (assert (= v v2))
+    (assert (= 100 (count v3)) )))

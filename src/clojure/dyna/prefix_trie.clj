@@ -1,7 +1,8 @@
 (ns dyna.prefix-trie
   (:require [dyna.utils :refer :all])
   (:require [dyna.rexpr])
-  ;(:import [dyna IPrefixTrie])
+                                        ;(:import [dyna IPrefixTrie])
+  (:import [dyna ClojureUnorderedVector])
   )
 
 
@@ -106,7 +107,7 @@
                              [key nil]
                              (keys node))
                  next-key (rest key-query)]
-             (apply concat (for [k look-keys]   ;;; TODO: this should use a lazy iterator ovedr this, maybe something like lazy-cat
+             (apply concat (for [k look-keys]   ;;; TODO: this should use a lazy iterator over this, maybe something like lazy-cat
                              (let [v (get node k)]
                                (if-not (nil? v)
                                  (lazy-seq (rec (cons k key-so-far)

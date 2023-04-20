@@ -110,3 +110,12 @@ g += f(X).
 print g.
 assert g = 135.
 ")
+
+(str-test memoization-v2-big-fact "
+fact(N) := fact(N-1)*N.
+fact(0) := 1.
+
+$memo(fact[N:$ground]) = \"unk\".
+
+print fact(10000).  % there is a bug with the data structure that causes an extra factor of N to end up in the computation, causing this to be slow
+")
