@@ -12,7 +12,7 @@
   (:import [dyna.rexpr proj-rexpr disjunct-rexpr aggregator-rexpr])
   (:import [dyna.rexpr_disjunction disjunct-op-rexpr])
   (:import [dyna.prefix_trie PrefixTrie])
-  (:import [dyna UnificationFailure]))
+  (:import [dyna UnificationFailure ClojureUnorderedVector]))
 
 
 (def-base-rexpr aggregator-op-outer [:unchecked operator
@@ -180,7 +180,7 @@
 (defn- convert-to-trie-mul1 [cnt trie lower-value]
   (if (= cnt 0)
     (try (let [key (lower-value trie)]
-           [{key [(make-multiplicity 1)]} (if (nil? key) 1 0)])
+           [{key (ClojureUnorderedVector/create [(make-multiplicity 1)])} (if (nil? key) 1 0)])
          (catch UnificationFailure err [{} 0])) ;; if there is a unification failure by lower, then this is just empty
     (let [contains-wildcard (volatile! 0)
           n (into {} (for [[k v] trie
@@ -191,7 +191,7 @@
 
 (defn- convert-to-trie-agg [cnt trie]
   (if (= cnt 0)
-    [[(make-aggregator-op-inner (make-constant trie) [] (make-multiplicity 1))] 0]
+    [(ClojureUnorderedVector/create [(make-aggregator-op-inner (make-constant trie) [] (make-multiplicity 1))]) 0]
     (let [contains-wildcard (volatile! 0)
           n (into {} (for [[k v] trie
                            :let [[n2 wildcard] (convert-to-trie-agg (- cnt 1) v)]]

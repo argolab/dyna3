@@ -3,8 +3,21 @@ package dyna;
 import java.util.*;
 import clojure.lang.*;
 
-// todo make this a full class..
-public class ClojureUnorderedVector extends AFn implements IPersistentVector,
+/**
+ * This is an alternate implementation of the vector class used by the
+ * prefix_trie.clj class for its internal implementation.  This class is a bit
+ * simpler than clojures' vector class as it is only backed by a single internal
+ * array.  Therefore when doing operations such as cons using this class, it
+ * will be less efficient.  In our case, we expect that the internal arrays held
+ * by this class will likely be small (a few elements at a time).  And mostly
+ * rewritten all at the same time (hence, it does not make much sense to
+ * optimize for insert operations).
+ *
+ * This class is "unordered" (like a bag), so [1 2 3 4] equals [4 1 3 2].  Also,
+ * this class will update the hash code instead of recomputing it from scratch
+ * when there are changes.
+ */
+public final class ClojureUnorderedVector extends AFn implements IPersistentVector,
                                                            //Iterable,
                                                            RandomAccess, //Comparable,
                                                            //Serializable,
@@ -14,12 +27,13 @@ public class ClojureUnorderedVector extends AFn implements IPersistentVector,
                                                            IObj
 {
 
-    private int _hash = 0; // there is hash and
+    private int _hash = 0;  // a cache for the has, as things get added/removed, then we will attempt to
     public final Object[] vals;
 
     public static final ClojureUnorderedVector EMPTY = new ClojureUnorderedVector(new Object[]{}, 0);
 
     private ClojureUnorderedVector(Object[] vals, int _hash) {
+        assert(vals != null);
         this.vals = vals;
         this._hash = _hash;
     }
@@ -39,32 +53,92 @@ public class ClojureUnorderedVector extends AFn implements IPersistentVector,
         }
     }
 
+    public static ClojureUnorderedVector create(Object args) {
+        if(args instanceof ClojureUnorderedVector)
+            return (ClojureUnorderedVector)args;
+        return new ClojureUnorderedVector(args);
+    }
+
     public boolean equals(Object other) {
-        if(!(other instanceof ClojureUnorderedVector)) return false;
-        ClojureUnorderedVector o = (ClojureUnorderedVector)other;
-        if(count() != o.count()) return false;
-        if(hashCode() != o.hashCode()) return false;
-        if(count() == 1) {
-            return Util.equiv(vals[0], o.vals[0]);
+        if(this == other) return true;
+        if(other instanceof ClojureUnorderedVector) {
+            ClojureUnorderedVector o = (ClojureUnorderedVector)other;
+            if(count() != o.count()) return false;
+            if(hashCode() != o.hashCode()) return false;
+            if(count() == 1) {
+                return Util.equiv(vals[0], o.vals[0]);
+            }
+            // because of the unordered nature, we are going to have to count the
+            // number of times that each of these elements appears in the map
+            //
+            // which means using something like a hashMap
+            return getFrequencyMap().equals(o.getFrequencyMap());
+        } else {
+            if(count() != RT.count(other)) return false;
+            Object s = RT.seq(other);
+            ITransientMap m = PersistentHashMap.EMPTY.asTransient();
+            while(s != null) {
+                Object v = RT.first(s);
+                int c = (Integer)RT.get(m, v, 0);
+                m = m.assoc(v, c+1);
+                s = RT.next(s);
+            }
+            return getFrequencyMap().equals(m.persistent());
         }
-        return getFrequencyMap().equals(o.getFrequencyMap());
-        // because of the unordered nature, we are going to have to count the
-        // number of times that each of these elements appears in the map
-        //
-        // which means using something like a hashMap
     }
 
     public int hashCode() {
-        if(_hash != 0)
-            return _hash;
-        int h = 0xdeadbeef;
+        // eh, probably not a great hash, but should be decent enough (hopefully)
+        int h = hashInternal() + vals.length;
+        h ^= h >> 16;
+        h *= 0x85ebca6b;
+        h ^= h >> 13;
+        int l = hashLengthCodes[(vals.length * (h >> 10)) & 127];
+        l = Integer.rotateLeft(l, (h^(h>>20))&15);
+        h ^= l;
+        h ^= h >> 5;
+        h *= 0xc2b2ae35;
+        h ^= h >> 16;
+        return  h;
+    }
+
+    private int hashInternal() {
+        if(_hash != 0) return _hash;
+        int h = 0;
         for(int i = 0; i < vals.length; i++) {
             h ^= hash(vals[i]);
         }
-        h += vals.length;
         _hash = h;
         return h;
     }
+
+    private static final int hashLengthCodes[] = new int[] { // 128 different numbers which will get shuffled into the code
+        597164378,  976600812,   62924696, 1630519828, 1269576953,
+        1073851686,  313560563,  914450662, 1473291817,   29561511,
+        2058145373, 1055075321, 1690157812,  903822113, 1711424116,
+        727951103,  686515870,  708104307, 2134809801,  623376737,
+        2046717049, 1167862095,  816242418,  954757334,  819860582,
+        1377590620, 2032725095, 1768598511, 1464040856, 1650972854,
+        1697456990,  243304649, 1303505355,  953897630,  354398211,
+        1963840659, 1048406214, 1011986554,  591020305, 1777792790,
+        214851141,  927388513, 1471254200, 1771940495,  660345542,
+        1076967111,  180699013, 1541684179, 2080757920,  979887472,
+        910719318, 1864325250,  982383862,  698723590, 1602608609,
+        1577236254,  738887741,  660786560, 1108795353, 2002397925,
+        148637919,  229614181,  489861505, 1729342076, 1207730783,
+        1625211364, 1270628662,   27326889,  796351079,  906056506,
+        1135126304,  603811104, 2116072586, 1299169065, 1594168154,
+        1238571850,   61405081, 1477599035,  446113839, 1206295293,
+        2059672457,  915463885, 1803259340,  564245662, 1218359760,
+        1660705314, 1351421505,  237817429, 1113006610, 1317108602,
+        47327975, 1114125848, 2051097259,  605677971, 1876005703,
+        1679153843, 1335619269, 1095148213, 1942757823,  312468049,
+        425205755,  202289932,  320151538, 1970421861, 1145384240,
+        905797029, 2002060918, 1190983952,  548320185, 1555063757,
+        1629691965, 1710279957, 1504309567, 1300128911,  397467516,
+        98494146, 1227657446,  106779726,   73565497,  917457706,
+        166548552, 1823913412,  118375438, 1113388665,  680749667,
+        576500507, 1159445553, 1463481156 };
 
     public int hasheq() { return hashCode(); }
 
@@ -93,7 +167,7 @@ public class ClojureUnorderedVector extends AFn implements IPersistentVector,
         System.arraycopy(vals,0,a,0,vals.length);
         a[a.length-1] = val;
         int h = 0;
-        if(_hash != 0) { h = ((_hash - vals.length) ^ hash(val)) + a.length; }
+        if(_hash != 0) { h ^= hash(vals); }
         return new ClojureUnorderedVector(a, h);
     }
 
@@ -103,7 +177,7 @@ public class ClojureUnorderedVector extends AFn implements IPersistentVector,
         System.arraycopy(vals,0,a,0,vals.length);
         a[i] = val;
         int h = _hash;
-        if(h != 0) { h = ((h - vals.length) ^ hash(vals[i]) ^ hash(a[i])) + vals.length; }
+        if(h != 0) { h ^= hash(vals[i]) ^ hash(a[i]); }
         return new ClojureUnorderedVector(a, h);
     }
 
@@ -155,7 +229,7 @@ public class ClojureUnorderedVector extends AFn implements IPersistentVector,
         Object a[] = new Object[vals.length-1];
         System.arraycopy(vals,1,a,0,vals.length-1);
         int h = _hash;
-        if(h != 0) { h = ((h - vals.length) ^ hash(vals[0])) + a.length; }
+        if(h != 0) { h ^= hash(vals[0]); }
         return new ClojureUnorderedVector(a, h);
     }
 
@@ -184,6 +258,14 @@ public class ClojureUnorderedVector extends AFn implements IPersistentVector,
 
     public IPersistentMap meta() {
         return null;
+    }
+
+    public Object invoke(Object arg) {
+        return valAt(arg);
+    }
+
+    public Object invoke(Object arg1, Object arg2) {
+        return valAt(arg1, arg2);
     }
 
     static class VecTransientCollection implements ITransientCollection {
@@ -244,8 +326,42 @@ public class ClojureUnorderedVector extends AFn implements IPersistentVector,
 
     }
 
-    static private int hash(Object h) {
-        return h == null ? 0 : h.hashCode();
+    static private int hash(Object o) {
+        if(o == null) return 0;
+        int h = o.hashCode();
+        h ^= h >> 16;
+        h *= 0x85ebca6b;
+        h ^= h >> 12;
+        return h;
+    }
+
+    static public ClojureUnorderedVector concat(Object args_list) {
+        int length = 0;
+        final Object seq = RT.seq(args_list);
+        Object n = seq;
+        while(n != null) {
+            length += RT.count(RT.first(n));
+            n = RT.next(n);
+        }
+        Object[] arr = new Object[length];
+        n = seq;
+        int i = 0;
+        while(n != null) {
+            Object v = RT.first(n);
+            if(v instanceof ClojureUnorderedVector) {
+                ClojureUnorderedVector c = (ClojureUnorderedVector)v;
+                System.arraycopy(c.vals,0, arr,i, c.vals.length);
+                i += c.vals.length;
+            } else {
+                while(v != null) {
+                    arr[i] = RT.first(v);
+                    v = RT.next(v);
+                    i++;
+                }
+            }
+            n = RT.next(n);
+        }
+        return new ClojureUnorderedVector(arr, 0);
     }
 
 }

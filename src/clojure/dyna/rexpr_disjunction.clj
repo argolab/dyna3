@@ -9,7 +9,7 @@
   (:require [clojure.set :refer [subset? union]])
   (:import [dyna.rexpr disjunct-rexpr])
   (:import [dyna.prefix_trie PrefixTrie])
-  (:import [dyna UnificationFailure DIterable DIterator DIteratorInstance]))
+  (:import [dyna UnificationFailure DIterable DIterator DIteratorInstance ClojureUnorderedVector]))
 
 (def ^:dynamic *disjunct-op-remove-if-single* true)
 
@@ -117,7 +117,7 @@
   :run-at :construction
   (let [dj-vars (vec (exposed-variables rexpr))
         existing-tries (filter is-disjunct-op? children)
-        non-tries (vec (filter #(not (is-disjunct-op? %)) children))
+        non-tries (ClojureUnorderedVector/create (filter #(not (is-disjunct-op? %)) children))
         non-tries-map (loop [n (count dj-vars)
                              s non-tries]
                     (if (= n 0)

@@ -28,7 +28,7 @@
 
 (defn- merge-map-arity [arity & args]
   (if (= arity 0)
-    (apply concat args)
+    (ClojureUnorderedVector/concat args)  ;(apply concat args)
     (apply merge-with (partial merge-map-arity (- arity 1)) args)))
 
 (defn- equal-tries [arity map1 map2]
@@ -141,7 +141,7 @@
       (assert (= (count key) arity))
       (let [new-root ((fn rec [key-so-far key-query node]
                         (if (empty? key-query)
-                          (vec (map-fn (reverse key-so-far) node))
+                          (ClojureUnorderedVector/create (map-fn (reverse key-so-far) node))
                           (let [cur-key (first key-query)
                                 rest-key (rest key-query)
                                 ;key-so-far2 (cons cur-key key-so-far)
@@ -168,7 +168,7 @@
       (assert (= (count key) arity))
       (let [new-root ((fn rec [key-so-far key-query node]
                         (if (empty? key-query)
-                          (vec (map-fn (reverse key-so-far) node))
+                          (ClojureUnorderedVector/create (map-fn (reverse key-so-far) node))
                           (let [cur-key (first key-query)
                                 rest-key (rest key-query)
                                 ;key-so-far2 (cons cur-key key-so-far)
@@ -224,8 +224,8 @@
                  (reduce bit-or contains-wildcard (map (fn [[idx v]] (if (nil? v) (bit-shift-left 1 idx) 0))
                                                        (zipmap (range) key)))
                  (if (> arity 0)
-                   (update-in root key update-fn)
-                   (update-fn root))))
+                   (update-in root key #(ClojureUnorderedVector/create (update-fn %)))
+                   (ClojureUnorderedVector/create (update-fn root)))))
 
   (trie-insert-val [this key val]
     (assert (= (count key) arity)) ;; there should be some function which remaps the key into what the filter is going to construct
@@ -362,6 +362,15 @@
     (trie-insert-val this key val)))
 
 (defn make-PrefixTrie [arity wildcard root]
+  ;; check that we have the right internals for now
+  (if (> arity 0)
+    ((fn rec [d n]
+       (if (= d 0)
+         (assert (instance? ClojureUnorderedVector n))
+         (doseq [v (vals n)]
+           (rec (- d 1) v))))
+     arity root)
+    (assert (or (nil? root) (instance? ClojureUnorderedVector root))))
   (PrefixTrie. arity wildcard root 0))
 
 (defmethod print-dup PrefixTrie [^PrefixTrie this ^java.io.Writer w]
