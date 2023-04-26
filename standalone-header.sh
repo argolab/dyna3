@@ -64,7 +64,8 @@ install_python() {
 
     unzip -qq "$self" "dyna_python_module/*" -d $t 2>/dev/null
     cp "$self" $t/dyna_python_module/dyna/dyna.jar
-    python -m pip install $t/dyna_python_module
+    cd $t/dyna_python_module
+    python setup.py install
 }
 
 # set dyna to use a different java runtime

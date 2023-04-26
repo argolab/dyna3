@@ -4,7 +4,7 @@
   (:require [dyna.utils :refer :all])
   (:require [dyna.prefix-trie :refer :all])
   (:import [dyna.prefix_trie IPrefixTrie PrefixTrie])
-  (:import [dyna ClojureUnorderedVector]))
+  (:import [dyna ClojureUnorderedVector ClojureHashMap]))
 
 
 
@@ -81,3 +81,16 @@
     (assert (= v v2))
     (assert (= 100 (count v3)))
     (print (hash v3))))
+
+(deftest new-hash-map-test
+  (let [v ClojureHashMap/EMPTY
+        v2 (assoc v :a :b)
+        v3 (conj v2 (zipmap (range 20) (map #(+ 1 %) (range))))
+        v4 (vec v3)]
+    (assert (= :b (get v2 :a)))
+    (assert (= 21 (count v3)))
+    (assert (= 8 (get v3 7)))
+    (assert (= 21 (count v4)))
+    (assert (every? #(some #{[% (+ 1 %)]} v4) (range 20)))
+    (debug-repl)
+    ))

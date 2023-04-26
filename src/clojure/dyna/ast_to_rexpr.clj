@@ -278,6 +278,10 @@
 
 (def ^{:private true :dynamic true} *do-not-use-with-key* false)
 (def ^{:private true :dynamic true} *compiler-expression-dynabase* nil)
+(def ^{:private true :dynamic true} *used-dynabase-create-in-defined-term* nil
+  ;; the dynabase create can only appear at most once per defined term.  If two or more dynabases are required, then they need to get split up into two different terms
+  ;; this is here to catch that error
+  )
 
 (defn convert-from-ast [^DynaTerm ast out-variable variable-name-mapping source-file]
   ;; convert from the ast into an R-expr which can then be evaluated
@@ -584,15 +588,16 @@ This is most likely not what you want."))))
                                                 project-variables-map (into {} (for [v project-variables]
                                                                                  [v (make-variable v)]))
                                                 incoming-variable (make-variable (str (gensym "$incoming_variable_")))
-                                                body-rexpr (convert-from-ast body
-                                                                             incoming-variable
-                                                                             (merge {"$functor_name" (make-constant functor-name)
-                                                                                     "$functor_arity" (make-constant functor-arity)}
-                                                                                    project-variables-map
-                                                                                    argument-variables
-                                                                                    (when (dnil? dynabase)
-                                                                                      {"$self" (make-constant DynaTerm/null_term)}))
-                                                                             source-file)
+                                                body-rexpr (binding [*used-dynabase-create-in-defined-term* (volatile! false)]
+                                                             (convert-from-ast body
+                                                                               incoming-variable
+                                                                               (merge {"$functor_name" (make-constant functor-name)
+                                                                                       "$functor_arity" (make-constant functor-arity)}
+                                                                                      project-variables-map
+                                                                                      argument-variables
+                                                                                      (when (dnil? dynabase)
+                                                                                        {"$self" (make-constant DynaTerm/null_term)}))
+                                                                               source-file))
                                                 rexpr (make-no-simp-aggregator aggregator
                                                                                aggregator-result-variable
                                                                                incoming-variable
@@ -743,13 +748,23 @@ This is most likely not what you want."))))
                                                                             (get-value extended-dynabase-value)
                                                                             (make-constant DynaTerm/null_term))
                                                                           out-variable)]
+                                     (when *used-dynabase-create-in-defined-term*
+                                       (when @*used-dynabase-create-in-defined-term*
+                                         (throw (DynaUserError. "There can be at most 1 dynabase created per rule.  If you need multiple dynabases types, split this into different rules")))
+                                       (vreset! *used-dynabase-create-in-defined-term* true))
                                      (when (not= dynabase-terms DynaTerm/null_term)
                                        ((fn mkt [^DynaTerm trm]
                                           (let [^DynaTerm dt (if (= "," (.name trm)) (get trm 0) trm)]
                                             (cond (= (.name dt) ",") (do (mkt (get dt 0))
                                                                          (mkt (get dt 1)))
                                                   (= (.name dt) "$define_term") (let [[name odb aggregator body] (.arguments dt)]
+                                                                                  ;; TODO: this could actually happen.. supose need to support this
+                                                                                  ;; I think that this case would be something like `new { f(X).y = 123.  f(X) = new { ... } }`
+                                                                                  ;; this would mean that odb would have the structure `f(X)`.  This would have to go through
+                                                                                  ;; a chain of multiple user calls until it finds the root element (f(X) in this case)
+                                                                                  ;; and it would have to replace that element with `$self.f(X)` for it to work with the dynabase
                                                                                   (assert (= odb DynaTerm/null_term))
+
                                                                                   (let [res (convert-from-ast (DynaTerm. "$define_term"
                                                                                                                          [name
                                                                                                                           dynabase-term-access
