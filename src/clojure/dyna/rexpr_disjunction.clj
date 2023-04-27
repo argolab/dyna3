@@ -115,35 +115,36 @@
   :match {:rexpr (disjunct (:rexpr-list children))
           :check system/*use-optimized-rexprs*}
   :run-at :construction
-  (let [dj-vars (vec (exposed-variables rexpr))
-        existing-tries (filter is-disjunct-op? children)
-        non-tries (ClojureUnorderedVector/create (filter #(not (is-disjunct-op? %)) children))
-        non-tries-map (loop [n (count dj-vars)
-                             s non-tries]
-                    (if (= n 0)
-                      s
-                      (recur (- n 1) (trie-hash-map nil s))))
-        base-trie (make-PrefixTrie (count dj-vars)
-                               (if-not (empty? non-tries)
-                                 (- (bit-shift-left 1 (count dj-vars)) 1)
-                                 0)
-                               non-tries-map)
-        combined-trie (loop [trie base-trie
-                             nt (first existing-tries)
-                             rt (next existing-tries)]
-                        (if (nil? nt) trie
-                            (let [vorder (:disjunction-variables nt)
-                                  t (:rexprs nt)
-                                  vorder-idx (zipmap vorder (range))
-                                  new-order (vec (map vorder-idx dj-vars))  ;; if the var is not present, it will be nil
-                                  t-reordered (trie-reorder-keys t new-order)]
-                              (recur (trie-merge trie t-reordered)
-                                     (first rt)
-                                     (next rt)))))
-        ret (make-disjunct-op dj-vars
-                              combined-trie)
-        ]
-    ret))
+  (let [dj-vars (vec (exposed-variables rexpr))]
+    (when-not (empty? dj-vars)
+      (let [existing-tries (filter is-disjunct-op? children)
+            non-tries (ClojureUnorderedVector/create (filter #(not (is-disjunct-op? %)) children))
+            non-tries-map (loop [n (count dj-vars)
+                                 s non-tries]
+                            (if (= n 0)
+                              s
+                              (recur (- n 1) (trie-hash-map nil s))))
+            base-trie (make-PrefixTrie (count dj-vars)
+                                       (if-not (empty? non-tries)
+                                         (- (bit-shift-left 1 (count dj-vars)) 1)
+                                         0)
+                                       non-tries-map)
+            combined-trie (loop [trie base-trie
+                                 nt (first existing-tries)
+                                 rt (next existing-tries)]
+                            (if (nil? nt) trie
+                                (let [vorder (:disjunction-variables nt)
+                                      t (:rexprs nt)
+                                      vorder-idx (zipmap vorder (range))
+                                      new-order (vec (map vorder-idx dj-vars)) ;; if the var is not present, it will be nil
+                                      t-reordered (trie-reorder-keys t new-order)]
+                                  (recur (trie-merge trie t-reordered)
+                                         (first rt)
+                                         (next rt)))))
+            ret (make-disjunct-op dj-vars
+                                  combined-trie)
+            ]
+        ret))))
 
 
 (def-rewrite

@@ -149,8 +149,10 @@
         r)))
 
   (ctx-contains-rexpr? [this rexpr]
-    (or (contains? rexprs rexpr) (when (not (nil? parent))
-                                   (ctx-contains-rexpr? parent rexpr))))
+    (or (contains? rexprs rexpr)
+        (if-not (nil? parent)
+          (ctx-contains-rexpr? parent rexpr)
+          false)))
 
   (ctx-get-value-map-upto-context [this parent-context]
     (if (identical? this parent-context)
