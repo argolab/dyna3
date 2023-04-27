@@ -2,4 +2,5 @@
 
 # this runs the dyna repl without having to generate the jar first
 
-exec make dyna-repl
+#exec make dyna-repl
+exec java -cp `make run-class-path` dyna.DynaMain "$@"

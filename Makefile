@@ -60,6 +60,8 @@ $(TARGET): $(JAR_WITH_PYTHON_INSTALLER) standalone-header.sh
 test-python: $(JAR_TARGET)
 	python dyna_python_module/test/test_wrapper.py
 
+run-class-path:
+	@$(LEIN) classpath
 
 # example to run a single test
 # reset && rlwrap -a lein test :only dyna.core-test/basic-aggregator2

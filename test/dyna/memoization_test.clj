@@ -117,5 +117,5 @@ fact(0) := 1.
 
 $memo(fact[N:$ground]) = \"unk\".
 
-print fact(10000).  % there is a bug with the data structure that causes an extra factor of N to end up in the computation, causing this to be slow
+print fact(2000).  % there was a bug in the hash table which caused an extra factor of O(N) get in there
 ")

@@ -450,3 +450,9 @@
     :else (cons (first coll) (lazy-seq (drop-nth (rest coll) (- n 1))))))
 
 (defn only [x] {:pre [(nil? (next x))]} (first x))
+
+
+(defmacro dyna-slow-check [& args]
+  ;; extra debugging checks which are slow
+  nil;`(do ~@args)
+  )

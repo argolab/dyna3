@@ -392,16 +392,17 @@
 
 (defn make-PrefixTrie [arity wildcard root]
   ;; check that we have the right internals for now
-  (if (> arity 0)
-    ((fn rec [d n]
-       (if (= d 0)
-         (assert (instance? ClojureUnorderedVector n))
-         (do
-           (assert (or (nil? n) (instance? ClojureHashMap n)))
-           (doseq [v (vals n)]
-             (rec (- d 1) v)))))
-     arity root)
-    (assert (or (nil? root) (instance? ClojureUnorderedVector root))))
+  (dyna-slow-check
+   (if (> arity 0)
+     ((fn rec [d n]
+        (if (= d 0)
+          (assert (instance? ClojureUnorderedVector n))
+          (do
+            (assert (or (nil? n) (instance? ClojureHashMap n)))
+            (doseq [v (vals n)]
+              (rec (- d 1) v)))))
+      arity root)
+     (assert (or (nil? root) (instance? ClojureUnorderedVector root)))))
   (PrefixTrie. arity wildcard root))
 
 (defmethod print-dup PrefixTrie [^PrefixTrie this ^java.io.Writer w]

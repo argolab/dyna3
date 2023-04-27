@@ -732,7 +732,7 @@
                                                                                                                       #_(last variable-list) ;; result of aggregation goes here....though this might not be used by the aggregator
                                                                                                                       (make-assumption)
                                                                                                                       (atom [true nil (make-PrefixTrie (- (count variable-list) 1)
-                                                                                                                                                   0 {})])
+                                                                                                                                                       0 nil)])
                                                                                                                       (atom nil)))
                                                                                                          nr (make-memoized-access container (vec (drop-last variable-list)))]
                                                                                                      ;; the variable list might not want to contain the resulting variable...
