@@ -86,11 +86,17 @@
   (let [v ClojureHashMap/EMPTY
         v2 (assoc v :a :b)
         v3 (conj v2 (zipmap (range 20) (map #(+ 1 %) (range))))
-        v4 (vec v3)]
+        v4 (vec v3)
+        v5 (into {} v3)
+        v6 (into v v5)]
     (assert (= :b (get v2 :a)))
     (assert (= 21 (count v3)))
     (assert (= 8 (get v3 7)))
     (assert (= 21 (count v4)))
     (assert (every? #(some #{[% (+ 1 %)]} v4) (range 20)))
-    (debug-repl)
+    (assert (= -784201506 (hash v3))) ;; the hash should be stable
+    (assert (= v3 v5))
+    (assert (= v3 v6))
+    (assert (= v5 v3))
+    (assert (= v5 v6))
     ))
