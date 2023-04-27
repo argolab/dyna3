@@ -148,9 +148,10 @@
   IMemoContainer
   (memo-get-assumption [this] assumption)
   (memo-push-recompute-key [this key]
-    (let [kk (doall key)
-          prio (memo-priority-function kk)]
-      (system/push-agenda-work (AgendaReprocessWork. this kk prio))))
+    (let [kk (doall key)]
+      (when (is-key-contained? (second @data) kk) ;; if we don't have the key already in the table, then we can't "recompute" it
+        (let [prio (memo-priority-function kk)]
+          (system/push-agenda-work (AgendaReprocessWork. this kk prio))))))
   (memo-rewrite-access [this variables variable-values]
     (let [control-arg (conj (vec (map #(if (nil? %) meta-free-dummy-free-value %) variable-values)) nil)
           control-setting (memo-controller control-arg)]
@@ -168,19 +169,21 @@
               (let [lookup-key (drop-last (second control-setting))
                     has-key (is-key-contained? has-computed lookup-key)]
                 (if-not has-key
-                  (if *memoization-make-guesses* ;; making a "bad guess" can cause this to not terminate
+                  (if (*memoization-make-guesses-handler* this variables variable-values) ;; return true if this should make the guess
                     (let [[old-dat new-dat] (swap-vals! data (fn [[a b c]]
                                                                (if-not a
                                                                  [a b c] ;; not valid, do not change
                                                                  [a (assoc-in b lookup-key true) c])))]
                       (when (or (identical? (second old-dat) has-computed) ;; this first check is just an optimization, we really care about if the we were the ones to add the new lookup key, which means it wasn't in old
                                 (not (is-key-contained? (second old-dat) lookup-key)))
+                        #_(when (or (nil? (first lookup-key)) (> (first lookup-key) 3))
+                          (debug-repl))
                         (memo-push-recompute-key this lookup-key))
                       (do
                         (throw (UnificationFailure. "empty memo (making guess)")) ;; we could be more efficient about stopping the evaluation by throwing unification failure
                         (make-multiplicity 0)) ;; return 0, as this is the current "guess" for this value and there is currently nothing there
                       )
-                    nil ;; return nil as we have to defer this "lookup" as we don't have anything and we are defering the guess operation (for now)
+                    nil ;; we are not making a guess, so we return nil which does not do the rewrite
                     )
 
                   ;; has-key is true, so we are going to return the matched values from the data trie
@@ -194,7 +197,7 @@
                       (ctx-set-value! lcontext var val))
                     ;(debug-repl "pre return")
                     (let [res (context/bind-context lcontext
-                                                    (binding [*memoization-make-guesses* false
+                                                    (binding [*memoization-make-guesses-handler* (fn [memo-table variable variable-values] false) ;; do not make guesses
                                                               *aggregator-op-get-variable-value* (fn [variable]
                                                                                                    (get-value (get variables-map variable variable)))]
                                                       (simplify-fully-no-guess lrexpr)))]
@@ -452,7 +455,7 @@
         (doseq [pr placeholder-rexprs]
           (binding [*memoization-forward-placeholder-bindings* (:key message)]
             (let [ctx (context/make-empty-context pr)
-                  result (context/bind-context ctx (try (simplify-fully pr)
+                  result (context/bind-context ctx (try (simplify-fully-no-guess pr)
                                                         (catch UnificationFailure e (make-multiplicity 0))))
                   ;; for now going to do a simpler version where it only handles a single value of the variables.  This will need to handle
                   ;; the case where it needs to get an iterator over the R-expr which is returned.  Such that it will get all of the bindings

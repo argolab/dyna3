@@ -1156,7 +1156,13 @@
     (.value ^constant-value-rexpr variable)
     (ctx-get-value (context/get-context) variable)))
 
-(def ^{:dynamic true} *memoization-make-guesses* false)  ;; if this is false, then the memos should not make any guesses, and just "remain" in hopes they will be eleminated by some other conjunct
+(def ^{:dynamic true} *memoization-make-guesses-handler*
+  ;; this function is called before a guess is going to be made.  If this function returns true, then it will make the guess
+  ;; otherwise it will not make the guess and delay
+  ;;
+  ;; This is important as making a bad guess could cause the system to not terminate, so we attempt to delay guessing for as long as possible
+  (fn [memo-table variables variable-values]
+    false))
 
 (def ^{:dynamic true} *simplify-with-inferences* false)
 
@@ -1225,8 +1231,11 @@
 (defn simplify-fully [rexpr]
   (loop [cri rexpr]
     (let [nri (simplify-fully-no-guess cri)
-          nri2 (binding [*memoization-make-guesses* true]
-                 (simplify-fast nri))]
+          nri2 (binding [*memoization-make-guesses-handler* (fn [memo-table variable variable-values]
+                                                              ;; it is possible that there are multiple *different* kinds of guesses which could be made
+                                                              ;; this function could be replaced with something that is smarter and chooses between multiple different options for what to guess about
+                                                              true)]
+                       (simplify-fast nri))]
       (if (= nri nri2)
         nri
         (recur nri2)))))

@@ -61,6 +61,7 @@ assert fib(10) = 55.
 
 % if this is not memoized, then this will take too long to run
 assert fib(100) = 354224848179261915075.
+
 ")
 
 #_(str-test factorial-null "
