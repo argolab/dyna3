@@ -2,7 +2,7 @@
   (:require [dyna.utils :refer :all])
   (:require [dyna.rexpr])
                                         ;(:import [dyna IPrefixTrie])
-  (:import [dyna ClojureUnorderedVector])
+  (:import [dyna ClojureUnorderedVector ClojureHashMap])
   )
 
 
@@ -26,12 +26,34 @@
 ;; example structure of the trie
 #_({:a {:b [val1 val2]}})
 
+(defn trie-hash-map [& args]
+  (ClojureHashMap/createFromSeq args))
+
+(defn- trie-update-in
+  {:static true}
+  ([m ks f & args]
+   (let [up (fn up [m ks f args]
+              (let [[k & ks] ks]
+                (ClojureHashMap/create
+                 (if ks
+                   (assoc m k (up (get m k) ks f args))
+                   (assoc m k (apply f (get m k) args))))))]
+     (up m ks f args))))
+
+(defn- trie-assoc-in
+  {:static true}
+  [m [k & ks] v]
+  (ClojureHashMap/create
+   (if ks
+     (assoc m k (trie-assoc-in (get m k) ks v))
+     (assoc m k v))))
+
 (defn- merge-map-arity [arity & args]
   (if (= arity 0)
     (ClojureUnorderedVector/concat args)  ;(apply concat args)
     (apply merge-with (partial merge-map-arity (- arity 1)) args)))
 
-(defn- equal-tries [arity map1 map2]
+#_(defn- equal-tries [arity map1 map2]
   (if (identical? map1 map2)
     true
     (if (or (empty? map1) (empty? map2))
@@ -43,7 +65,7 @@
              (every? #(equal-tries (- arity 1) (get map1 %) (get map2 %)) (keys map1)))))))
 
 ;; the elements in the leaf of the trie should not matter about the order, so this is
-(defn- hash-tries [arity node]
+#_(defn- hash-tries [arity node]
   (if (= arity 0)
     (reduce bit-xor (map hash node))
     (reduce unchecked-add-int 0 (map #(bit-xor (hash (first %)) (hash-tries (- arity 1) (second %))) node))))
@@ -92,7 +114,7 @@
                      ;; ^int filter-arity
                      ;; filter ;; a tuple of which keys are already known or the value nil indicating that there is nothing
                      root
-                     ^{:tag int :unsynchronized-mutable true} hashCodeCache
+                     ;^{:tag int :unsynchronized-mutable true} hashCodeCache
                      ]
   IPrefixTrie
   (trie-get-values-collection [this key]
@@ -146,16 +168,17 @@
                                 rest-key (rest key-query)
                                 ;key-so-far2 (cons cur-key key-so-far)
                                 ]
-                            (into {} (remove empty? (map (fn [[key x]]
-                                                           (if (or (nil? cur-key)
-                                                                   (nil? key)
-                                                                   (= cur-key key))
-                                                             (let [v (rec (cons key key-so-far) rest-key x)]
-                                                               (when-not (empty? v)
-                                                                 [key v]))
-                                                             [key x] ;  this is not mapped, so just keep it the same
-                                                             ))
-                                                         node))))))
+                            (into ClojureHashMap/EMPTY
+                                  (remove empty? (map (fn [[key x]]
+                                                        (if (or (nil? cur-key)
+                                                                (nil? key)
+                                                                (= cur-key key))
+                                                          (let [v (rec (cons key key-so-far) rest-key x)]
+                                                            (when-not (empty? v)
+                                                              [key v]))
+                                                          [key x] ;  this is not mapped, so just keep it the same
+                                                          ))
+                                                      node))))))
                       () key root)]
         (make-PrefixTrie arity contains-wildcard new-root))))
 
@@ -173,17 +196,18 @@
                                 rest-key (rest key-query)
                                 ;key-so-far2 (cons cur-key key-so-far)
                                 ]
-                            (into {} (remove empty? (if (nil? cur-key)
-                                                      (for [[k v] node]
-                                                        (let [r (rec (cons k key-so-far) rest-key v)]
-                                                          (when-not (empty? r)
-                                                            [k r])))
-                                                      (for [k [nil cur-key]
-                                                            :let [v (get node k)]
-                                                            :when (not (nil? v))]
-                                                        (let [r (rec (cons k key-so-far) rest-key v)]
-                                                          (when-not (empty? r)
-                                                            [k r])))))))))
+                            (into ClojureHashMap/EMPTY
+                                  (remove empty? (if (nil? cur-key)
+                                                   (for [[k v] node]
+                                                     (let [r (rec (cons k key-so-far) rest-key v)]
+                                                       (when-not (empty? r)
+                                                         [k r])))
+                                                   (for [k [nil cur-key]
+                                                         :let [v (get node k)]
+                                                         :when (not (nil? v))]
+                                                     (let [r (rec (cons k key-so-far) rest-key v)]
+                                                       (when-not (empty? r)
+                                                         [k r])))))))))
                       () key root)]
         ;; technically the contains wildcard could get remapped here
         (make-PrefixTrie arity contains-wildcard new-root))))
@@ -224,7 +248,7 @@
                  (reduce bit-or contains-wildcard (map (fn [[idx v]] (if (nil? v) (bit-shift-left 1 idx) 0))
                                                        (zipmap (range) key)))
                  (if (> arity 0)
-                   (update-in root key #(ClojureUnorderedVector/create (update-fn %)))
+                   (trie-update-in root key #(ClojureUnorderedVector/create (update-fn %)))
                    (ClojureUnorderedVector/create (update-fn root)))))
 
   (trie-insert-val [this key val]
@@ -247,16 +271,18 @@
                         nil
                         (let [[f & r] key-query]
                           (if (nil? f)
-                            (into {} (remove nil? (for [[k v] node]
-                                                    (let [e (rec r v)]
-                                                      (when-not (nil? e)
-                                                        [k e])))))
-                            (into {} (remove nil? (for [[k v] node]
-                                                    (if (= k f)
-                                                      (let [e (rec r v)]
-                                                        (when-not (nil? e)
-                                                          [k e]))
-                                                      [k v]))))))))
+                            (into ClojureHashMap/EMPTY
+                                  (remove nil? (for [[k v] node]
+                                                 (let [e (rec r v)]
+                                                   (when-not (nil? e)
+                                                     [k e])))))
+                            (into ClojureHashMap/EMPTY
+                                  (remove nil? (for [[k v] node]
+                                                 (if (= k f)
+                                                   (let [e (rec r v)]
+                                                     (when-not (nil? e)
+                                                       [k e]))
+                                                   [k v]))))))))
                     key root))))
 
   (trie-delete-key [this key]
@@ -313,10 +339,10 @@
                                                                   (bit-shift-left 1 i)
                                                                   0))
                                                         (range (count new-order))))
-            new-root (volatile! {})]
+            new-root (volatile! ClojureHashMap/EMPTY)]
         (doseq [[key col] (trie-get-values-collection this nil)]
           (let [new-key (vec (map (fn [i] (if (nil? i) nil (nth key i))) new-order))]
-            (vswap! new-root assoc-in new-key col)))
+            (vswap! new-root trie-assoc-in new-key col)))
         (make-PrefixTrie (count new-order) new-contains-wildcard @new-root))))
 
   Object
@@ -329,12 +355,15 @@
         (and (instance? PrefixTrie other)
              (= arity (.arity ^PrefixTrie other))
              (= contains-wildcard (.contains-wildcard ^PrefixTrie other))
-             (equal-tries arity root (.root ^PrefixTrie other)))))
+             (= root (.root ^PrefixTrie other))  ;; the equals now should handle things being out of order
+                                        ;(equal-tries arity root (.root ^PrefixTrie other))
+             )))
 
   (hashCode [this]
-    (when (= hashCodeCache 0)
-      (set! hashCodeCache (unchecked-add-int arity (hash-tries arity root))))
-    hashCodeCache)
+    #_(when (= hashCodeCache 0)
+        (set! hashCodeCache (unchecked-add-int arity (hash-tries arity root))))
+                                        ;hashCodeCache
+    (unchecked-add-int arity (hash root)))
 
   clojure.lang.ILookup
   (valAt [this key] (.valAt this key nil))
@@ -367,11 +396,13 @@
     ((fn rec [d n]
        (if (= d 0)
          (assert (instance? ClojureUnorderedVector n))
-         (doseq [v (vals n)]
-           (rec (- d 1) v))))
+         (do
+           (assert (or (nil? n) (instance? ClojureHashMap n)))
+           (doseq [v (vals n)]
+             (rec (- d 1) v)))))
      arity root)
     (assert (or (nil? root) (instance? ClojureUnorderedVector root))))
-  (PrefixTrie. arity wildcard root 0))
+  (PrefixTrie. arity wildcard root))
 
 (defmethod print-dup PrefixTrie [^PrefixTrie this ^java.io.Writer w]
   (.write w (str "(dyna.prefix-trie/make-PrefixTrie "

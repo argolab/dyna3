@@ -24,6 +24,47 @@ public final class ClojureHashMap extends AFn implements IPersistentMap,
         assert(root != null);
     }
 
+    public static ClojureHashMap create(Object v) {
+        if(v == null) {
+            return EMPTY;
+        } else if(v instanceof ClojureHashMap) {
+            return (ClojureHashMap)v;
+        } else if(v instanceof Map) {
+            return EMPTY.asTransient().conj(v).persistent();
+        } else if(RT.canSeq(v)) {
+            TransientHashMap ret = EMPTY.asTransient();
+            for(ISeq s = RT.seq(v); s != null; s = s.next()) {
+                Object sv = s.first();
+                if(sv instanceof Map.Entry)
+                    ret = ret.assoc(((Map.Entry)sv).getKey(), ((Map.Entry)sv).getValue());
+                else {
+                    if(RT.count(sv) != 2)
+                        throw new IllegalArgumentException("Expected two values to create entry from");
+                    ret = ret.assoc(RT.nth(sv, 0), RT.nth(sv, 1));
+                }
+            }
+            return ret.persistent();
+        }
+        throw new IllegalArgumentException("Do not know how to construct a Hash map from type: "+v.getClass().getName());
+    }
+
+    public static ClojureHashMap createFromSeq(Object o) {
+        TransientHashMap ret = EMPTY.asTransient();
+        ISeq s = RT.seq(o);
+        while(s != null) {
+            Object k = s.first();
+            s = s.next();
+            Object v = s.first();
+            ret = ret.assoc(k, v);
+            s = s.next();
+        }
+        return ret.persistent();
+    }
+
+
+
+
+
     public boolean equals(Object o) {
         if(o instanceof ClojureHashMap) {
             ClojureHashMap c = (ClojureHashMap)o;
@@ -51,7 +92,7 @@ public final class ClojureHashMap extends AFn implements IPersistentMap,
     }
     public int hasheq() { return hashCode(); }
 
-    public ITransientMap asTransient() {
+    public TransientHashMap asTransient() {
         return new TransientHashMap(root);
     }
 
@@ -110,7 +151,7 @@ public final class ClojureHashMap extends AFn implements IPersistentMap,
     }
 
     public ISeq seq() {
-        return RT.chunkIteratorSeq(iterator());
+        return count() > 0 ? RT.chunkIteratorSeq(iterator()) : null;
     }
 
     public Object valAt(Object k) {
@@ -245,20 +286,20 @@ public final class ClojureHashMap extends AFn implements IPersistentMap,
                 Map.Entry m = (Map.Entry)o;
                 return assoc(m.getKey(), m.getValue());
             } else if(o instanceof IPersistentVector) {
-                if(RT.count(o) != 2)
+                IPersistentVector v = (IPersistentVector)o;
+                if(v.count() != 2)
                     throw new IllegalArgumentException("Vector arg to map conj must be a pair");
-                return assoc(RT.nth(o, 0), RT.nth(o, 1));
+                return assoc(v.nth(0), v.nth(1));
             } else {
+                TransientHashMap ret = this;
                 for(ISeq s = RT.seq(o); s != null; s = s.next()) {
                     Map.Entry e = (Map.Entry)s.first();
-                    assoc(e.getKey(), e.getValue());
+                    ret = ret.assoc(e.getKey(), e.getValue());
                 }
-                return this;
+                return ret;
             }
         }
     }
-
-
 
     static private abstract class INodeIterator {
         abstract boolean hasNext();
@@ -364,7 +405,7 @@ public final class ClojureHashMap extends AFn implements IPersistentMap,
         // }
 
         public Object get_value(Object key, int hash, int hashOffset, Object not_found) {
-            if(this.key.equals(key))
+            if(ClojureHashMap.equals(this.key, key))
                 return value;
             return not_found;
         }
@@ -454,7 +495,7 @@ public final class ClojureHashMap extends AFn implements IPersistentMap,
 
         public Object get_value(Object key, int hash, int hashOffset, Object not_found) {
             for(int i = 0; i < keys.length; i++) {
-                if(keys[i].equals(key))
+                if(ClojureHashMap.equals(keys[i], key))
                     return values[i];
             }
             return not_found;
@@ -606,7 +647,7 @@ public final class ClojureHashMap extends AFn implements IPersistentMap,
                     while(iter.hasNext()) {
                         MapEntry e = iter.next();
                         Object fval = o.get_value(e.getKey(), ClojureHashMap.hash(e.getKey()), hashOffset, null);
-                        if(fval != e.getValue() && !fval.equals(e.getValue()))
+                        if(fval != e.getValue() && !ClojureHashMap.equals(fval, e.getValue()))
                             return false;
                     }
                 }

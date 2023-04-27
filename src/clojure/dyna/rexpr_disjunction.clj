@@ -122,7 +122,7 @@
                              s non-tries]
                     (if (= n 0)
                       s
-                      (recur (- n 1) {nil s})))
+                      (recur (- n 1) (trie-hash-map nil s))))
         base-trie (make-PrefixTrie (count dj-vars)
                                (if-not (empty? non-tries)
                                  (- (bit-shift-left 1 (count dj-vars)) 1)

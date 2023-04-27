@@ -12,7 +12,7 @@
   (:import [dyna.rexpr proj-rexpr disjunct-rexpr aggregator-rexpr])
   (:import [dyna.rexpr_disjunction disjunct-op-rexpr])
   (:import [dyna.prefix_trie PrefixTrie])
-  (:import [dyna UnificationFailure ClojureUnorderedVector]))
+  (:import [dyna UnificationFailure ClojureUnorderedVector ClojureHashMap]))
 
 
 (def-base-rexpr aggregator-op-outer [:unchecked operator
@@ -180,23 +180,25 @@
 (defn- convert-to-trie-mul1 [cnt trie lower-value]
   (if (= cnt 0)
     (try (let [key (lower-value trie)]
-           [{key (ClojureUnorderedVector/create [(make-multiplicity 1)])} (if (nil? key) 1 0)])
+           [(trie/trie-hash-map key (ClojureUnorderedVector/create [(make-multiplicity 1)])) (if (nil? key) 1 0)])
          (catch UnificationFailure err [{} 0])) ;; if there is a unification failure by lower, then this is just empty
     (let [contains-wildcard (volatile! 0)
-          n (into {} (for [[k v] trie
-                           :let [[n2 wildcard] (convert-to-trie-mul1 (- cnt 1) v lower-value)]]
-                       (do (vswap! contains-wildcard bit-or wildcard)
-                           [k n2])))]
+          n (into ClojureHashMap/EMPTY
+                  (for [[k v] trie
+                        :let [[n2 wildcard] (convert-to-trie-mul1 (- cnt 1) v lower-value)]]
+                    (do (vswap! contains-wildcard bit-or wildcard)
+                        [k n2])))]
       [n (bit-or (bit-shift-left @contains-wildcard 1) (if (contains? n nil) 1 0))])))
 
 (defn- convert-to-trie-agg [cnt trie]
   (if (= cnt 0)
     [(ClojureUnorderedVector/create [(make-aggregator-op-inner (make-constant trie) [] (make-multiplicity 1))]) 0]
     (let [contains-wildcard (volatile! 0)
-          n (into {} (for [[k v] trie
-                           :let [[n2 wildcard] (convert-to-trie-agg (- cnt 1) v)]]
-                       (do (vswap! contains-wildcard bit-or wildcard)
-                           [k n2])))]
+          n (into ClojureHashMap/EMPTY
+                  (for [[k v] trie
+                        :let [[n2 wildcard] (convert-to-trie-agg (- cnt 1) v)]]
+                    (do (vswap! contains-wildcard bit-or wildcard)
+                        [k n2])))]
       [n (bit-or (bit-shift-left @contains-wildcard 1) (if (contains? n nil) 1 0))])))
 
 (def-rewrite
