@@ -10,6 +10,11 @@
   (:import [dyna.assumptions Watcher Assumption])
   )
 
+
+;; This was the initial version of memoization which essentially represents everything as an R-expr IF-expression.
+;; This version is no longer used
+(assert false)
+
 (defsimpleinterface IMemoContainer
   (get-value-for-key [key])
   (compute-value-for-key [key])

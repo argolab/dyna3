@@ -3,7 +3,7 @@
   (:require [dyna.simple-test :refer [str-test]]))
 
 
-(str-test memoization1 "
+#_(str-test memoization1 "
 foo(1) += 123.
 foo(2) += 456.
 
@@ -12,7 +12,7 @@ foo(2) += 456.
 assert foo(1) = 123.
 ")
 
-(str-test memoization2 "
+#_(str-test memoization2 "
 :- memoize_unk f/1.
 f(1) = 1.
 
@@ -21,7 +21,7 @@ assert f(1) = 1.
 :- print_memo_table f/1.
 ")
 
-(str-test memoization3 "
+#_(str-test memoization3 "
 :- memoize_unk f/1.
 f(1) = 1.
 
@@ -34,7 +34,7 @@ f(2) = 2.
 assert f(2) = 2.
 ")
 
-(str-test factorial "
+#_(str-test factorial "
 fact(0) := 1.
 fact(N) := fact(N-1)*N for N > 0.
 
@@ -44,10 +44,11 @@ assert fact(5) = 120.")
 
 
 (str-test fibonacci "
-:- memoize_unk fib/1.
 fib(0) := 0.
 fib(1) := 1.
 fib(N) := fib(N-2) + fib(N-1) for N > 1.
+
+$memo(fib[N:$ground]) = \"unk\".
 
 print fib(3).
 
@@ -62,7 +63,7 @@ assert fib(10) = 55.
 assert fib(100) = 354224848179261915075.
 ")
 
-(str-test factorial-null "
+#_(str-test factorial-null "
 :- memoize_null fact/1.
 fact(0) := 1.
 fact(N) := fact(N-1)*N for N < 4.
@@ -117,5 +118,5 @@ fact(0) := 1.
 
 $memo(fact[N:$ground]) = \"unk\".
 
-print fact(2000).  % there was a bug in the hash table which caused an extra factor of O(N) get in there
+print fact(2000).  % there was a bug in the hash table which caused an extra factor of O(N) get in there.  that is hard to test in the
 ")

@@ -6,7 +6,7 @@
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
   (:require [dyna.user-defined-terms :refer [add-to-user-term update-user-term! def-user-term get-user-term]])
-  (:require [dyna.memoization-v1 :refer [set-user-term-as-memoized print-memo-table]])
+  ;(:require [dyna.memoization-v1 :refer [set-user-term-as-memoized print-memo-table]])
   (:require [dyna.memoization-v2 :refer [handle-dollar-memo-rexpr handle-dollar-priority-rexpr]])
   (:require [dyna.optimize-rexpr :refer [optimize-aliased-variables]])
   (:require [clojure.set :refer [union intersection difference]])
@@ -454,37 +454,39 @@ This is most likely not what you want."))))
                                                                           (???) ;; TODO
                                                                           )
 
-                                           "memoize_unk" (match-term arg1 ("memoize_unk" ("/" name arity))
-                                                                     (let [call-name {:name name
-                                                                                      :arity arity
-                                                                                      :source-file source-file}]
-                                                                       (set-user-term-as-memoized call-name :unk)))
-                                           "memoize_null" (match-term arg1 ("memoize_null" ("/" name arity))
-                                                                      (let [call-name {:name name
-                                                                                       :arity arity
-                                                                                       :source-file source-file}]
-                                                                        (set-user-term-as-memoized call-name :null)))
+                                           ;; "memoize_unk" (match-term arg1 ("memoize_unk" ("/" name arity))
+                                           ;;                           (let [call-name {:name name
+                                           ;;                                            :arity arity
+                                           ;;                                            :source-file source-file}]
+                                           ;;                             (set-user-term-as-memoized call-name :unk)))
+                                           ;; "memoize_null" (match-term arg1 ("memoize_null" ("/" name arity))
+                                           ;;                            (let [call-name {:name name
+                                           ;;                                             :arity arity
+                                           ;;                                             :source-file source-file}]
+                                           ;;                              (set-user-term-as-memoized call-name :null)))
 
-                                           "memoize_none" (match-term arg1 ("memoize_none" ("/" name arity))
-                                                                      (let [call-name {:name name
-                                                                                       :arity arity
-                                                                                       :source-file source-file}]
-                                                                        (set-user-term-as-memoized call-name :none)))
+                                           ;; "memoize_none" (match-term arg1 ("memoize_none" ("/" name arity))
+                                           ;;                            (let [call-name {:name name
+                                           ;;                                             :arity arity
+                                           ;;                                             :source-file source-file}]
+                                           ;;                              (set-user-term-as-memoized call-name :none)))
 
-                                           "memoize" (match-term arg1 ("memoize" term)
-                                                                 (let [name (.name ^DynaTerm term)
-                                                                       arg-signature (.arguments ^DynaTerm term)
-                                                                       call-name {:name name
-                                                                                  :arity (.arity ^DynaTerm term)
-                                                                                  :source-file source-file}]
-                                                                   (???)
-                                                                   ))
+                                           ;; "memoize" (match-term arg1 ("memoize" term)
+                                           ;;                       (let [name (.name ^DynaTerm term)
+                                           ;;                             arg-signature (.arguments ^DynaTerm term)
+                                           ;;                             call-name {:name name
+                                           ;;                                        :arity (.arity ^DynaTerm term)
+                                           ;;                                        :source-file source-file}]
+                                           ;;                         (???)
+                                           ;;                         ))
 
-                                           "print_memo_table" (match-term arg1 ("print_memo_table" ("/" name arity))
-                                                                          (let [call-name {:name name
-                                                                                           :arity arity
-                                                                                           :source-file source-file}]
-                                                                            (print-memo-table call-name)))
+                                           ;; "print_memo_table" (match-term arg1 ("print_memo_table" ("/" name arity))
+                                           ;;                                (let [call-name {:name name
+                                           ;;                                                 :arity arity
+                                           ;;                                                 :source-file source-file}]
+                                           ;;                                  (print-memo-table call-name)))
+
+
 
                                            ;; "import_csv" (let [[term-name term-arity file-name] (.arguments ^DynaTerm (get arg1 0))]
                                            ;;                ;; import some CSV file as a term
