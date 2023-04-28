@@ -4,7 +4,7 @@
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.rexpr-builtins :refer [make-lessthan make-lessthan-eq
                                          make-add make-times make-min make-max make-lor make-land
-                                         make-not-equals make-colon-line-tracking-min]])
+                                         make-not-equals make-colon-line-tracking-min upcast-big-int]])
   (:require [dyna.context :as context])
   (:require [dyna.iterators :refer [run-iterator make-skip-variables-iterator]])
   (:import (dyna UnificationFailure DynaTerm DynaUserError ParserUtils))
@@ -62,15 +62,15 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def-aggregator "+="
-  :combine +
+  :combine (upcast-big-int +' +)
   :combine-mult (fn [a b mult]
-                  (+ a (* b mult))) ;; a + b*mult
-  :many-items *
+                  ((upcast-big-int +' +) a (* b mult))) ;; a + b*mult
+  :many-items (upcast-big-int *' *)
   :rexpr-binary-op make-add)
 
 (def-aggregator "*="
-  :combine *
-  :combine-mult (fn [a b mult] (* a (Math/pow b mult)))
+  :combine (upcast-big-int *' *)
+  :combine-mult (fn [a b mult] ((upcast-big-int *' *) a (Math/pow b mult)))
   :many-items (fn [x mult]
                 (if (= mult 1)
                   x

@@ -61,7 +61,7 @@ test-python: $(JAR_TARGET)
 	python dyna_python_module/test/test_wrapper.py
 
 run-class-path:
-	@$(LEIN) classpath
+	@$(LEIN) classpath | awk '/\.jar/'
 
 python-package: $(TARGET)
 	@echo 'run "pip install build" first'

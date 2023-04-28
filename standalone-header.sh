@@ -209,8 +209,6 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-jvm_args+="-Xmx$memory -Dclojure.compiler.direct-linking=true -Ddyna.print_rewrites_performed=$debug_mode -Ddyna.debug=$debug_mode -Ddyna.trace_rexpr_construction=$debug_mode -Ddyna.debug_repl=$debug_mode -Ddyna.check_rexprs_args=$debug_mode"
-# -XX:-StackTraceInThrowable  # disable stack traces entirely
 
 if [ -z "$dyna_args" ]; then
     welcome_message
@@ -218,6 +216,10 @@ if [ -z "$dyna_args" ]; then
     jvm_args+=" -Ddyna.loading_spin=true "
 fi
 
+jvm_args="-Xmx$memory -Dclojure.compiler.direct-linking=true -Ddyna.print_rewrites_performed=false -Ddyna.debug=$debug_mode -Ddyna.trace_rexpr_construction=$debug_mode -Ddyna.debug_repl=$debug_mode -Ddyna.check_rexprs_args=$debug_mode $jvm_args"
+# -XX:-StackTraceInThrowable  # disable stack traces entirely
+
+jvm_args+=" -Ddyna.check_rexprs_args=true"  # TODO: some bug when this is false...
 
 exec $DYNA_JVM $jvm_args "-Ddyna.runtimejar=$self" -jar "$self" $import_args $dyna_args
 exit 1  # should not get to this line
