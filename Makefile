@@ -8,7 +8,7 @@ VERSION= $(shell date '+%Y%m%d')
 SOURCE=$(wildcard src/*/*/*.clj) $(wildcard src/*/*/*.java)
 JAR_TARGET=target/dyna-$(JVERSION)-SNAPSHOT-standalone.jar
 JAR_WITH_PYTHON_INSTALLER=target/dyna-combined-$(JVERSION)-SNAPSHOT-standalone.jar
-TARGET=dyna-standalone-$(VERSION)
+TARGET=dyna-standalone-$(VERSION).run
 
 PYTHON_MODULE=python_module
 
@@ -19,7 +19,7 @@ PARSER_TARGET=target/classes/dyna/dyna_grammar2Parser.class
 all: $(TARGET)
 
 clean:
-	rm -rf target/ dyna-standalone-*
+	rm -rf target/ dyna-standalone-* python_build/
 
 test:
 	_JAVA_OPTIONS='-Ddyna.debug=false -Ddyna.trace_rexpr_construction=false -Xss8m' $(LEIN) test
@@ -62,6 +62,13 @@ test-python: $(JAR_TARGET)
 
 run-class-path:
 	@$(LEIN) classpath
+
+python-package: $(TARGET)
+	@echo 'run "pip install build" first'
+	rm -rf python_build/
+	cp -r dyna_python_module python_build/
+	cp $(TARGET) python_build/dyna/dyna.jar
+	cd python_build && python -m build
 
 # example to run a single test
 # reset && rlwrap -a lein test :only dyna.core-test/basic-aggregator2

@@ -1,7 +1,5 @@
 package dyna;
 
-import com.strobel.core.Comparer;
-
 import java.util.Comparator;
 import java.util.PriorityQueue;
 import java.util.concurrent.Callable;

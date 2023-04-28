@@ -121,3 +121,44 @@ $memo(fact[N:$ground]) = \"unk\".
 
 print fact(2000).  % there was a bug in the hash table which caused an extra factor of O(N) get in there.  that is hard to test in the
 ")
+
+
+(str-test priority1 "
+fact(N) := fact(N-1)*N.
+fact(0) := 1.
+
+$memo(fact[N:$ground]) = \"unk\".
+
+$priority(fact[N]) = -N.
+
+print fact(20).
+")
+
+(str-test priority2 "
+% this is a bad order which causes the most amount of repropagation
+fib_bad(0) += 0.
+fib_bad(1) += 1.
+fib_bad(N) += fib_bad(N-1) for N > 1.
+fib_bad(N) += fib_bad(N-2) for N > 1.
+
+$memo(fib_bad[N:$ground]) = \"unk\".
+$priority(fib_bad[N]) = N.
+
+print fib_bad(10).
+assert fib_bad(10) == 55.
+")
+
+(str-test memo-change-program "
+fib(0) += 0.
+fib(1) += 1.
+fib(N) += fib(N-1) for N > 1.
+fib(N) += fib(N-2) for N > 1.
+
+$memo(fib[N:$ground]) = \"unk\".
+
+assert fib(10) = 55.
+
+fib(4) += 1.  % this causes the program's R-expr to change, so the memo table has to get rebuilt
+
+assert fib(10) = 68.
+")

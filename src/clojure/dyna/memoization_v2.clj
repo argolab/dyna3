@@ -25,6 +25,9 @@
   (:import [dyna.prefix_trie PrefixTrie])
   (:import [clojure.lang IFn]))
 
+;; the priority for system work that should be done immeditly is 1e16
+;; for user work that does not have anything set, we will give that a low priority by default.  Which will be 1e-16 in this case
+(def unset-priority-default-work -1e16)
 
 (defn- get-all-children [rexpr]
   (let [c (ensure-set (get-children rexpr))]
@@ -364,12 +367,16 @@
                                                            ;; TODO: this needs to check that
                                                            (vswap! messages-to-send conj kk)
                                                            (recur (trie-update-collection cmv kk (fn [c]
-                                                                                                   (when-not (nil? c)
-                                                                                                     ;; TODO: this "replace" c instead of adding it to the
-                                                                                                     ;; collection.  This means that it also does not have
-                                                                                                     ;; to
-                                                                                                     (???))
-                                                                                                   (vec (concat (or c []) re))))
+
+                                                                                                   ;; (when-not (nil? c)
+                                                                                                   ;;   ;; TODO: this "replace" c instead of adding it to the
+                                                                                                   ;;   ;; collection.  This means that it also does not have
+                                                                                                   ;;   ;; to
+                                                                                                   ;;   (debug-repl)
+                                                                                                   ;;   (???))
+                                                                                                   ;; (vec (concat (or c []) re))
+                                                                                                   (vec re)
+                                                                                                   ))
                                                                   (next kvs)))))]
                                       ;(debug-repl "todo")
                                       [valid has-computed with-added]
@@ -574,7 +581,6 @@
                                                :arity 1
                                                :source-file (:source-file (:term-name info))}
                                               {(make-variable "$0") (make-variable 'Input)
-
                                                (make-variable "$1") (make-variable 'Result)}
                                               0 {})
         term-name (:name (:term-name info))]
@@ -582,7 +588,7 @@
       (let [ctx (context/make-empty-context memo-controller-rexpr)
             res (context/bind-context-raw ctx
                                           (set-value! (make-variable 'Input) (DynaTerm. term-name (drop-last signature)))
-                                          (simplify-top memo-controller-rexpr))]
+                                          (simplify-fully-no-guess memo-controller-rexpr))]
         (if (= (make-multiplicity 1) res)
           (let [v (ctx-get-value ctx (make-variable 'Result))]
             (if (= "none" v)
@@ -603,6 +609,7 @@
             ;(throw (DynaUserError. "$memo defined incorrectly"))
             ))))))
 
+
 (defn- make-memoization-controller-function [info]
   ;; this will return a function which represents $memo.  If the representation of the function is "sufficently simple"
   (cond (and (= 1 (count (:memoization-modes info)))
@@ -610,6 +617,8 @@
              (not (:memoization-has-non-trivial-constraint info)))
         (let [f `(do
                    (in-ns 'dyna.memoization-v2)
+                   ;; TODO: the last value pass as the argument represents the result of aggregation.  This value is always null.  We should instead just remove that from the array
+
                    (fn [~'args] ;; the function that is generated could be cached and reused in many cases, as there are unlikely to be lots of different kinds of functions here?
                      ~(cond
                         (= :unk (:memoization-mode info))
@@ -657,6 +666,25 @@
     ))
 
 
+(defn- make-priority-controller-function [call-name priority-function-name]
+  (let [rexpr (make-user-call {:name priority-function-name
+                               :arity 1
+                               :source-file (:source-file call-name)}
+                              {(make-variable "$0") (make-variable 'Input)
+                               (make-variable "$1") (make-variable 'Result)}
+                              0 {})]
+    (fn [signature]
+      (let [ctx (context/make-empty-context rexpr)
+            res (context/bind-context-raw ctx
+                                          (set-value! (make-variable 'Input) (DynaTerm. (:name call-name) signature))
+                                          (simplify-fully-no-guess rexpr))
+            val (get-value-in-context (make-variable 'Result) ctx)]
+        (if-not (and (= (make-multiplicity 1) res) (number? val))
+          (do
+            (dyna-warning (str "$priority did not return a numerical priority for " (:name call-name) "/" (:arity call-name)))
+            unset-priority-default-work)
+          val)))))
+
 (defn- convert-user-term-to-have-memos [rexpr mapf]
   ;; this takes an R-expr and adds one or more memo tables to the R-expr such that it will support memoization
   ;; I suppose that it will
@@ -694,6 +722,13 @@
                                                     (get-all-children tr))))))
     :else nil))
 
+(declare ^{:private true} rebuild-memo-table-for-term)
+
+(defrecord rebuild-memo-table-for-term-agenda-work [term-name]
+  IDynaAgendaWork
+  (run [this] (rebuild-memo-table-for-term term-name))
+  (priority [this] 1e16))
+
 (defn- rebuild-memo-table-for-term [term-name]
   ;; this will create a new memo container for the term.  The container will
   ;; just be the thing which holds the memos and the references to the R-expr
@@ -708,6 +743,7 @@
                                                 :memoized-rexpr (make-memoization-placeholder term-name (zipmap (map #(make-variable (str "$" %)) (range))
                                                                                                                 variable-list)))))
         ;; second we will generate the Real memo tables (there might be multiple tables which are combined together depending on the structure of the R-expr
+        orig-rexpr-assumpt-v (volatile! nil)
         [old2 new2] (update-user-term! term-name
                                        (fn [dat]
                                          (let [[orig-rexpr-assumpt orig-rexpr] (binding [*expand-memoization-placeholder* false
@@ -715,37 +751,53 @@
                                                                                  (compute-with-assumption
                                                                                   (simplify-top (user-rexpr-combined-no-memo dat))))
                                                controller-function (make-memoization-controller-function dat)
-                                               priority-function (constantly 0) ;; TODO: have the priority function
+                                               priority-function (if (:memoization-priorty-method dat)
+                                                                   (make-priority-controller-function term-name (:memoization-priorty-method dat))
+                                                                   (constantly unset-priority-default-work))
                                                rexpr-with-memos (convert-user-term-to-have-memos orig-rexpr
                                                                                                  (fn [rr agg-op agg-result]
+                                                                                                   (if (nil? agg-op)
+                                                                                                     (let []
+                                                                                                       rr ;; just return without adding a memo table as this should have already finished its computation
+                                                                                                       ;(debug-repl "nil agg op")
+                                                                                                       ;(???)
+                                                                                                       )
+                                                                                                     (let [exposed (exposed-variables rr)
+                                                                                                           container (if (contains? exposed (last variable-list))
+                                                                                                                       (do
+                                                                                                                         ;; this needs to just create a normal memo table?
+                                                                                                                         ;; or something which isn't optimized for aggregators
 
-                                                                                                   (let [exposed (exposed-variables rr)
-                                                                                                         container (if (contains? exposed (last variable-list))
-                                                                                                                     (do
-                                                                                                                       ;; this needs to just creat a normal memo table?
-                                                                                                                       ;; or something which isn't optimized for aggregators
-                                                                                                                       (???))
-                                                                                                                     (MemoContainerTrieStorageAggregatorContributions.
-                                                                                                                      controller-function
-                                                                                                                      priority-function
-                                                                                                                      agg-op
-                                                                                                                      rr
-                                                                                                                      (vec (drop-last variable-list)) ;; the argument variables
+                                                                                                                         ;; this could happen if the memo got fully computed already
+                                                                                                                         ;; in which case there is nothing to "memoize"
+                                                                                                                         (???))
+                                                                                                                       (MemoContainerTrieStorageAggregatorContributions.
+                                                                                                                        controller-function
+                                                                                                                        priority-function
+                                                                                                                        agg-op
+                                                                                                                        rr
+                                                                                                                        (vec (drop-last variable-list)) ;; the argument variables
                                         ;agg-result  ;; this is the local variable which is used
-                                                                                                                      #_(last variable-list) ;; result of aggregation goes here....though this might not be used by the aggregator
-                                                                                                                      (make-assumption)
-                                                                                                                      (atom [true nil (make-PrefixTrie (- (count variable-list) 1)
-                                                                                                                                                       0 nil)])
-                                                                                                                      (atom nil)))
-                                                                                                         nr (make-memoized-access container (vec (drop-last variable-list)))]
-                                                                                                     ;; the variable list might not want to contain the resulting variable...
-                                                                                                     #_(when-not (= (exposed-variables nr) (exposed-variables rr))
-                                                                                                       (debug-repl "exposed failed"))
-                                                                                                     nr)))
+                                                                                                                        #_(last variable-list) ;; result of aggregation goes here....though this might not be used by the aggregator
+                                                                                                                        (make-assumption)
+                                                                                                                        (atom [true nil (make-PrefixTrie (- (count variable-list) 1)
+                                                                                                                                                         0 nil)])
+                                                                                                                        (atom nil)))
+                                                                                                           nr (make-memoized-access container (vec (drop-last variable-list)))]
+                                                                                                       ;; the variable list might not want to contain the resulting variable...
+                                                                                                       #_(when-not (= (exposed-variables nr) (exposed-variables rr))
+                                                                                                           (debug-repl "exposed failed"))
+                                                                                                       nr))))
                                                ]
+                                           (vreset! orig-rexpr-assumpt-v orig-rexpr-assumpt)
                                            (assoc dat
                                                   :memoized-rexpr rexpr-with-memos))))]
-
+    (binding [*fast-fail-on-invalid-assumption* false]
+      (add-watcher! @orig-rexpr-assumpt-v (reify Watcher
+                                            (notify-message! [this watching message] nil)
+                                            (notify-invalidated! [this watching]
+                                              ;; then it needs to rebuild the memo tables for this term
+                                              (system/push-agenda-work (->rebuild-memo-table-for-term-agenda-work term-name))))))
     (let [old-tables (ensure-set (when (:memoized-rexpr old1)
                                    (filter #(or (is-memoized-access? %) (is-memoization-placeholder? %))
                                            (get-all-children (:memoized-rexpr old1)))))
@@ -909,7 +961,7 @@
           (invalidate! (:is-not-memoized-null new)))
 
         ;; push that we are going to construct the memo tables for this
-        (system/push-agenda-work #(rebuild-memo-table-for-term call-name))))))
+        (system/push-agenda-work (->rebuild-memo-table-for-term-agenda-work call-name))))))
 
 (defn handle-dollar-priority-rexpr [rexpr source-file dynabase]
   (when-not (dnil? dynabase)
@@ -924,7 +976,9 @@
                                                    (if-not (:memoization-priorty-method dat)
                                                      (assoc dat :memoization-priorty-method (str (gensym '$priority_controller_)))
                                                      dat)))]
-      (add-to-user-term source-file dynabase (:memoization-priorty-method new) 1 rexpr))))
+      (add-to-user-term source-file dynabase (:memoization-priorty-method new) 1 rexpr)
+      (if (not= (:memoization-priorty-method new) (:memoization-priorty-method old))
+        (system/push-agenda-work (->rebuild-memo-table-for-term-agenda-work call-name))))))
 
 
 (swap! debug-useful-variables assoc

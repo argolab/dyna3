@@ -34,7 +34,8 @@
   (is-valid? [this] (is-valid? upstream))
   (add-watcher! [this watcher]
     (assert (instance? Watcher watcher))
-    (locking watchers      (.put watchers watcher nil)
+    (locking watchers
+      (.put watchers watcher nil)
       (when-not (is-valid? this)
         (notify-invalidated! watcher this)
         (when *fast-fail-on-invalid-assumption*

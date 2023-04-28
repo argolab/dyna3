@@ -1,7 +1,7 @@
 (ns dyna.core
   (:require [aprint.core :refer [aprint]])
   (:require [clojure.tools.namespace.repl :refer [refresh]])
-  (:require [clj-java-decompiler.core :refer [decompile]])
+  ;(:require [clj-java-decompiler.core :refer [decompile]])
   (:require [clojure.java.io :refer [resource file]])
 
   (:require [dyna.system :as system])

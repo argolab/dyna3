@@ -8,7 +8,7 @@
                  ;[org.clojure/tools.macro "0.1.5"]
                  [aprint "0.1.3"]  ;; for formatted printing
                  ;[clj-python/libpython-clj "2.00-beta-22"]
-                 [com.clojure-goes-fast/clj-java-decompiler "0.3.0"] ;; for debugging what the generated code looks like
+                 ;[com.clojure-goes-fast/clj-java-decompiler "0.3.0"] ;; for debugging what the generated code looks like
                  [org.antlr/antlr4-runtime "4.7.2"] ;; for the front end parser
                  [org.jline/jline "3.20.0"]  ;; for the front end repl
                  [robert/hooke "1.3.0"]
@@ -16,7 +16,7 @@
                                         ;[datalevin "0.6.6"]
                                         ;[io.replikativ/datahike "0.5.1504"]
 
-                 [org.clojure/tools.analyzer.jvm "0.7.3"]
+                 ;[org.clojure/tools.analyzer.jvm "0.7.3"]
                  [instaparse "1.4.12"]
 
                  [org.clojure/data.csv "1.0.1"]
