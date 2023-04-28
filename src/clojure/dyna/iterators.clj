@@ -23,7 +23,6 @@
 ;; this will want to find which of the values will have this binding
 
 
-;; should we run all of the possible iterators?  that would
 
 
 
@@ -257,7 +256,11 @@
                                      (bit-shift-left 1 i)
                                      0)))
           ;zzz (debug-repl)
-          trie (build-skip-trie underlying (count binding-order) skips)]
+          trie (if (= skips (dec (bit-shift-left 1 (inc (count binding-order)))))
+                 (do
+                   (???);(debug-repl "??? skip all")
+                   {}) ;; meaning that we are skipping all of the variables??? wtf
+                 (build-skip-trie underlying (count binding-order) skips))]
       (iterator-over-trie trie))
     (reify DIterator
       (iter-run-cb [this cb-fn] (doseq [v (iter-run-iterable this)] (cb-fn v)))
@@ -291,7 +294,7 @@
             underlying (iter-create-iterator iterator selected-binding)]
         (iterator-skip-variables underlying selected-binding skipped-variables)))))
 
-(defn- iterator-disjunct-diterator [branch-iters]
+(defn iterator-disjunct-diterator [branch-iters]
   (reify DIterator
     (iter-run-cb [this cb-fn]
       (doseq [v (iter-run-iterable this)]
@@ -303,7 +306,7 @@
            (if (nil? iter-val)
              ;; this needs to move to the next iterator
              (if (empty? next-iterators)
-               () ;; then we are done iterating, so just return the empty sequence which indi
+               () ;; then we are done iterating, so just return the empty sequence which will be the tail of the list
                (rec (conj completed-iterators current-diterable)
                     (next next-iterators)
                     (iter-run-iterable (first next-iterators))
@@ -337,7 +340,8 @@
               (= (count new-branches) 1) (first new-branches)
               :else (iterator-disjunct-diterator new-branches))))
     (iter-debug-which-variable-bound [this] (???))
-    (iter-estimate-cardinality [this] (???))))
+    (iter-estimate-cardinality [this]
+      (reduce + (map iter-estimate-cardinality branch-iters)))))
 
 
 
@@ -435,7 +439,10 @@
              ;(debug-repl)
              (if-not (nil? it-bound) ;; if the binding failed, then the iterator should return nil to indicate that there is nothing here
                (rec it-bound r rexpr)
-               (debug-repl "it-bound fail")))
+               (do
+                 ;; in the case that a binding failed, this just means that the iterator does not support this value, hence the multiplicity
+                 ;; of the resulting rexpr would be zero.  In this case, we can just do nothing
+                 )))
            (if (some #{v} can-bind-variables) ;(contains? can-bind-variables v)
              (doseq [val (iter-run-iterable iter)]
                (let [dctx (context/make-nested-context-disjunct rexpr)] ;; this should take the context as an argument?

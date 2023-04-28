@@ -3,13 +3,16 @@
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.user-defined-terms :refer [def-user-term]])
   (:require [dyna.base-protocols :refer :all])
-  (:import [dyna DynaTerm])
-  (:import [dyna.base_protocols Dynabase])
+  (:import [dyna DynaTerm Dynabase])
+  ;(:import [dyna.base_protocols Dynabase])
   (:import [dyna.rexpr unify-structure-rexpr]))
 
 (def-base-rexpr indirect-user-call [:var indirect-user-var
                                     :var-list argument-vars
-                                    :var result])
+                                    :var result]
+  (check-rexpr-basecases [this stack]
+                         1 ;; indicate that there is an indirect user call, so we can't be sure about this
+                         ))
 
 (def-base-rexpr reflect-structure [:var out
                                    :var dynabase
@@ -87,7 +90,7 @@
 
 (defn- arg-list [var remains cb]
   (if (empty? remains)
-    (make-conjunct [(make-unify var DynaTerm/null_term)
+    (make-conjunct [(make-unify var (make-constant DynaTerm/null_term))
                     cb])
     (let [new-var (make-variable (gensym))]
       (make-proj new-var (make-conjunct [(make-unify-structure var nil (make-constant DynaTerm/null_term)
@@ -102,7 +105,8 @@
     (if-not (and (string? name-val)
                  (int? arity-val))
       (make-multiplicity 0)
-      (let [arg-vars (vec (map #(make-variable (gensym)) (range arity-val)))]
+      (let [arg-vars (vec (for [_ (range arity-val)]
+                            (make-variable (gensym))))]
         (arg-list arguments arg-vars (make-unify-structure struct
                                                            nil
                                                            dynabase
@@ -133,15 +137,25 @@
          cname
          value-map
          0
-         #{})))))
+         {})))))
 
 
-;; need to gather the conjunctive constraints first, otherwise this might not find the relevant parts of the expression
-(comment
-  (def-rewrite
-    :match {:rexpr (indirect-user-call (:free call-ref) (:any-list arguments) (:any result))
-            :context (unify-structure call-ref (:unchecked file-name) (:ground dynabase) (:unchecked name-str) (:any-list arguments))}
-    :run-at :inference
-    (do
-      (debug-repl "idr2")
-      (???))))
+;; this looks a conjunctive constraints that we might not have yet evaluated yet to identify what function is going to be called
+(def-rewrite
+  :match {:rexpr (indirect-user-call (:free call-ref) (:any-list arguments) (:any result))
+          :context (unify-structure foo (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:any-list arguments2))
+          }
+  :run-at :inference
+  (let [args (concat arguments2 arguments)
+        has-dynabase (not (and (is-ground? dynabase) (dnil? (get-value dynabase))))
+        call-name (if has-dynabase
+                    {:name name-str
+                     :arity (count args)}
+                    {:name name-str
+                     :arity (count args)
+                     :source-file file-name})
+        value-map (merge (into {} (for [[i v] (zipseq (range) args)]
+                                    [(make-variable (str "$" i)) v]))
+                         (when has-dynabase {(make-variable "$self") dynabase})
+                         {(make-variable (str "$" (count args))) result})]
+    (make-user-call call-name value-map 0 {})))

@@ -1,4 +1,4 @@
-(ns dyna.memoization
+(ns dyna.memoization-v1
   (:require [dyna.utils :refer :all])
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.system :as system])
@@ -6,8 +6,14 @@
   (:require [dyna.user-defined-terms :refer [update-user-term! user-rexpr-combined-no-memo get-user-term]])
   (:require [dyna.assumptions :refer :all])
   (:require [dyna.context :as context])
-  ;(:import  [dyna.base_protocols MemoizationContainer])
+                                        ;(:import  [dyna.base_protocols MemoizationContainer])
+  (:import [dyna.assumptions Watcher Assumption])
   )
+
+
+;; This was the initial version of memoization which essentially represents everything as an R-expr IF-expression.
+;; This version is no longer used
+(assert false)
 
 (defsimpleinterface IMemoContainer
   (get-value-for-key [key])
@@ -121,8 +127,8 @@
                                               (compute-with-assumption
                                                (simplify-top (make-conjunct [cond Rorig]))))]
         (when-not (deep-equals orig-result memo)
-          #_(debug-delay-ntimes 20
-                        (debug-repl "refresh"))
+          (debug-delay-ntimes 5
+                              (debug-repl "refresh"))
           #_(let [vv (simplify-top orig-result)]
             (debug-repl "tables not equal"))
           ;; then we need to save the memo in to the table, and signal that an event happened
@@ -157,7 +163,7 @@
                                 :var-map variable-name-mapping])
 
 (def-rewrite
-  :match (memoized-rexpr (:unchecked ^dyna.memoization.MemoContainer memoization-container) (:unchecked variable-name-mapping))
+  :match (memoized-rexpr (:unchecked ^dyna.memoization_v1.MemoContainer memoization-container) (:unchecked variable-name-mapping))
   (let [memo-config (.memo-config memoization-container)]
     (when (or (= :null (:memo-mode memo-config))
               (every? is-ground? (map variable-name-mapping (:required-ground-variables memo-config))))

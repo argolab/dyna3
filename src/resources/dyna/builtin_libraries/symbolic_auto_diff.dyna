@@ -1,0 +1,30 @@
+:- export grad/1.
+:- export $grad/2.
+
+:- macro grad/1.
+
+rewrite_term(','[Term, Rest]) :=
+  rewrite_term(','[rewrite_terms(Term), rewrite_terms(Rest)]).
+
+selective_aggregator("max=").
+selective_aggregator("min=").
+selective_aggregator(":=").
+selective_aggregator("=").
+
+% the head like foo[X,Y,Z], the seconds is the dynabase addon to the term which should be nothing (atm),
+rewrite_term($define_term[TermHead, $nil, AggregatorName, Body]) :=
+  selective_aggregator(AggregatorName),
+  UniqueId = str("gradient_body_", unique_id(*)),
+  $reflect(InternalCall, UniqueId, [$quote1[TermHead]]),
+  ','[$define_term[TermHead, $nil, AggregatorName, $dynabase_call[$variable["$self"], InternalCall]],
+      ','[$define_term[InternalCall, $nil, AggregatorName, Body],
+          $define_term[$grad[$quote1[TermHead]], $nil, "=", compute_grad(TermHead, Body)]
+          ]].
+
+compute_grad(TermHead, Body) := $error("not implemented").
+
+
+
+grad(_) := $sytax_error("grad/1 expects a dynabase with no parent to perform symbolic differntation against").
+grad($dynabase_create[$nil, Terms]) :=
+  $dynabase_create[$nil, rewrite_term(Terms)].

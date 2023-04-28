@@ -5,22 +5,29 @@
   (:require [dyna.utils :refer :all])
   (:require [dyna.base-protocols :refer :all])
   (:require [dyna.rexpr :refer :all])
-  ;(:require [dyna.rewrites :refer [def-rewrite]])
   (:require [clojure.set :refer [union]])
   (:require [dyna.user-defined-terms :refer [def-user-term]])
-  (:import [dyna DynaTerm DIterable DIterator DIteratorInstance])
-  )
+  (:require [dyna.context :as context])
+  (:import [dyna.rexpr unify-structure-rexpr])
+  (:import [dyna DynaTerm DIterable DIterator DIteratorInstance UnificationFailure DynaMap]))
 
 ;(in-ns 'dyna.rexpr)
 
 (defn  get-variables-in-expression [expression]
-  (if (symbol? expression)
+  (cond
+    (symbol? expression)
     (if (re-matches #"v[0-9]+" (str expression))
       #{ expression }
       #{ }) ; this does not match a variable expression
-    (if (seq? expression)
+
+    (seq? expression)
       (reduce union (map get-variables-in-expression (cdr expression)))
-      #{ })))
+
+    (vector? expression)
+    (reduce union (map get-variables-in-expression expression))
+
+    :else
+    #{}))
 
 (defn construct-rewrite-for-expression [name nargs body]
   (let [all-vars (map #(symbol (str "v" %)) (range nargs))
@@ -48,23 +55,31 @@
        ;;:resulting ()  ; might be nice to know what the resulting form of this rewrite should be
        ~@(if all-ground
            `[:is-check-rewrite true
-             :check-expression (quote ~(cdar body))]  ;; this expression should return true or false depending if the check works
+             :check-expression ~(cdar body)]  ;; this expression should return true or false depending if the check works
            `[:is-assignment-rewrite true
              :assignment-requires-ground-vars [~@required-ground]  ;; variables which are required ground by this expression
              :assignment-computes-var ~(car body) ;; which variable is computed as the result of this expression
-             :assignment-computes-expression (quote ~(cdar body)) ;; the code which is going to do the computation
+             :assignment-computes-expression ~(cdar body) ;; the code which is going to do the computation
              ])
 
        ;; because of the let-expression, it is a little hard to pull apart the map value that is going to be returned
        ;; how efficient is it going to be about destructuring the representation
-     (let ~(vec (apply concat
-                       (for [v required-ground]
+       ~@(if all-ground
+           [:check]
+           [:assigns-variable (car body)])
+       (let ~(vec (apply concat
+                         (for [v required-ground]
                          `[~v (get-value ~(symbol (str "g" v)))])))
-       ~(if all-ground
-          `(if ~(cdar body)
-             (make-multiplicity 1)
-             (make-multiplicity 0))
-          `(make-unify ~(car body) (make-constant ~(cdar body))))
+         ~(cdar body)
+
+         ;; ~@(if all-ground
+         ;;   `[:check ~(cdar body)]
+         ;;   ;; `(if ~(cdar body)
+         ;;   ;;   (make-multiplicity 1)
+         ;;   ;;   (make-multiplicity 0))
+         ;;   `[:assigns {~(car body) ~(cdar body)}]
+         ;;   ;`(make-unify ~(car body) (make-constant ~(cdar body)))
+         ;;   )
        ))
     ))
 
@@ -122,8 +137,7 @@
 
   (v2 ((upcast-big-int +' +) v0 v1))  ;; assign some value to a variable using the existing variables
   (v1 ((upcast-big-int -' -) v2 v0))
-  (v0 ((upcast-big-int -' -) v2 v1))
-  )
+  (v0 ((upcast-big-int -' -) v2 v1)))
 
 (def-user-term "+" 2 (make-add v0 v1 v2))
 (def-user-term "-" 2 (make-add v2 v1 v0))
@@ -231,7 +245,7 @@
   (:allground (= v2 (< v0 v1)))
   (v2 (< v0 v1))) ;; there should be a return true / false place for this expression
 
-(def-user-term ["lesshthan" "<"] 2 (make-lessthan v0 v1 v2))
+(def-user-term ["lessthan" "<"] 2 (make-lessthan v0 v1 v2))
 (def-user-term ["greaterthan" ">"] 2 (make-lessthan v1 v0 v2))
 
 (def-builtin-rexpr lessthan-eq 3
@@ -277,6 +291,12 @@
   :infers (make-lessthan-eq C B (make-constant true)))
 
 (def-rewrite
+  :match {:rexpr (lessthan-eq (:any A) (:any B) (is-true? _))
+          :context (lessthan-eq B (:any C) (is-true? _))}
+  :run-at :inference
+  :infers (make-lessthan-eq A C (make-constant true)))
+
+(def-rewrite
   :match (lessthan (:any A) (:any B) (#(= % (make-constant false)) _))
   :run-at :construction
   (make-lessthan-eq B A (make-constant true)))
@@ -291,7 +311,6 @@
           :context (lessthan-eq B (:any C) (is-true? _))}
   :run-at :inference
   :infers (make-lessthan-eq A C (make-constant true)))
-
 
 (def-rewrite
   :match {:rexpr (lessthan (:any A) (:any B) (is-true? _))
@@ -316,7 +335,9 @@
   (v2 (= v0 v1)))
 
 
-;; XXX: should this rewrite exist??? this makes it basically the same as unify-with-return
+;; unify-with-return is just called equals.  In the case that we know that two
+;; of the values have to be equal, as the return from the expression is going to
+;; be true, then it can replace the expression with an equals value
 (def-rewrite
   :match (equals (:any A) (:any B) (is-true? _))
   :run-at [:construction :standard]
@@ -354,7 +375,6 @@
   :infers (make-equals B C (make-constant true)))
 
 
-;; this should maybe just be unification rather than having something different for equals checking?
 (def-user-term ["equals" "=="] 2 (make-equals v0 v1 v2))
 
 (def-builtin-rexpr not-equals 3
@@ -377,12 +397,12 @@
 (def-builtin-rexpr land 3
   (:allground (= (boolean v2) (boolean (and v0 v1))))
   (v2 (boolean (and v0 v1))))
-(def-user-term ["land" "&"] 2 (make-land v0 v1 v2))
+(def-user-term ["land" "&&"] 2 (make-land v0 v1 v2))
 
 (def-builtin-rexpr lor 3
   (:allground (= (boolean v2) (boolean (or v0 v1))))
   (v2 (boolean (or v0 v1))))
-(def-user-term ["lor" "|"] 2 (make-lor v0 v1 v2))  ;; the pipe might be something which is or between methods so that we can use this to define types
+(def-user-term ["lor" "||"] 2 (make-lor v0 v1 v2))  ;; the pipe might be something which is or between methods so that we can use this to define types
 
 
 (def-builtin-rexpr not 2
@@ -434,9 +454,6 @@
 (def-user-term "atanh" 1 (make-tanh v1 v0))
 
 
-
-;; this needs to have some way of defining the sequence things
-
 (def-base-rexpr range [:var Low
                        :var High
                        :var Step
@@ -445,6 +462,7 @@
 ;; the contained variable should just be true.  In which case it will ensure that the value is contained inside of the range
 (def-user-term "range" 4 (make-range v0 v1 v2 v3 v4))
 (def-user-term "range" 3 (make-range v0 v1 (make-constant 1) v2 v3))
+(def-user-term "range" 2 (make-range (make-constant 0) v0 (make-constant 1) v1 v2))
 
 (def-rewrite
   :match (range (:ground Low) (:ground High) (:ground Step) (:ground Out) (:any Contained))
@@ -457,35 +475,11 @@
         StepV (get-value Step)
         OutV (get-value Out)
         successful (and (int? OutV)
-                      (>= OutV LowV)
-                      (< OutV HighV)
-                      (= (mod (- OutV LowV) StepV) 0))]
+                        (>= OutV LowV)
+                        (< OutV HighV)
+                        (= (mod (- OutV LowV) StepV) 0))]
     (make-unify Contained
                 (make-constant-bool successful))))
-
-;; there should be notation that this is going to introduce a disjunct
-;; such that it knows that this would have some loop or something
-#_(def-rewrite
-  :match (range (:ground Low) (:ground High) (:ground Step) (:free Out) (is-true? Contained))
-  :run-at :inference ;; there should be some version of run-at where it would be able to indicate that it would introduce a disjunct, so that this could be some "optional" rewrite or something that it might want to defer until later.  This would be trying to find if
-  (do ;(assert (get-value Contained)) ;; in the case that this is false, there is no way for us to rewrite this expression
-      (let [LowV (get-value Low)
-            HighV (get-value High)
-            StepV (get-value Step)]
-        (if (is-bound? Out)
-          (let [OutV (get-value Out)]
-            (make-multiplicity
-             (and (int? OutV)
-                  (>= LowV OutV)
-                  (< OutV HighV)
-                  (= (mod (- OutV LowV) StepV) 0))))
-          (if (>= LowV HighV) (make-multiplicity 0)
-              (make-disjunct [(make-no-simp-unify Out (make-constant LowV)) ; this make-unify will have to avoid running the constructors, otherwise it will assign the value directly.  So no-simp should allow for this to avoid those at construction rewrites
-                              (make-range (make-constant (+ LowV StepV))
-                                          High
-                                          Step
-                                          Out
-                                          Contained)]))))))
 
 
 (def-iterator
@@ -512,12 +506,40 @@
                     iterator-empty-instance
                     nil))
                 (iter-estimate-cardinality [this]
-                  (count r)))))}))))
+                  (quot (- high-v low-v) step-v)
+                  ;(count r) ;; this is not optimized, as it will scan through the entire list when doing this count
+                  ))))}))))
+
+
+;; there should be notation that this is going to introduce a disjunct
+;; such that it knows that this would have some loop or something
+#_(def-rewrite
+  :match (range (:ground Low) (:ground High) (:ground Step) (:free Out) (is-true? Contained))
+  :run-at :inference ;; there should be some version of run-at where it would be able to indicate that it would introduce a disjunct, so that this could be some "optional" rewrite or something that it might want to defer until later.  This would be trying to find if
+  (do ;(assert (get-value Contained)) ;; in the case that this is false, there is no way for us to rewrite this expression
+      (let [LowV (get-value Low)
+            HighV (get-value High)
+            StepV (get-value Step)]
+        (if (is-bound? Out)
+          (let [OutV (get-value Out)]
+            (make-multiplicity
+             (and (int? OutV)
+                  (>= LowV OutV)
+                  (< OutV HighV)
+                  (= (mod (- OutV LowV) StepV) 0))))
+          (if (>= LowV HighV) (make-multiplicity 0)
+              (make-disjunct [(make-no-simp-unify Out (make-constant LowV)) ; this make-unify will have to avoid running the constructors, otherwise it will assign the value directly.  So no-simp should allow for this to avoid those at construction rewrites
+                              (make-range (make-constant (+ LowV StepV))
+                                          High
+                                          Step
+                                          Out
+                                          Contained)]))))))
+
 
 ;; there is no way to define a range with 3 arguments, as it would use the same name here
 ;; that would have to be represented with whatever is some named mapped from a symbol to what is being created
 
-(def random-seed (Integer/valueOf (System/getProperty "dyna.random_seed" (str (rand-int 10000000)))))
+(def random-seed (Integer/valueOf (System/getProperty "dyna.random_seed" (str (rand-int (bit-shift-left 1 31))))))
 
 (defn generate-random [x]
   ;; this will generate a random int32 value
@@ -546,7 +568,7 @@
   :match (cast-to-string (:any Out) (:ground-var-list Args))
   (make-unify Out (make-constant (apply str (map get-value Args)))))
 
-;; this is going to cast the value to some expression
+;; this is going to cast the value into a string as well as concat multiple strings together
 (doseq [i (range 1 50)]
   (let [vars (map #(symbol (str "v" %)) (range 0 (+ 1 i)))]
     (eval `(def-user-term "str" ~i (make-cast-to-string ~(last vars) ~(vec (drop-last vars)))))))
@@ -560,24 +582,25 @@
 
 (def-user-term "string" 1 (make-is-string v0 v1))
 
-(def-base-rexpr unify-with-return [:var A :var B :var Return]
-  (is-constraint? [this] true))
+(comment
+  (def-base-rexpr unify-with-return [:var A :var B :var Return]
+    (is-constraint? [this] true))
 
-(def-rewrite
-  :match (unify-with-return (:ground A) (:ground B) (:free Return))
-  :run-at [:standard :construction]
-  (make-unify Return (make-constant (= (get-value A) (get-value B)))))
+  (def-rewrite
+    :match (unify-with-return (:ground A) (:ground B) (:free Return))
+    :run-at [:standard :construction]
+    (make-unify Return (make-constant (= (get-value A) (get-value B)))))
 
-(def-rewrite
-  :match (unify-with-return (:any A) (:any B) (is-true? Return))
-  :run-at :construction
-  (make-unify A B))
+  (def-rewrite
+    :match (unify-with-return (:any A) (:any B) (is-true? Return))
+    :run-at :construction
+    (make-unify A B))
 
-(def-rewrite
-  :match (unify-with-return (:any A) (:any B) (:ground Return))
-  :run-at [:standard :construction]
-  (when (= (get-value Return) true)
-    (make-unify A B)))
+  (def-rewrite
+    :match (unify-with-return (:any A) (:any B) (:ground Return))
+    :run-at [:standard :construction]
+    (when (= (get-value Return) true)
+      (make-unify A B))))
 
 ;; this should check if the arguments are the same variable, in which case this
 ;; can just unify the result with true?  but if there is an expression like
@@ -590,13 +613,16 @@
 ;; identify the return value as true so it will not identify which of the
 ;; expressions
 
-(def-user-term "$unify" 2 (make-unify-with-return v0 v1 v2))
+;(def-user-term "$unify" 2 (make-unify-with-return v0 v1 v2))
+
+(def-user-term "$unify" 2 (make-conjunct [(make-unify v0 v1)
+                                          (make-unify v2 (make-constant true))]))
 
 
 ;; (def-user-term "$make_with_key" 2 (make-multiplicity 1))  ;; TODO: should construct some structured term
 
-(def-user-term "$value" 1 (make-multiplicity 1)) ;; TODO: should return the value for some pair which might have the withkey construct
-(def-user-term "$arg" 1 (make-multiplicity 1)) ;; TODO: should return the argument which is associated with the withkey construct
+;; (def-user-term "$value" 1 (make-multiplicity 1)) ;; TODO: should return the value for some pair which might have the withkey construct
+;; (def-user-term "$arg" 1 (make-multiplicity 1)) ;; TODO: should return the argument which is associated with the withkey construct
 
 
 ;; operators for handling an array.  An array in Dyna is just a linked list of cells with the name ".".  This is akin to prolog
@@ -608,25 +634,37 @@
 (def-user-term "$cons" 2 (make-unify-structure v2 nil (make-constant DynaTerm/null_term) "." [v0 v1]))
 
 ;; operators for handing a map of elements.  The map is a wrapped clojure map which is associate
-(defrecord DynaMap [map-elements])
+;(defrecord DynaMap [map-elements])
 
 (defmethod print-method DynaMap [^DynaMap this ^java.io.Writer w]
   (.write w (str (.map-elements this))))
 
 (def-base-rexpr map-element-access [:var Key
                                     :var Value
-                                    :var previous_map
-                                    :var resulting_map]
+                                    :var previous-map
+                                    :var resulting-map]
   (is-constraint? [this] true))
+
+(def-base-rexpr map-list-keys [:var Map
+                               :var KeyList])
+
+(def-builtin-rexpr is-map 2
+  (:allground (= v1 (instance? DynaMap v0)))
+  (v1 (instance? DynaMap v0)))
 
 (def-user-term "$map_empty" 0 (make-unify v0 (make-constant (DynaMap. {})))) ;; return an empty map value
 (def-user-term "$map_element" 3 (make-map-element-access v0 v1 v2 v3))
+(def-user-term "$map_keys" 1 (make-map-list-keys v0 v1))
+(def-user-term "map" 1 (make-is-map v0 v1))
 ;(def-user-term "$map_merge" 2) ;; take two maps and combine them together
 
+;; there should be some way to isnert a value into a map overriding, but this will have that
+;(def-user-term "$map_insert" )
+
 (def-rewrite
-  :match (map-element-access (:ground Key) (:any Value) (:any previous_map) (:ground resulting_map))
+  :match (map-element-access (:ground Key) (:any Value) (:any previous-map) (:ground resulting-map))
   ;; read a value out of the map
-  (let [pm (get-value resulting_map)]
+  (let [pm (get-value resulting-map)]
     (if (not (instance? DynaMap pm))
       (make-multiplicity 0)
       (let [m (.map-elements ^DynaMap pm)
@@ -636,25 +674,60 @@
           (make-multiplicity 0)
           (make-conjunct [(make-unify Value (make-constant r))
                           ;; remove the key from the map
-                          (make-unify previous_map (make-constant (DynaMap. (dissoc m k))))]))))))
+                          (make-unify previous-map (make-constant (DynaMap. (dissoc m k))))]))))))
 
 (def-rewrite
-  :match (map-element-access (:ground Key) (:ground Value) (:ground previous_map) (:any resulting_map))
+  :match (map-element-access (:ground Key) (:ground Value) (:ground previous-map) (:any resulting-map))
   ;; put a value into the map
-  (let [pm (get-value previous_map)]
+  ;; if the value already exists in the map, it will have to be mult 0, otherwise it would not be consistent with multiple modes
+  (let [pm (get-value previous-map)]
     (if (not (instance? DynaMap pm))
       (make-multiplicity 0)
       (let [m (.map-elements ^DynaMap pm)
             k (get-value Key)
-            v (get-value Value)
-            r (assoc m k v)]
-        (make-unify resulting_map (make-constant (DynaMap. r)))))))
+            v (get-value Value)]
+        (if (contains? m k)
+          (make-multiplicity 0) ;; we can not override an existing key, otherwise this is going to break the out of order procesinsg of this expression...
+          (make-unify resulting-map (make-constant (DynaMap. (assoc m k v)))))))))
+
+(def-rewrite
+  :match (map-list-keys (:ground Map) (:free KeyList))
+  :assigns-variable KeyList
+  (let [pm (get-value Map)]
+    (when-not (instance? DynaMap pm)
+      (throw (UnificationFailure. "not a map")))
+    (DynaTerm/make_list (keys (.map-elements ^DynaMap pm)))))
+
+;; this is more permissive than the other function which will return the keys in a particular order
+(def-rewrite
+  :match (map-list-keys (:ground Map) (:ground KeyList))
+  :check true ;; this checks that the sets (represented as a list) are equal
+  (let [pm (get-value Map)
+        kl (get-value KeyList)]
+    (if-not (and (instance? DynaMap pm)
+                   (instance? DynaTerm kl))
+      false
+      (let [l (.list_to_vec ^DynaTerm kl)]
+        (if (nil? l) false
+            (= (into #{} l) (into #{} (keys (.map-elements ^DynaMap pm)))))))))
+
+(comment
+  (def-rewrite
+    :match (map-element-access (:ground Key) (:any Value) (:any previous-map) (:any resulting-map))
+    :run-at :inference
+    (let [ctx (context/get-context)
+          did-consider (transient #{previous-map})  ;; the key should not be contained in the previous map, so there is no point
+          can-consider-vars (transient #{resulting-map})]
+      ;; this will need to look through all of the resulting variables to see if there is any other variable
+      ;; which matches ground key.  This will generate new unify rexprs which should allow values to "flow" through the map access
+
+      )))
 
 ;; TODO: there should be some operator which is able to do a many element access
 ;; on the map.  This would allow for it to find that there are
 
 ;; (def-rewrite
-;;   :match {:rexpr (map-element-access (:ground Key) (:any Value) (:any previous_map) (:ground resulting_map))
+;;   :match {:rexpr (map-element-access (:ground Key) (:any Value) (:any previous-map) (:ground resulting_map))
 ;;           :context }
 ;;   )
 
@@ -689,10 +762,176 @@
                                   (make-conjunct [(make-no-simp-unify MatchedResult (make-constant (car match)))
                                                   (make-conjunct (doall (map #(make-no-simp-unify %1 (make-constant %2))
                                                                              Args (cdr match))))])))))))))
-
-
 ;; (doseq [i (range 0 50)]
 ;;   (let [vars (map #(symbol (str "v" %)) (range 3 (+ i 4)))]
 ;;     (eval `(def-user-term "$regex_match" ~(+ i 3)
 ;;              (make-conjunct (make-unify ~(last vars) (make-constant true))
 ;;                             (make-regex-matcher v0 v1 v2 ~(vec (drop-last vars))))))))
+
+(def-builtin-rexpr is-int 2
+  (:allground (= v1 (integer? v0)))
+  (v1 (integer? v0)))
+
+(def-builtin-rexpr is-float 2
+  (:allground (= v1 (float? v0)))
+  (v1 (float? v0)))
+
+(def-builtin-rexpr is-number 2
+  (:allground (= v1 (number? v0)))
+  (v1 (number? v0)))
+
+(def-user-term "int" 1 (make-is-int v0 v1))
+(def-user-term "float" 1 (make-is-float v0 v1))
+(def-user-term "number" 1 (make-is-number v0 v1))
+
+(defn- round-down [v]
+  (cond (integer? v) v
+        (float? v) (int (Math/floor v))
+        :else (???)))
+
+(defn- round-up [v]
+  (cond (integer? v) v
+        (float? v) (int (Math/ceil v))
+        :else (???)))
+
+(def-rewrite
+  :match-combines [(is-int (:free Var) (is-true? _))
+                   (or (lessthan (:free Var) (:ground Upper) (is-true? _))
+                       (lessthan-eq (:free Var) (:ground Upper) (is-true? _)))
+                   (or (lessthan (:ground Lower) (:free Var) (is-true? _))
+                       (lessthan-eq (:ground Lower) (:free Var) (is-true? _)))]
+  :run-at :inference
+  :infers
+  (make-range (make-constant (round-down (get-value Lower)))
+              (make-constant (round-up (get-value Upper)))
+              (make-constant 1)
+              Var
+              (make-constant true)))
+
+(defmacro incompatible-types [type1 type2]
+  `(do
+     (def-rewrite
+       :match {:rexpr (~type1 ~'(:free Var) ~'(:any Result))
+               :context (~type2 ~'(:free Var) (is-true? ~'_))}
+       :run-at :inference
+       (make-unify ~'Result (make-constant false)))
+     (def-rewrite
+       :match {:rexpr (~type2 ~'(:free Var) ~'(:any Result))
+               :context (~type1 ~'(:free Var) (is-true? ~'_))}
+       :run-at :inference
+       (make-unify ~'Result (make-constant false)))))
+
+(incompatible-types is-int is-string)
+(incompatible-types is-int is-float)
+(incompatible-types is-float is-string)
+(incompatible-types is-number is-string)
+
+(defmacro not-structure-type [type]
+  `(do
+     (def-rewrite
+       :match {:rexpr (~type ~'(:free Var) ~'(:any Result))
+               :context ~'(unify-structure Var _ _ _ _)}
+       :run-at :inference
+       (make-unify ~'Result (make-constant false)))
+     (def-rewrite
+       :match {:rexpr ~'(unify-structure (:free Var) _ _ _ _)
+               :context (~type ~'Var (is-true? ~'_))}
+       :run-at :inference
+       (make-multiplicity 0))))
+
+(not-structure-type is-int)
+(not-structure-type is-float)
+(not-structure-type is-number)
+(not-structure-type is-string)
+
+(comment
+  (def-builtin-rexpr int-division 3
+    (:allground (= v2 (quot v0 v1)))
+    (v2 (quot v0 v1)))
+  (def-user-term ["int_division" "//"] 2 (make-int-division v0 v1 v2))
+
+  (def-rewrite
+    :match-combines [(int-division (:free Num) (:ground Denom) (:any Result))h.D., Mathematics, University of Texas at Austin, 2003.
+
+
+                     (or (lessthan (:free Num) (:ground Upper) (is-true? _))
+                         (lessthan-eq (:free Num) (:ground Upper) (is-true? _)))
+                     (or (lessthan (:ground Lower) (:free Num) (is-true? _))
+                         (lessthan-eq (:ground Lower) (:free Num) (is-true? _)))]
+    :run-at :inference
+    :infers
+    (make-range (make-constant (round-down (get-value Lower)))
+                (make-constant (round-up (get-value Upper)))
+                Demon
+                Num
+                (make-constant true))))
+
+
+(def-builtin-rexpr int-cast 2
+  (:allground (= v1 (bigint v0)))
+  (v1 (bigint v0)))
+
+(defn- cast-to-float [x]
+  (if (instance? String x)
+    (Double/parseDouble ^String x)
+    (.doubleVaue ^Number (num x))))
+
+(def-builtin-rexpr float-cast 2
+  (:allground (= v1 (cast-to-float v0)))
+  (v1 (cast-to-float v0)))
+
+(def-user-term "cast_int" 1 (make-int-cast v0 v1))
+(def-user-term "cast_float" 1 (make-float-cast v0 v1))
+
+
+(def-base-rexpr meta-is-ground [:var input
+                                :var result])
+(def-user-term "$ground" 1 (make-meta-is-ground v0 v1))
+
+(def-rewrite
+  :match (meta-is-ground (:ground input) (:any result))
+  :assigns-variable result
+  true)
+
+(def-base-rexpr meta-is-free [:var input
+                              :var result])
+(def-user-term "$free" 1 (make-meta-is-free v0 v1))
+
+;; if this value is used, then $free will return true.  This should make it easier to run this against
+;; though it would only match against $free rather than having it actually match against an unbound value
+(def meta-free-dummy-free-value (DynaTerm. "$free_meta_representing_unbound_value" []))
+
+(def-rewrite
+  :match (meta-is-free (:ground input) (:any result))
+  :assigns-variable result
+  ;; this can only match the dummy placeholder value for free, otherwise then it would clearly be bound to something else
+  (= meta-free-dummy-free-value (get-value input)))
+(def-rewrite
+  :match (meta-is-free (:free input) (:any result))
+  :run-at :inference ;; this is indended to delay this a bit such that it has time to check if this is truly a free variable
+  :assigns-variable result
+  true)
+
+
+(def-builtin-rexpr colon-line-tracking 3
+  (:allground (= v2 (DynaTerm. "$colon_line_tracking" [v0 v1])))
+  (v2 (DynaTerm. "$colon_line_tracking" [v0 v1])))
+
+(def-user-term "$colon_line_tracking" 2 (make-colon-line-tracking v0 v1 v2))
+
+(def-builtin-rexpr colon-line-tracking-min 2
+  (:allground (and (= "$colon_line_tracking" (:name v1))
+                   (> (get v1 0) v0))))
+
+(def-rewrite
+  :match {:rexpr (colon-line-tracking-min (:ground idx) (:free res))
+          :context (colon-line-tracking (:ground idx2) _ res)}
+  :run-at :inference
+  :check (>= (get-value idx2) (get-value idx)))
+
+(def-rewrite
+  :match {:rexpr (colon-line-tracking-min (:ground idx) (:free res))
+          :context (colon-line-tracking-min (:ground idx2) res)
+          :check (>= (get-value idx2) (get-value idx))}
+  :run-at :inference
+  (make-multiplicity 1))

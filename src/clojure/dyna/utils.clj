@@ -10,6 +10,8 @@
 (def debug-statements
   (= "true" (System/getProperty "dyna.debug" "true")))
 
+(def dummy-namespace (create-ns 'dyna.dummy-namespace))
+
 ;; make functions like car caar cdr etc
 
 (defn- make-cr-function-body [args]
@@ -76,7 +78,7 @@
 (def debug-useful-variables (atom {'aprint (constantly aprint)
                                    'reflect (constantly reflect)}))
 
-(defn- debug-repl-fn [prompt local-bindings ^Throwable traceback]
+(defn- debug-repl-fn [prompt local-bindings ^Throwable traceback print-bindings]
   (let [all-bindings  (merge (into {} (for [[k v] @debug-useful-variables]
                                         [k (v)]))
                              (into {} (for [[k v] (ns-publics 'dyna.rexpr-constructors)]
@@ -85,8 +87,9 @@
                                         [k (var-get v)]))
                              local-bindings)]
     (.printStackTrace traceback System/out)
-    (try (aprint local-bindings)
-         (catch Exception err nil))
+    (when print-bindings
+      (try (aprint local-bindings)
+           (catch Exception err nil)))
     (clojure.main/repl
      :read (fn [fresh-request exit-request]
              (let [res (clojure.main/repl-read fresh-request exit-request)]
@@ -105,11 +108,15 @@
      :prompt #(print prompt "=> ")
      :eval (partial eval-with-locals all-bindings))))
 
+(if (= (System/getProperty "dyna.debug_repl" "true") "false")
+  (defn- debug-repl-fn [prompt local-bindings ^Throwable traceback print-bindings]))
+
 
 (defmacro debug-repl
   "Starts a REPL with the local bindings available."
   ([] `(debug-repl "dr"))
-  ([prompt] `(~debug-repl-fn ~prompt (debugger-get-local-bindings) (Throwable. "Entering Debugger"))))
+  ([prompt] `(debug-repl ~prompt true))
+  ([prompt print-bindings] `(~debug-repl-fn ~prompt (debugger-get-local-bindings) (Throwable. "Entering Debugger") ~print-bindings)))
 
 (defmacro debug-delay-ntimes [ntimes & body]
   (let [sym (gensym 'debug-delay)
@@ -118,6 +125,15 @@
        (alter-var-root ~isym inc)
        (when (>= @~isym ~ntimes)
          ~@body))))
+
+(def ^{:dynamic true} *debug-block-enabled* false)
+(defmacro debug-block [& block]
+  `(binding [*debug-block-enabled* true]
+     ~@block))
+
+(defmacro debug-in-block [& args]
+  `(when *debug-block-enabled*
+     (debug-repl ~@args)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -168,7 +184,7 @@
 ;; a macro for overriding functions in the body which also appear in the opts
 ;; this shoudl allow us to make it such that there is a generic function which
 ;; is called, but also something which will cause the values of the expression to corresponds
-(defmacro override-functions [opts & bodies]
+#_(defmacro override-functions [opts & bodies]
   (debug-repl)
   bodies)
 
@@ -290,11 +306,11 @@
         class-name (str (namespace-munge *ns*) "." name)]
     `(do (definterface ~name
            ~@(for [m methods]
-               `(~(symbol (munge (first m))) ~(second m))))
+               `(~(with-meta (symbol (munge (first m))) (meta (first m))) ~(second m))))
          ~@(for [m methods]
              `(defn ~(first m)
-                ;; this does not seem to generate the type annotation correctly..... so this does not become a direct call properly
                 {:inline (fn [~this-var & args#]
+                           ;; embed a direct call to the interface using as it has the type annotation for the class-name
                            (concat (list '. (with-meta ~this-var ~{:tag class-name})
                                          (quote ~(symbol (munge (first m)))))
                                    args#))}
@@ -302,7 +318,11 @@
                 (. ~(with-meta this-var {:tag class-name})
                    ~(symbol (munge (first m)))
                    ~@(second m))))
-         ~name)))
+         #_(intern *ns* (quote ~name) {:on (quote ~(symbol class-name))
+                                     :on-interface (Class/forName ~class-name)})
+         #_(intern *ns* (quote ~name) {:on (quote ~(symbol class-name))
+                                     :on-interface (quote ~(symbol class-name))})
+         name)))
 
 (defn- get-superclass-methods [^Class cls]
   (let [r (reflect cls)
@@ -326,9 +346,9 @@
        ;(defonce ~interface-name {})
        ~@(for [[name arity] methods-to-create
                :let [param-list (vec (repeatedly arity gensym))]]
-             ;; the method name will have to become unmunged.  additionally, this is going to find that there are
+             ;; the method name will have to become unmunged.
            (when-not (resolve (symbol (demunge name)))
-              ;; because of the different arit of functions, this might not work if it has the same signature with different values
+              ;; because of the different arity of functions, this might not work if it has the same signature with different values
               ;; maybe we should collect this into a name/arity collection
              `(defn ~(symbol (demunge name))
                 {:inline (fn [~this-var & args#]
@@ -411,6 +431,28 @@
           (lazy-seq (apply zipseq-longest (map next seqs))))))
 
 (defn indexof [col pred]
-  (for [[idx val] (zipseq (range) col)]
-    (when (pred val)
-      idx)))
+  (first (for [[idx val] (zipseq (range) col)
+               :when (pred val)]
+           idx)))
+
+(defn strict-get [map key]
+  (let [r (get map key :not-found-value)]
+    (if (= :not-found-value r)
+      (do
+        (debug-repl "key not found")
+        (throw (RuntimeException. (str "Key " key " not found in map"))))
+      r)))
+
+(defn drop-nth [coll n]
+  (cond
+    (or (nil? n) (< n 0)) coll
+    (= n 0) (rest coll)
+    :else (cons (first coll) (lazy-seq (drop-nth (rest coll) (- n 1))))))
+
+(defn only [x] {:pre [(nil? (next x))]} (first x))
+
+
+(defmacro dyna-slow-check [& args]
+  ;; extra debugging checks which are slow
+  nil;`(do ~@args)
+  )

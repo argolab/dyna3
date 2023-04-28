@@ -17,21 +17,31 @@ matrix(M) = {
     add(Other) = add($self, Other).
     multiply(Other) = multiply($self,Other).
 
-    row(X) :- _ = elem(X, _).
-    col(Y) :- _ = elem(_, Y).
-    rows += 1 for row(_).
-    cols += 1 for col(_).
+    row(X) :- _ = $self.elem(X, _).
+    col(Y) :- _ = $self.elem(_, Y).
+    rows += 1 for $self.row(_).
+    cols += 1 for $self.col(_).
 }.
 
 zero_matrix(A,B) = matrix {
-    elem(X: range(0, A), Y: range(0,B)) = 0.
+    elem(X:range(A), Y:range(B)) = 0.
 }.
+
+identity_matrix(I) = matrix {
+    elem(A,A) += 1 for A:range(I).
+    elem(A:range(I), B:range(I)) += 0.
+}.
+
+
 
 % parameter_matrix(Name) = matrix {
 %                              elem(X,Y) = $parameter(&matrix(Name,X,Y)).
 %                          }.
 
+%:- export parameter_matrix/1.
+
+
+
 :- export matrix/1.
 :- export zero_matrix/2.
-%:- export parameter_matrix/1.
-x
+:- export identity_matrix/1.

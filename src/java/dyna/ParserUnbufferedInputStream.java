@@ -5,6 +5,10 @@ import org.antlr.v4.runtime.misc.Interval;
 
 import java.io.InputStream;
 
+/**
+ * Circular buffer for the parser.  Allows for bigger input files to be handled
+ * rather than having to buffer everything in ram.
+ */
 public class ParserUnbufferedInputStream extends UnbufferedCharStream {
 
     public ParserUnbufferedInputStream(InputStream input, int bufferSize) {

@@ -2,16 +2,5 @@
 
 # this runs the dyna repl without having to generate the jar first
 
-# which lein 2>/dev/null >/dev/null
-# if [ $? -eq 0 ]
-# then
-#    l='lein'
-# else
-#     [ -f .lein.sh ] || curl -o .lein.sh https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein && chmod +x .lein.sh
-#     l='./.lein.sh'
-# fi
-
-# exec lein run -m dyna.core/main2 "$@"
-
-
-exec make dyna-repl
+#exec make dyna-repl
+exec java -cp `make run-class-path` dyna.DynaMain "$@"

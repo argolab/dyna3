@@ -1,12 +1,15 @@
 (ns dyna.base-protocols
-  (:require [dyna.utils :refer [import-interface-methods]])
-  (:import [dyna DIterable DIterator DIteratorInstance]))
+  (:require [dyna.utils :refer [import-interface-methods defsimpleinterface]])
+  (:import [dyna DIterable DIterator DIteratorInstance Dynabase
+            Rexpr RContext RexprValue
+            ]))
 
 ;; this file defines the base protocols (interfaces) which are referenced
 ;; throughout the rest of the project in different files.  The implementations
 ;; for these methods are scattered around
 
-(defprotocol Rexpr
+(import-interface-methods Rexpr)
+#_(defprotocol Rexpr
   (primitive-rexpr [this]) ;; return a primitive r-expr for the expression
   ;;(replace-expressions [this expressions-map]) ;; replace a given nested expression
   (get-variables [this])  ;; get the variables from the current rexpr
@@ -26,6 +29,7 @@
   (remap-variables [this variable-renaming-map])
   (rewrite-rexpr-children [this remap-function])
   (rewrite-rexpr-children-no-simp [this remap-function])
+  (remap-variables-func [this remap-function])
 
   ;; in the case of hidden variables, those re something which need to get added to the map when it recurses through
   (remap-variables-handle-hidden [this variable-renaming-map])
@@ -41,14 +45,40 @@
 
   (is-empty-rexpr? [this]) ;; if the multiplicity of this expression is zero
   (is-non-empty-rexpr? [this]) ;; if there is some branch of the disjunct which is non-zero
-  )
+
+  ;; return a map of the internal values which are stored, and it .
+                                        ;(get-arguments-map [this])
+
+  (rexpr-map-function-with-access-path [this cb-fn])
+
+  (all-conjunctive-rexprs [this]
+    ;; return [set-of-projected-out-variables, The rexpr]
+    )
+
+  (rexpr-jit-info [this])
+
+
+  ;; An R-expr will have to hit a basecase as R-exprs do not allow for "infinite"
+  ;; expressions.  So if there is something without a basecase, then that means
+  ;; that it would be impossible for it to resolve as anything
+  ;; Returns:
+  ;;    0 indicates that for sure there is no base case
+  ;;    1 this uses indirect calls somewhere so we can not be sure if this will have a base cases as a result of the indirection
+  ;;    2 there is some recursion, but there is also a base case that could maybe get hit
+  ;;    3 there is no recursion
+  (check-rexpr-basecases [this stack])
+
+
+  (simplify-fast-rexprl [this simplify])
+  (simplify-inference-rexprl [this simplify]))
 
   ;; (visit-rexpr-children [this remap-function]) ;; this will visit any nested R-exprs on the expression, and return a new expression of the same type with
   ;(visit-all-children [this remap-function]) ;; this will visit
 
 
 
-(defprotocol RexprValue
+(import-interface-methods RexprValue)
+#_(defprotocol RexprValue
   (get-value [this])
   (get-value-in-context [this ctx])
   (get-representation-in-context [this ctx])
@@ -58,7 +88,8 @@
   (all-variables [this]))
 
 
-(defprotocol RContext
+(import-interface-methods RContext)
+#_(defprotocol RContext
   (ctx-get-rexpr [this])
   (ctx-get-value [this variable])
   (ctx-is-bound? [this variable])
@@ -83,10 +114,10 @@
 
 
 
-(defrecord Dynabase [access-map]
-  Object
-  (toString [this]
-    (str "(Dynabase " access-map ")")))
+;; (defrecord Dynabase [access-map]
+;;   Object
+;;   (toString [this]
+;;     (str "(Dynabase " access-map ")")))
 
 (def undefined-dynabase (Dynabase. nil))
 
@@ -126,34 +157,7 @@
     (iter-debug-which-variable-bound [this] nil)))
 
 
-(comment
-  (defsimpleinterface DIterable
-    (iter-what-variables-bound []) ;; return a set of which variables can be bound
-    (iter-variable-binding-order []) ;; return a list of lists, where the second list represents which order the variables will get bound in
-
-    ;; maybe this should instead select which option it will be going for
-
-    (iter-create-iterator [which-binding])) ;; create an iterator which can do the binding of different variables
-
-
-  (defsimpleinterface DIterator
-    (iter-run-cb [^clojure.lang.IFn cb-fun]) ;; the function will get passed the value
-
-    (iter-bind-value [value]))
-
-
-  ;; this can just be a seq in clojure
-  (defsimpleinterface DIteratorVariable
-    (^boolean iter-has-next [])
-    (iter-next []))
-
-
-  ;; this could just be returned as a pair.  It does not have to be its own class?
-  (defsimpleinterface DIteratorInstance
-    (iter-variable-value []) ;; return the value for which an expression has been bound
-    (iter-continuation []))) ;; return the next iterator in the sequence of binding multiple values
-
-
+ ;; return the next iterator in the sequence of binding multiple values
 
 
 ;; (defrecord MemoizationContainer [RConditional

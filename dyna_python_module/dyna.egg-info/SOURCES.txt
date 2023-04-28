@@ -1,0 +1,12 @@
+README.md
+setup.py
+dyna/__init__.py
+dyna/dyna_ipython_magic.py
+dyna/java_configure_jvm.py
+dyna/java_wrapper.py
+dyna.egg-info/PKG-INFO
+dyna.egg-info/SOURCES.txt
+dyna.egg-info/dependency_links.txt
+dyna.egg-info/requires.txt
+dyna.egg-info/top_level.txt
+test/test_wrapper.py

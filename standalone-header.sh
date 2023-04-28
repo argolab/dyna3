@@ -1,34 +1,7 @@
 #!/bin/bash
 
 self="$0"
-
-help() {
-    echo "Dyna implemented using R-exprs"
-    echo ""
-    echo "     --help                Print this message"
-    echo "     --memory=1G           Set the amount of memory for the JVM"
-    echo "     --import [file name]  Import some a file into the REPL from the command line"
-    echo "     --csv-import [term name] [file name]"
-    echo "     --csv-export [term name] [file name]"
-    echo "     --time                Time the different parts of the runtime report when the program exits"
-    echo "     --fast-math           Do not check the math for overflow"
-    echo ""
-    echo "Useage: $self [args] [file to start]"
-    echo ""
-    #echo "To install python package for dyna: $self install-python"
-}
-
-install_python() {
-    exit 1  # Todo????
-    t=`mktemp -d`
-    trap "rm -rf $t" EXIT
-
-    unzip $self "dyna_backend/install-python-package" -d $t
-    cp $self $t/some-path-in-the-install-dir/dyna
-    pushd $t
-    pip install .
-    popd
-}
+version="VERSION_STRING"
 
 welcome_message() {
 echo "                _____   __     __  _   _                                     "
@@ -45,7 +18,7 @@ echo "   \                                          / /      \                  
 echo "    \                                        / /        \                    "
 echo "     \     Impelemented by                  / /          \                   "
 echo "      \       Matthew Francis-Landau       / /            \                  "
-echo "       \                  (2020-2022)     / /              \                 "
+echo "       \                  (2020-2023)     / /              \                 "
 echo "        \                                / /                \                "
 echo "         \                              / /                  \               "
 echo "          \                            / /                    \              "
@@ -55,7 +28,7 @@ echo "             \                      / /                          \        
 echo "              \                    / /                            \          "
 echo "               \                  / /                              \         "
 echo "                \                / /                                \        "
-echo "                 \              / /                                  \       "
+echo "                 \              / /         http://dyna.org          \       "
 echo "                  \            / /                                    \      "
 echo "                   \          / /                                      \     "
 echo "                    \        / /    https://github.com/argolab/dyna3    \    "
@@ -65,6 +38,50 @@ echo "                       \  / /                                             
 echo "                        \/ --------------------------------------------------"
 echo "                                                                             "
 }
+
+help() {
+    echo "Dyna implemented using R-exprs"
+    echo ""
+    echo "     --help                Print this message"
+    echo "     --memory=1G           Set the amount of memory for the JVM"
+    echo "     --import [file name]  Import some a file into the REPL from the command line"
+    echo "     --csv-import [term name] [file name]"
+    echo "     --csv-export [term name] [file name]"
+    echo "     --time                Time the different parts of the runtime report when the program exits"
+    echo "     --fast-math           Do not check the math for overflow"
+    echo "     --random-seed=42      Set a random seed"
+    echo "     --version             Print out version"
+    echo ""
+    echo "Usage: $self [args] [file to start]"
+    echo ""
+    echo "To install the Python package for Dyna run: $self install-python"
+}
+
+install_python() {
+    t=`mktemp -d`
+    trap "rm -rf $t" EXIT
+    set -x
+
+    unzip -qq "$self" "dyna_python_module/*" -d $t 2>/dev/null
+    cp "$self" $t/dyna_python_module/dyna/dyna.jar
+    cd $t/dyna_python_module
+    python setup.py install
+}
+
+# set dyna to use a different java runtime
+if [ -z "${DYNA_JVM}" ]; then
+   DYNA_JVM='java'
+fi
+
+which $DYNA_JVM 2>/dev/null >/dev/null
+if [ $? -ne 0 ]; then
+    echo "Unable to find Java in the path ($PATH)."
+    echo ""
+    echo "Either install Java or provide a path to the Java runtime using: "
+    echo "    export DYNA_JVM=/path/to/java-install/bin/java"
+    exit 1
+fi
+
 
 dyna_args=""
 import_args=""
@@ -84,6 +101,10 @@ while [ $# -gt 0 ]; do
             ;;
         --help)
             help
+            exit 1
+            ;;
+        --version)
+            echo "Version: $version"
             exit 1
             ;;
         -agentlib*|-D*|-XX*)
@@ -110,10 +131,10 @@ while [ $# -gt 0 ]; do
             # this will turn off overflow checking on the math operators, which will make the runtime faster
             jvm_args+="-Ddyna.unchecked_math=true "
             ;;
-        --fast)
-            # maybe should just set this at the same time as debug
-            jvm_arg+="-Ddyna.check_rexprs_args=false "
-            ;;
+        # --fast)
+        #     # maybe should just set this at the same time as debug
+        #     jvm_arg+="-Ddyna.check_rexprs_args=false "
+        #     ;;
 
 
         --import|--run)
@@ -125,7 +146,7 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         --csv-import|--csv-export)
-            [[ "$2" =~ ^[a-z][a-zA-Z0-9]*\/[0-9]+$ ]] || {
+            [[ "$2" =~ ^[a-z][a-zA-Z0-9_]*\/[0-9]+$ ]] || {
                 echo "term '$2' did not match expected 'name/arity'"
                 exit 2
             }
@@ -135,29 +156,71 @@ while [ $# -gt 0 ]; do
             exit 1  # TODO implement this
             ;;
 
+        --random-seed*)
+            seed="${1#*=}"
+            [[ $seed =~ ^[0-9]+$ ]] || {
+                echo "--random-seed was unexpected, expected something like: --random-seed=42"
+                exit 1
+            }
+            jvm_args+="-Ddyna.random_seed=$seed "
+            ;;
+
         install-python)
-            exit 1  # TODO, will need the python package included into the jar
-            echo "Install the dyna runtime package to the current python environment"
+            welcome_message
+            echo
+            echo '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~'
+            echo 'Python environment:'
+            python -m site
+            echo ''
+            python -c 'import sys; print("Python prefix:", sys.prefix)'
+            echo '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~'
+            echo ''
+            echo "Install Dyna into the current Python environment?"
+            read -p "Are you sure? (y/N) " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[yY]$ ]]; then
+                install_python
+                exit 0
+            else
+                echo "Install canceled"
+                exit 1
+            fi
+            ;;
+
+        install-python-no-confirm)
             install_python
             exit 0
             ;;
 
         *)
+            # I suppose that the program which is running on dyna could also
+            # take command line arguments, so maybe we can not check if the
+            # arguments passed are valid, in which case this is going to have to
+            # start the whole runtime before it returns an error
+
+            # [[ -f "$1" ]] || {
+            #     echo "file not found: $1"
+            #     echo "Use `$self --help` to see command line arguments"
+            #     exit 2
+            # }
             dyna_args+="$1 "
             ;;
     esac
     shift
 done
 
-jvm_args+="-Xmx$memory -Dclojure.compiler.direct-linking=true -Ddyna.print_rewrites_performed=$debug_mode -Ddyna.debug=$debug_mode -Ddyna.trace_rexpr_construction=$debug_mode"
+jvm_args+="-Xmx$memory -Dclojure.compiler.direct-linking=true -Ddyna.print_rewrites_performed=$debug_mode -Ddyna.debug=$debug_mode -Ddyna.trace_rexpr_construction=$debug_mode -Ddyna.debug_repl=$debug_mode -Ddyna.check_rexprs_args=$debug_mode"
+# -XX:-StackTraceInThrowable  # disable stack traces entirely
 
 if [ -z "$dyna_args" ]; then
     welcome_message
+    printf "Loading...\r"
+    jvm_args+=" -Ddyna.loading_spin=true "
 fi
 
 
-exec java $jvm_args -Ddyna.runtimejar=$self -jar "$self" $import_args $dyna_args
+exec $DYNA_JVM $jvm_args "-Ddyna.runtimejar=$self" -jar "$self" $import_args $dyna_args
 exit 1  # should not get to this line
 
 # what follows is the dyna implementation compiled into a jar
-##################################################
+#############################################################

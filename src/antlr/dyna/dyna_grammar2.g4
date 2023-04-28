@@ -2,16 +2,13 @@
 
 
 
-// some bug that prevents us from having this loaded in a package
-// looks like it might be how the build script is trying to locate items
-// also unable to use any additional tools from antlr when using a package name...lame
 grammar dyna_grammar2;
-//
+
 @header {
 package dyna;
 
 import java.math.BigInteger;
-import clojure.java.api.Clojure;
+//import clojure.java.api.Clojure;
 import static dyna.ParserUtils.*;
 import clojure.lang.BigInt;
 
@@ -92,9 +89,7 @@ atom returns[String t]
     ;
 
 
-// for the fact that you aren't allowed to set to the $variable things
 readAtom returns[String t]
-//    : n=DollaredAtom { $t = $n.getText();  }
     : a=atom { $t = $a.t; }
     ;
 
@@ -105,13 +100,10 @@ Variable
 
 // going to change this to only match the aggregators which are actually defined
 MergedAggregator
-    : [&*\-+:|] '='
-    | [a-z][a-z&*\-+:|]* '=' {
-    // there needs to be some method which checks if something is defined as an aggregator
-    // that can then conditionally enable this lexer rule
-    //("max=".equals(getText()) || "min=".equals(getText()) || "prob+=".equals(getText()))
-    aggregator_defined(getText())
-}?
+    : [&*\-+:|?] '='
+    | [a-z][a-z&*\-+:|?]* '=' {
+    // this checks that the aggregator name is defined in rexpr_aggregators.clj and will conditionally enable this lexer rule
+        aggregator_defined(getText())}?
     ;
 
 junk2: ;
@@ -157,7 +149,6 @@ StringConstBrackets
 
 junk3: ;
 
-// if we want to support multilined strings in the future or something, we can just do that here
 stringConst returns[String t] locals [String vv]
     : a=StringConst { $vv = $a.getText(); $t = $vv.substring(1, $vv.length() - 1); }
     | a=StringConst2 { $vv = $a.getText(); $t = $vv.substring(1, $vv.length() - 1); }
@@ -166,8 +157,6 @@ stringConst returns[String t] locals [String vv]
     ;
 
 primitive returns[Object v]
-    // TODO: automatically choose the correct representation size for these objects depending on what value they are
-    // this should parse as a bigint, and then check if it size is with in the range of a 64 bit int.
     : neg='-'? a=NumberInt {
       BigInteger b = new BigInteger($a.getText());
       if($neg != null) b = b.negate();
@@ -189,7 +178,7 @@ primitive returns[Object v]
     // or if there should be some special signal such as `0.0f`
     | neg='-'? a=NumberFloat { $v = ($neg != null ? -1 : 1) * java.lang.Double.valueOf($a.getText()); }
     | b=stringConst { $v = $b.t; }
-    | 'true' { $v = java.lang.Boolean.valueOf(true); } // these possibly get confused as aggregators if used like true=
+    | 'true' { $v = java.lang.Boolean.valueOf(true); }
     | '$true' { $v = java.lang.Boolean.valueOf(true); }
     | 'false' { $v = java.lang.Boolean.valueOf(false); }
     | '$false' { $v = java.lang.Boolean.valueOf(false); }
@@ -300,8 +289,8 @@ term returns[DynaTerm rterm = null]
         { // the warning stuff should somehow check something at runtime?
             // Though this is going to need which of the values will correspond with something
             // ideally, this should somehow allow for something to be conditional on some value
-
-            assert(false);
+            $rterm = DynaTerm.create("\$warning", $we.rterm, $we.ctx.getStart().getLine(), $t.rterm);
+            //assert(false);
         }
     ;
 
@@ -376,9 +365,9 @@ termBody[String aname] returns[DynaTerm rterm]
             $rterm = DynaTerm.create("\$with_key", $rterm, $with_key);
         }
         if(":=".equals($aname)) {
-            $rterm = DynaTerm.create("\$quote1", DynaTerm.create("\$colon_line_tracking",
-                                                                 DynaTerm.create("\$constant", colon_line_counter()),
-                                                                 $rterm));
+            $rterm = DynaTerm.create("\$colon_line_tracking",
+                                     DynaTerm.create("\$constant", colon_line_counter()),
+                                     $rterm);
         }
       }
     ;
@@ -548,7 +537,7 @@ expressionRoot returns [DynaTerm rterm]
     | '(' e=expression ')' { $rterm = $e.rterm; }
     | ilf=inlineFunction2 { $rterm = $ilf.rterm; }
     | a=array { $rterm = $a.rterm; }
-    | ':' m=methodCall {  // for supporthing things like f(:int) => f(_:int)
+    | ':' m=methodCall {  // for supporting things like f(:int) => f(_:int)
             $rterm = DynaTerm.create("\$variable", gensym_variable_name());
             $m.args.add($rterm);
             $rterm = DynaTerm.create(",", DynaTerm.create($m.name, $m.args), $rterm); }
@@ -575,7 +564,8 @@ expressionDynabaseAccess returns[DynaTerm rterm]
     : a=expressionRoot {$rterm=$a.rterm;}
       ('.' m=methodCall {
                 if($rterm.name.equals("\$quote") || $rterm.name.equals("\$inline_function")) {
-                    assert(false); /// should be a syntax error
+                    throw new RuntimeException("syntax error");
+                    //assert(false); /// should be a syntax error
                 }
                 if($rterm.name.equals("\$quote1")) {
                     // this is something like `&f(5).foo` which should be converted into `f(5).foo[]`
@@ -589,7 +579,8 @@ expressionDynabaseAccess returns[DynaTerm rterm]
         })*
       ('.' bracketTerm {
         if($rterm.name.equals("\$quote") || $rterm.name.equals("\$quote1") || $rterm.name.equals("\$dynabase_quote1")) {
-            assert(false); // should be a syntax error
+            throw new RuntimeException("syntax error");
+            //assert(false); // should be a syntax error
         }
         $rterm = DynaTerm.create("\$dynbase_quote1", $rterm, DynaTerm.create_arr($bracketTerm.name, $bracketTerm.args)); })?
     ;
@@ -615,7 +606,10 @@ locals [DynaTerm add_arg=null]
                || $rterm.name.equals("\$escaped") || $rterm.name.equals("\$inline_function") || $rterm.name.equals("\$dynabase_quote1")
                || $rterm.name.equals("\$dynabase_create") || $rterm.name.equals("\$map_empty") || $rterm.name.equals("\$map_element")
                || $rterm.name.equals("\$nil") || $rterm.name.equals("\$cons"))
-               assert(false); // this should return a syntax error rather than an assert(false)
+               {
+               throw new RuntimeException("syntax error");
+               //assert(false); // this should return a syntax error rather than an assert(false)
+               }
             if($rterm.name.equals("\$dynabase_call")) {
                 // have to put the argument onto the dynabase call element,
                 $rterm = DynaTerm.create($rterm.name, $rterm.get(0), ((DynaTerm)$rterm.get(1)).extend_args($add_arg));
@@ -661,7 +655,7 @@ expressionExponent returns [DynaTerm rterm]
     ;
 
 expressionMultiplicative returns [DynaTerm rterm]
-    : a=expressionExponent {$rterm = $a.rterm;} (op=('*'|'/'|'//') b=expressionExponent
+    : a=expressionExponent {$rterm = $a.rterm;} (op=('*'|'/') b=expressionExponent  // removed // for the int division. not sure if that is needed given we have a builtin range expression which only works for int expressions
                 {$rterm = DynaTerm.create($op.getText(), $rterm, $b.rterm);})*
     ;
 
@@ -735,6 +729,8 @@ compilerExpressionArgument returns [Object val]
     | '**' {$val = "**";}
     | '&' {$val = "&";}
     | '&&' {$val = "&&";}
+    | '+' {$val = "+";}
+    | '-' {$val = "-";}
     ;
 
 compilerExpressionParams returns [ArrayList<Object> args = new ArrayList<>()]
@@ -751,22 +747,26 @@ locals [ArrayList<Object> args]
     : 'import'  {$args = new ArrayList<>();}
         (m=methodId Comma  {$args.add($m.rterm);})*
          m=methodId Comma? {$args.add($m.rterm);}
-      'from' name=primitive {
-         $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create("import", DynaTerm.make_list($args), $name.v));
+      'from' name=stringConst {
+         $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create("import", DynaTerm.make_list($args), $name.t));
       }
-    | 'from' name=primitive
+    | 'from' name=stringConst
       'import' {$args = new ArrayList<>();}
         (m=methodId Comma  {$args.add($m.rterm);})*
          m=methodId Comma? {$args.add($m.rterm);}
       {
-         $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create("import", DynaTerm.make_list($args), $name.v));
+         $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create("import", DynaTerm.make_list($args), $name.t));
       }
-    | 'import' name=primitive {
-         $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create("import", $name.v));
+    | 'import' name=stringConst {
+         $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create("import", $name.t));
        }
+    // TODO: there is some redudancy in the way that expressions could be
+    // encoded by this.  But the encodings are going to generate _different_
+    // ASTs
     | a=atom p=compilerExpressionParams {$rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create_arr($a.t, $p.args));}
     | a=atom b=atom p=compilerExpressionParams {$rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create($a.t, DynaTerm.create_arr($b.t, $p.args)));}
     | a=atom m=methodId { $rterm = DynaTerm.create("\$compiler_expression", DynaTerm.create($a.t, $m.rterm)); }
+    | e=expression {$rterm=DynaTerm.create("\$compiler_expression", $e.rterm);}
 ;
 
 methodId returns [DynaTerm rterm]

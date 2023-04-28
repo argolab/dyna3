@@ -26,16 +26,16 @@ public final class DynaInterface {
     private static final IFn make_constant_f;
     private static final IFn make_rexpr_f;
     private static final IFn get_rexpr_name_f;
+    private static final IFn define_external_function_f;
     //private static final IFn clojure_get;
     private static final IFn clojure_keyword;
 
     /**
      * Wrap an instance of the DynaSystem.  There can be multiple dyna runtimes
      * instantiated at the same time.  These are created by the method
-     * `create_dyna_system` below.
+     * `create_dyna_system` below.  The internals of this are opaque
      */
     public static class DynaSystem {
-        // Wraps a
         final Object system;
         DynaSystem(Object v) { system = v; }
         public boolean equals(Object o) {
@@ -43,6 +43,9 @@ public final class DynaInterface {
         }
         public int hashCode() {
             return System.identityHashCode(system);
+        }
+        public String toString() {
+            return "DynaSystem@" + hashCode();
         }
     }
 
@@ -83,8 +86,8 @@ public final class DynaInterface {
     }
 
 
-    public void runString(String program) { run_string(program); }
-    public void runString(DynaSystem s, String program) { run_string(s, program); }
+    // public void runString(String program) { run_string(program); }
+    // public void runString(DynaSystem s, String program) { run_string(s, program); }
     public void run_string(String program) { run_string(null, program); }
     public void run_string(DynaSystem s, String program) { run_string(s, program, null); }
     public void run_string(DynaSystem s, String program, Object[] external_values) {
@@ -106,9 +109,14 @@ public final class DynaInterface {
         run_file_f.invoke(s == null ? null : s.system, filename);
     }
 
+    public Object run_query(String q) { return run_query(null, q); }
     public Object run_query(DynaSystem s, String query) {
         // this might come back as an R-expr, in which case I suppose that we should wrap it in something
-        Object r = run_query_f.invoke(s == null ? null : s.system, query);
+        return run_query(s, query, null);
+    }
+
+    public Object run_query(DynaSystem s, String query, Object[] external_values) {
+        Object r = run_query_f.invoke(s == null ? null : s.system, query, external_values);
         if(is_rexpr(r)) {
             return new DynaRexpr(r);
         }
@@ -142,12 +150,12 @@ public final class DynaInterface {
     /**
      * Define an external function which will be defined globally
      */
-    public void define_external_function(String function_name, int function_arity, ExternalFunction func) {
-
+    public void define_external_function(DynaSystem sys, String function_name, int function_arity, ExternalFunction func) {
+        define_external_function_f.invoke(sys == null ? null : sys.system, function_name, function_arity, func);
     }
 
-    public void define_external_function(String function_name, int function_arity, IFn func) {
-        define_external_function(function_name, function_arity, new ExternalFunction () {
+    public void define_external_function(DynaSystem sys, String function_name, int function_arity, IFn func) {
+        define_external_function(sys, function_name, function_arity, new ExternalFunction () {
                 public Object call(Object... args) {
                     return func.applyTo(RT.seq(args));
                 }
@@ -191,7 +199,28 @@ public final class DynaInterface {
     Object create_dyna_sytem();
     */
 
-    public DynaSystem create_dyna_sytem() {
+    public String get_term_name(Object term) {
+        if(term instanceof DynaTerm) {
+            return ((DynaTerm)term).name;
+        }
+        return null;
+    }
+
+    public int get_term_arity(Object term) {
+        if(term instanceof DynaTerm) {
+            return ((DynaTerm)term).arity();
+        }
+        return -1;
+    }
+
+    public Object get_term_argument(Object term, int i) {
+        if(term instanceof DynaTerm) {
+            return ((DynaTerm)term).get(i);
+        }
+        return null;
+    }
+
+    public DynaSystem create_dyna_system() {
         return new DynaSystem(create_system_f.invoke());
     }
 
@@ -217,7 +246,10 @@ public final class DynaInterface {
         make_constant_f = Clojure.var("dyna.rexpr", "make-constant");
         make_rexpr_f = Clojure.var("dyna.public-interface", "make-rexpr");
         get_rexpr_name_f = Clojure.var("dyna.base-protocols", "rexpr-name");
+        define_external_function_f = Clojure.var("dyna.public-interface", "define-external-function");
         //clojure_get = Clojure.var("clojure.core", "get");
         clojure_keyword = Clojure.var("clojure.core", "keyword");
     }
+
+    public static void main(String[] args) {}
 }

@@ -1,8 +1,9 @@
 (ns dyna.memoization-test
+  (:require [dyna.core])
   (:require [dyna.simple-test :refer [str-test]]))
 
 
-(str-test memoization1 "
+#_(str-test memoization1 "
 foo(1) += 123.
 foo(2) += 456.
 
@@ -11,7 +12,7 @@ foo(2) += 456.
 assert foo(1) = 123.
 ")
 
-(str-test memoization2 "
+#_(str-test memoization2 "
 :- memoize_unk f/1.
 f(1) = 1.
 
@@ -20,7 +21,7 @@ assert f(1) = 1.
 :- print_memo_table f/1.
 ")
 
-(str-test memoization3 "
+#_(str-test memoization3 "
 :- memoize_unk f/1.
 f(1) = 1.
 
@@ -33,7 +34,7 @@ f(2) = 2.
 assert f(2) = 2.
 ")
 
-(str-test factorial "
+#_(str-test factorial "
 fact(0) := 1.
 fact(N) := fact(N-1)*N for N > 0.
 
@@ -43,10 +44,11 @@ assert fact(5) = 120.")
 
 
 (str-test fibonacci "
-:- memoize_unk fib/1.
 fib(0) := 0.
 fib(1) := 1.
 fib(N) := fib(N-2) + fib(N-1) for N > 1.
+
+$memo(fib[N:$ground]) = \"unk\".
 
 print fib(3).
 
@@ -59,12 +61,13 @@ assert fib(10) = 55.
 
 % if this is not memoized, then this will take too long to run
 assert fib(100) = 354224848179261915075.
+
 ")
 
-(str-test factorial-null "
+#_(str-test factorial-null "
 :- memoize_null fact/1.
 fact(0) := 1.
-fact(N) := fact(N-1)*N for N < 10.
+fact(N) := fact(N-1)*N for N < 4.
 
 :- run_agenda.
 
@@ -73,4 +76,89 @@ fact(N) := fact(N-1)*N for N < 10.
 assert fact(2) = 2.
 
 :- print_memo_table fact/1.
+")
+
+
+(str-test memoization-v2 "
+fact(N) := fact(N-1)*N for N > 0.
+fact(0) := 1.
+
+
+$memo(fact[N:$ground]) = \"unk\".
+
+assert fact(10) = 3628800.
+")
+
+;; check that we can have the aggregator not go back and compute negative numbers
+(str-test memoization-v2-t2 "
+fact(N) := fact(N-1)*N.
+fact(0) := 1.
+
+
+$memo(fact[N:$ground]) = \"unk\".
+
+print fact(100).
+
+%assert fact(10) = 3628800.
+assert fact(4) = 24.
+")
+
+(str-test memoization-v2-iter "
+f(X) := X*3 for range(0,10,X).
+
+$memo(f[X:$free]) = \"null\".
+
+g += f(X).
+print g.
+assert g = 135.
+")
+
+(str-test memoization-v2-big-fact "
+fact(N) := fact(N-1)*N.
+fact(0) := 1.
+
+$memo(fact[N:$ground]) = \"unk\".
+
+print fact(2000).  % there was a bug in the hash table which caused an extra factor of O(N) get in there.  that is hard to test in the
+")
+
+
+(str-test priority1 "
+fact(N) := fact(N-1)*N.
+fact(0) := 1.
+
+$memo(fact[N:$ground]) = \"unk\".
+
+$priority(fact[N]) = -N.
+
+print fact(20).
+")
+
+(str-test priority2 "
+% this is a bad order which causes the most amount of repropagation
+fib_bad(0) += 0.
+fib_bad(1) += 1.
+fib_bad(N) += fib_bad(N-1) for N > 1.
+fib_bad(N) += fib_bad(N-2) for N > 1.
+
+$memo(fib_bad[N:$ground]) = \"unk\".
+$priority(fib_bad[N]) = N.
+
+print fib_bad(10).
+assert fib_bad(10) == 55.
+")
+
+(str-test memo-change-program "
+fib(0) += 0.
+fib(1) += 1.
+fib(N) += fib(N-1) for N > 1.
+fib(N) += fib(N-2) for N > 1.
+
+$memo(fib[N:$ground]) = \"unk\".
+
+assert fib(10) = 55.
+
+fib(4) += 1.  % this causes the program's R-expr to change, so the memo table has to get rebuilt
+
+assert fib(10) = 68.
 ")

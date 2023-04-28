@@ -1,11 +1,16 @@
 LEIN := $(shell which lein 2>/dev/null > /dev/null && echo lein || { if [ ! -f .lein.sh ]; then curl -o .lein.sh https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein; chmod +x .lein.sh ; fi; echo './.lein.sh' ; })
 JAVA ?= java
 
-VERSION=0.1.0
+# this version should match the version in project.clj as that is what is going to be built by lein
+JVERSION:= 0.1.0
+VERSION= $(shell date '+%Y%m%d')
 
 SOURCE=$(wildcard src/*/*/*.clj) $(wildcard src/*/*/*.java)
-JAR_TARGET=target/dyna-$(VERSION)-SNAPSHOT-standalone.jar
-TARGET=dyna-standalone-$(VERSION)
+JAR_TARGET=target/dyna-$(JVERSION)-SNAPSHOT-standalone.jar
+JAR_WITH_PYTHON_INSTALLER=target/dyna-combined-$(JVERSION)-SNAPSHOT-standalone.jar
+TARGET=dyna-standalone-$(VERSION).run
+
+PYTHON_MODULE=python_module
 
 PARSER_TARGET=target/classes/dyna/dyna_grammar2Parser.class
 
@@ -14,7 +19,7 @@ PARSER_TARGET=target/classes/dyna/dyna_grammar2Parser.class
 all: $(TARGET)
 
 clean:
-	rm -rf target/ $(TARGET)
+	rm -rf target/ dyna-standalone-* python_build/
 
 test:
 	_JAVA_OPTIONS='-Ddyna.debug=false -Ddyna.trace_rexpr_construction=false -Xss8m' $(LEIN) test
@@ -37,20 +42,33 @@ clj-repl: clean
 # and we don't want to have mixed the old and new versions of this
 $(JAR_TARGET): $(SOURCE)
 	rm -rf target/
-#$(LEIN) do antlr, javac, compile, uberjar
 	$(LEIN) uberjar
 
 $(PARSER_TARGET): src/antlr/dyna/dyna_grammar2.g4
 	$(LEIN) do antlr, javac, compile
 
+$(JAR_WITH_PYTHON_INSTALLER): $(JAR_TARGET) $(wildcard dyna_python_module/**/*.py)
+	cp $(JAR_TARGET) $(JAR_WITH_PYTHON_INSTALLER)
+	find dyna_python_module/ -name '*.pyc' -delete
+	jar -uf $(JAR_WITH_PYTHON_INSTALLER) dyna_python_module
 
-$(TARGET): $(JAR_TARGET) standalone-header.sh
-	cat standalone-header.sh $(JAR_TARGET) > $(TARGET)
+$(TARGET): $(JAR_WITH_PYTHON_INSTALLER) standalone-header.sh
+	cat standalone-header.sh | sed "s/VERSION_STRING/$(shell git describe --always --long --dirty --abbrev=12 ; date)/" > $(TARGET)
+	cat $(JAR_WITH_PYTHON_INSTALLER) >> $(TARGET)
 	chmod +x $(TARGET)
 
-test_python: $(JAR_TARGET)
-	cd python_module && python test_wrapper.py
+test-python: $(JAR_TARGET)
+	python dyna_python_module/test/test_wrapper.py
 
+run-class-path:
+	@$(LEIN) classpath
+
+python-package: $(TARGET)
+	@echo 'run "pip install build" first'
+	rm -rf python_build/
+	cp -r dyna_python_module python_build/
+	cp $(TARGET) python_build/dyna/dyna.jar
+	cd python_build && python -m build
 
 # example to run a single test
 # reset && rlwrap -a lein test :only dyna.core-test/basic-aggregator2

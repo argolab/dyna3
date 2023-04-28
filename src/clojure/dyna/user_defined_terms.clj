@@ -4,7 +4,7 @@
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
-  (:require [dyna.assumptions :refer [invalidate! make-assumption make-invalid-assumption depend-on-assumption]])
+  (:require [dyna.assumptions :refer [invalidate! make-assumption make-invalid-assumption depend-on-assumption compute-with-assumption]])
   (:require [clojure.set :refer [subset? union]])
   (:import [dyna.rexpr user-call-rexpr]))
 
@@ -29,12 +29,15 @@
   {:def-assumption (make-assumption) ;; the assumption for the definition
    :optimized-rexpr-assumption (make-invalid-assumption) ;; if the optimized R-expr changes, this assumption needs to be invalidated
 
+   :has-with-key false ;; if $with_key wraps the results of the term, in which case $value needs to be added to it when accessing the result
+
    :is-not-memoized-null (make-assumption) ;; if there is a memo table which _must_ be read, then this assumption should be made invalid
    :is-memoized-null (make-invalid-assumption)
 
    :is-memoized-unk (make-invalid-assumption)
 
    :memoization-mode :none  ;; should either be :none, :null or :unk depending
+
 
    ;:optimized-assumption (make-assumption) ;; the assumption that there is no more optimized version of this term
    ;:memoized-assumption (make-assumption) ;; if there is some changed to the memoized value for this term
@@ -60,6 +63,12 @@
    ;; this will then have to recurse in finding the other thing
    :imported-from-another-file nil
 
+   ;; if something is a constraint, then we can eliminate multiple copies of the
+   ;; same rule call on an expression.  To determine if something is a
+   ;; constraint, this is going to depend on the internal expression.  if something is an aggregator, then it should be able to find that there are
+   :is-constraint (make-invalid-assumption)
+
+
    ;; would be nice if there was some kind of return value type information as
    ;; well.  This would have to be something which is cached information I
    ;; suppose that it could look at the various R-exprs which are defined for a
@@ -74,7 +83,9 @@
   (let [[old new](swap-vals! system/user-defined-terms
                              (fn [old]
                                (let [v (get old name nil)]
-                                 (assoc old name (function (if-not (nil? v) v (empty-user-defined-term name)))))))]
+                                 (assoc old name (let [r (function (if-not (nil? v) v (empty-user-defined-term name)))]
+                                                   (assert (not (nil? r)))
+                                                   r)))))]
     [(get old name) (get new name)]))
 
 (defn add-to-user-term [source-file dynabase name arity rexpr]
@@ -136,14 +147,29 @@
                 another-file (:imported-from-another-file u)]
             (if another-file
               (recur another-file)
-              u)))))))
+              (if (nil? u)
+                (do
+                  ;; printing a waring here does not work, as recursive functions will call themselves before they are fully defined
+                  ;;(dyna-warning (str "Did not find method " (:name name) "/" (:arity name) " from file " (:source-file name)))
+
+                  (get ;; if the term is not found, then we are going to create an
+                   ;; empty term.  This will have mult 0, but assumptions
+                   ;; which allow it to be overriden later
+                   (swap! system/user-defined-terms (fn [x]
+                                                      (if (contains? x name)
+                                                        x
+                                                        (assoc x name (empty-user-defined-term name)))))
+                   name))
+                u))))))))
+(intern 'dyna.rexpr-constructors 'get-user-term get-user-term)
 
 (defn- combine-user-rexprs-bodies [term-bodies]
   ;; this will combine multiple rexprs from a uesr's definition together
   ;; this should
   (context/bind-no-context ;; this is something that should be the same regardless of whatever nested context we are in
-   (if (= 1 (count term-bodies))
-     (:rexpr (first term-bodies))
+   (case (count term-bodies)
+     0 (make-multiplicity 0)
+     1 (:rexpr (first term-bodies))
      (let [out-vars (try (into #{} (map #(:result (:rexpr %))
                                         term-bodies))
                          (catch AssertionError e (debug-repl "assert error")))
@@ -179,6 +205,16 @@
                       (map #(remap-variables-handle-hidden % {(first out-vars) intermediate-var}) (vals groupped-aggs))))
          (first (vals groupped-aggs)))))))
 
+(defn optimize-user-term [term-rep]
+  (let [unopt-rexpr (combine-user-rexprs-bodies term-rep)
+        [assumpt optimized] (binding [system/user-recursion-limit (min system/user-recursion-limit 5)]
+                              (compute-with-assumption
+                               (simplify-top unopt-rexpr)))])
+  (debug-repl "optimize user term")
+  (???)
+  #_(assoc term-rep
+         ))
+
 (defn user-rexpr-combined-no-memo [term-rep]
   ;; this should check if there is some optimized
   (assert (nil? (:optimized-rexpr term-rep)))
@@ -188,7 +224,15 @@
 (defn user-rexpr-combined [term-rep]
   (if (:builtin-def term-rep)
     (:rexpr term-rep)
-    (case (:memoization-mode term-rep)
+    (if (:memoized-rexpr term-rep)
+      (do
+        (depend-on-assumption (:memoized-rexpr-assumption term-rep))
+        (:memoized-rexpr term-rep))
+      (do
+        (depend-on-assumption (:is-not-memoized-null term-rep))
+        (user-rexpr-combined-no-memo term-rep)))
+
+    #_(case (:memoization-mode term-rep)
       :none (do
               (depend-on-assumption (:is-not-memoized-null term-rep)) ;; memization of unk is fine, but null requires that we redo all of the computation
               (user-rexpr-combined-no-memo term-rep))
@@ -197,55 +241,102 @@
              (:memoized-rexpr term-rep))
       :null (do
               (depend-on-assumption (:is-memoized-null term-rep))
-              (:memoized-rexpr term-rep)))))
+              (:memoized-rexpr term-rep))
+      :complex (do
+                 (when (:unk (:memoiztaion-modes term-rep))
+                   (depend-on-assumption (:is-memoized-unk term-rep)))
+                 (if (:null (:memoization-modes term-rep))
+                   (depend-on-assumption (:is-memoized-null term-rep))
+                   (depend-on-assumption (:is-not-memoized-null term-rep)))
+                 (:memoized-rexpr term-rep)))))
+
+
 
 (def-rewrite
   :match (user-call (:unchecked name) (:unchecked var-map) (#(< % @system/user-recursion-limit) call-depth) (:unchecked parent-call-arguments))
   (let [ut (get-user-term name)]
-    (when (nil? ut)
+    #_(when (nil? ut)
       (debug-repl "nil user term")
       (dyna-warning (str "Did not find method " (:name name) "/" (:arity name) " from file " (:source-file name))))
+    (when (and (empty? (:rexprs ut)) (= :none (:memoization-mode ut)))
+      (dyna-warning (str "Did not find method " (:name name) "/" (:arity name) " from file " (:source-file name))))
 
-    (when ut  ;; this should really be a warning or something in the case that it can't be found. Though we might also need to create some assumption that nothing is defined...
-      (let [;;rexprs (:rexprs ut)
-            ;;rexpr (combine-user-rexprs-bodies rexprs)
-            rexpr (user-rexpr-combined ut)
-            rewrite-user-call-depth (fn rucd [rexpr]
-                                      (dyna-assert (rexpr? rexpr))
-                                      (if (is-user-call? rexpr)
-                                        (let [[lname lvar-map lcall-depth] (get-arguments rexpr)
-                                              new-call (make-user-call lname lvar-map (+ call-depth lcall-depth 1)
-                                                                       #{})]
-                                          (when-not (rexpr? new-call)
-                                            (debug-repl "call fail rexpr"))
-                                          ;(debug-repl)
-                                          new-call)
-                                        (let [ret (rewrite-rexpr-children rexpr rucd)]
-                                          (when-not (rexpr? ret) (debug-repl "call fail rexpr"))
-                                          ret)))
-            variable-map-rr (context/bind-no-context
-                             (remap-variables-handle-hidden (rewrite-user-call-depth rexpr)
-                                                            var-map))]
+    (let [existing-parent-args (get parent-call-arguments name #{})
+          local-map (into {} (for [[k v] var-map]
+                               [k (get-value v)]))
+          amapped (into #{} (for [s existing-parent-args]
+                              (into {} (for [[k v] s]
+                                         [k (get-value v)]))))]
+      ;; this should really be a warning or something in the case that it can't be found. Though we might also need to create some assumption that nothing is defined...
+      (when (and ut (not (contains? amapped local-map)))
+        (let [new-parent-args (assoc parent-call-arguments name (conj (get parent-call-arguments name #{})
+                                                                      var-map))
+              rexpr (user-rexpr-combined ut)
+              rewrite-user-call-depth (fn rucd [rexpr]
+                                        (dyna-assert (rexpr? rexpr))
+                                        (if (is-user-call? rexpr)
+                                          (let [[lname lvar-map lcall-depth] (get-arguments rexpr)
+                                                new-call (make-user-call lname
+                                                                         lvar-map
+                                                                         (+ call-depth lcall-depth 1)
+                                                                         new-parent-args)]
+                                            (when-not (rexpr? new-call)
+                                              (debug-repl "call fail rexpr"))
+                                            new-call)
+                                          (let [ret (rewrite-rexpr-children rexpr rucd)]
+                                            (when-not (rexpr? ret) (debug-repl "call fail rexpr"))
+                                            ret)))
+              [new-var-map with-key-var] (if (and (:has-with-key ut) (not (contains? var-map (make-variable "$do_not_use_with_key"))))
+                                           (let [wkv (make-variable (gensym 'with-key-var))]
+                                             [(assoc var-map (make-variable (str "$" (:arity name))) wkv) wkv])
+                                            [var-map nil])
+              variable-map-rr (context/bind-no-context
+                               (remap-variables-handle-hidden (rewrite-user-call-depth rexpr)
+                                                              new-var-map))]
 
-        (depend-on-assumption (:def-assumption ut))  ;; this should depend on the representational assumption or something.  Like there can be a composit R-expr, but getting optimized does not have to invalidate everything, so there can be a "soft" depend or something
-        (dyna-debug (let [exp-var (exposed-variables variable-map-rr)]
-                      (when-not (subset? exp-var (set (vals var-map)))
-                        (debug-repl "should not happen, extra exposed variables"))))
-        variable-map-rr))))
+          (depend-on-assumption (:def-assumption ut)) ;; this should depend on the representational assumption or something.  Like there can be a composit R-expr, but getting optimized does not have to invalidate everything, so there can be a "soft" depend or something
+          (dyna-debug (let [exp-var (exposed-variables variable-map-rr)]
+                        (when-not (subset? exp-var (set (vals new-var-map)))
+                          (debug-repl "should not happen, extra exposed variables"))))
+          (if-not (nil? with-key-var)
+            (let [result-var (get var-map (make-variable (str "$" (:arity name))))
+                  value-call (make-user-call {:name "$value" :arity 1}
+                                             {(make-variable "$0") with-key-var
+                                              (make-variable "$1") result-var}
+                                             0
+                                             {})
+                  ret (make-proj with-key-var
+                                 (make-conjunct [variable-map-rr
+                                                 value-call]))]
+              ret)
+            variable-map-rr))))))
 
 
 ;; get a user defined function and turn it into something which can be called
 ;; not 100% sure that this should be included in this file.  Should maybe also
 ;; allow for there to be a textual representation that can be called into.  But
 ;; that is going to have to go through the parser first.
-(defn get-user-defined-function [term-name arity]
+#_(defn get-user-defined-function [term-name arity]
   (fn [& args]
     (assert (= arity (count args)))
     (let [result-var (make-variable 'Result)
-          rexpr (make-user-call term-name (merge (into {} (for [[k v] (zipseq (range) args)]
-                                                            [(make-variable (str "$" k)) (make-constant v)]))
-                                                 {(make-variable (str "$" arity)) result-var}))
+          rexpr (make-user-call term-name
+                                (merge (into {} (for [[k v] (zipseq (range) args)]
+                                                  [(make-variable (str "$" k)) (make-constant v)]))
+                                       {(make-variable (str "$" arity)) result-var})
+                                0
+                                {})
           ctx (context/make-empty-context rexpr)
           result-rexpr (context/bind-context-raw ctx (simplify-fully rexpr))]
       (assert (= (make-multiplicity 1) (result-rexpr)))
       (ctx-get-value ctx result-var))))
+
+
+(swap! debug-useful-variables assoc
+       'get-term (fn []
+                   (fn
+                     ([name] (first (filter #(= (str name) (:name (:term-name %))) (vals @system/user-defined-terms))))
+                     ([name arity] (first (filter #(and
+                                                    (= (str name) (:name (:term-name %)))
+                                                    (= arity (:arity (:term-name %))))
+                                                  (vals @system/user-defined-terms)))))))

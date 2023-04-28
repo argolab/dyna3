@@ -1,6 +1,8 @@
 (ns dyna.macro-rexpr-generator
   (:require [dyna.rexpr :refer :all]))
 
+(assert false)
+
 ;; genreate macro R-exprs which are compositions of many smaller R-exprs this
 ;; could be used in the case that an expression appears mutliple times when
 ;; stored in a memo table.  and also can be a prerequisit for when we are going

@@ -50,36 +50,38 @@ public final class DynaTerm implements ILookup {
 
     public String toString() {
         StringBuilder b = new StringBuilder();
-        if(include_filename_in_print && from_file != null) {
-            b.append(from_file.toString());
-            b.append("/");
-        }
         if(".".equals(name) && arguments != null && arity() == 2) {
-            Object list_as_vec = list_to_vec();
-            if(list_as_vec != null) {
+            Object[] arr = list_to_array();
+            if(arr != null) {
                 b.append("[");
-                int cnt = ((java.lang.Number)clojure_count.invoke(list_as_vec)).intValue();
-                for(int i = 0; i < cnt; i++) {
+                for(int i = 0; i < arr.length; i++) {
                     if(i != 0) b.append(", ");
-                    b.append(clojure_nth.invoke(list_as_vec, i).toString());
+                    b.append(arr[i].toString());
                 }
                 b.append("]");
                 return b.toString();
             }
         }
-        b.append(name);
-        if(arguments != null) {
-            int count = arity();
-            if(count > 0) {
-                b.append("(");
-                for(int i = 0; i < count; i++) {
-                    if(i != 0) b.append(", ");
-                    Object o = get(i);
-                    b.append(o == null ? "null" : o.toString());
-                }
-                b.append(")");
-            }
+        if(include_filename_in_print && from_file != null) {
+            b.append(from_file.toString());
+            b.append("/");
         }
+        final int count = arity();
+        if(name.charAt(0) == '$' && count == 0) {
+            // $nil (and $null) is a term which would cause it to print as $nil[], but we also have it defined as a term which just returns its value
+            return name;
+        }
+        // there is no way to tell the difference between $nil and [] as those are the same expression.
+        // I suppose that we could make the end of a list represented as something else?  Like use `[]` as the name of the list term or something
+        // in which case it would
+        b.append(name);
+        b.append("["); // going to use the square bracket to print these as that is the syntax for writing this without &x(1,2,3) == x[1,2,3]
+        for(int i = 0; i < count; i++) {
+            if(i != 0) b.append(", ");
+            Object o = get(i);
+            b.append(o == null ? "null" : o.toString());
+        }
+        b.append("]");
         return b.toString();
     }
 
@@ -139,12 +141,14 @@ public final class DynaTerm implements ILookup {
     }
 
     public Object valAt(Object key) {
-        if("name".equals(key)) return name;
+        if(name_keyword == key) return name;
+        if(arity_keyword == key) return arity();
         return clojure_nth.invoke(arguments, key);
     }
 
     public Object valAt(Object key, Object notfound) {
-        if("name".equals(key)) return name;
+        if(name_keyword == key) return name;
+        if(arity_keyword == key) return arity();
         return clojure_nth.invoke(arguments, key, notfound);
     }
 
@@ -158,9 +162,13 @@ public final class DynaTerm implements ILookup {
     static private final IFn clojure_concat;
     static private final IFn clojure_list;
 
+    static private final Object name_keyword;
+    static private final Object arity_keyword;
+
     static public final DynaTerm null_term;
 
     static {
+        // this should get the underlying value, otherwise there is still some indirect through the variable for these values
         clojure_seqable = Clojure.var("clojure.core", "seqable?");
         clojure_hash = Clojure.var("clojure.core", "hash");
         clojure_count = Clojure.var("clojure.core", "count");
@@ -170,6 +178,9 @@ public final class DynaTerm implements ILookup {
         clojure_gensym = Clojure.var("clojure.core", "gensym");
         clojure_concat = Clojure.var("clojure.core", "concat");
         clojure_list = Clojure.var("clojure.core", "list");
+
+        name_keyword = Clojure.var("clojure.core", "keyword").invoke("name");
+        arity_keyword = Clojure.var("clojure.core", "keyword").invoke("arity");
 
         null_term = new DynaTerm();//"$nil", new Object[]{});
     }
@@ -193,12 +204,12 @@ public final class DynaTerm implements ILookup {
         final int cnt = ((java.lang.Number)clojure_count.invoke(arr)).intValue();
         for(int i = cnt - 1; i >= 0; i--) {
             ret = DynaTerm.create(".", clojure_nth.invoke(arr, i), ret);
+            ret.hashCode(); // make sure the cache is set before it creates something that is very deep
         }
         return ret;
     }
 
-    public Object list_to_vec() {
-        // this has to construct a clojure vector from a dyna linked list object
+    public Object[] list_to_array() {
         int count = 0;
         DynaTerm s = this;
         while(".".equals(s.name)) {
@@ -214,6 +225,13 @@ public final class DynaTerm implements ILookup {
             tmp[i] = s.get(0);
             s = (DynaTerm)s.get(1);
         }
+        return tmp;
+    }
+
+    public Object list_to_vec() {
+        // this has to construct a clojure vector from a dyna linked list object
+        Object[] tmp = list_to_array();
+        if(tmp == null) return null;
         // vec is going to alias java arrays?  So this should just keep a reference to the above array rather than copying it?
         return clojure_vec.invoke(tmp);
     }

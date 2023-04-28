@@ -13,7 +13,7 @@ public interface IDynaAgendaWork extends Runnable {
             public int compare(IDynaAgendaWork o1, IDynaAgendaWork o2) {
                 float a = o1.priority(), b = o2.priority();
                 if(a == b) return 0;
-                if(a < b) return -1;
+                if(a > b) return -1;
                 else return 1;
             }
             public boolean equals(IDynaAgendaWork o1, IDynaAgendaWork o2) { return o1 == o2; }

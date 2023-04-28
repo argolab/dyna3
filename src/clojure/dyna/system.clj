@@ -45,15 +45,15 @@
 ;; expressions which are defined by the user
 (def ^:dynamic user-defined-terms (atom {}))
 
-;; a map of which terms are exported from a
+;; a map of which terms are exported from a file
 (def ^:dynamic user-exported-terms (atom {}))
 
+;; a set of java.net.URL objects of which files have been imported into the runnint system
 (def ^:dynamic imported-files (atom #{}))
 
-;; the agenda of pending work.  When an assumption is invalidated, this will want to push the work onto this object
-;; this should probably be a queue type rather than just a set, also some priority function will want to be constructed
-;; for this also
-(def ^:dynamic work-agenda (DynaAgenda.)) ;; this should really be a priority quieue instead of just a set
+;; the agenda is a priority queue of the work as well as a hash set which tracks what is already pushed.
+;; Parallel processing could work by just processing work from the agenda in parallel.  If there is multiple
+(def ^:dynamic work-agenda (DynaAgenda.))
 
 ;; how many times a user-defined function can be expanded before we stop expanding
 (def ^:dynamic user-recursion-limit (atom default-recursion-limit))  ;; this does not need to really be an atom?  it can just hold the value directly
@@ -61,7 +61,7 @@
 ;; if a query is made, where it should get printed to
 (def ^:dynamic query-output println)
 
-;; in the parser expressions like `$0$`, `$1`, .... can be replaced with an R-expr.  This is done via this handler
+;; in the parser expressions like `$0`, `$1`, .... can be replaced with an R-expr.  This is done via this handler
 ;; this is used in the case of using the system like a database
 (def ^:dynamic parser-external-value (fn [index]
                                        (throw (RuntimeException. "External value handler not set"))))
@@ -82,6 +82,13 @@
    :query-output println
    :system-is-inited (atom false)})
 
+#_(defn copy-dyna-system [system]
+  ;; this should check that the agenda is empty? Or will have that we need to copy the agenda
+  (merge (into {} (for [[k v] system]
+                    (if (instance? clojure.lang.Atom v)
+                      [k (atom @v)]
+                      [k v])))
+         {:work-agenda (DynaAgenda. ^DynaAgenda (:work-agenda system))}))
 
 
 (defmacro run-under-system [system & args]
@@ -99,16 +106,17 @@
        ~@args)))
 
 (defn push-agenda-work [work]
-  (.push_work ^DynaAgenda work-agenda
-              (if (instance? IDynaAgendaWork work)
-                work
-                (reify IDynaAgendaWork
-                  (run [this] (work))
-                  ;; there should be some fixed priority configured for which
-                  ;; internal tasks run at.  Then some stuff could run before it
-                  ;; when it wants, but the internal stuff should probably be
-                  ;; let to run first?
-                  (priority [this] 1e16)))))
+  (if (instance? IDynaAgendaWork work)
+    #_(if (= (.priority ^IDynaAgendaWork work) ##Inf)
+      (.run ^IDynaAgendaWork work))
+    (.push_work ^DynaAgenda work-agenda work) ;; if something is inf, it should just get popped first, there is no need to run it during the pushing stage, which might end up in weird orderings of the tasks
+    (.push_work ^DynaAgenda work-agenda (reify IDynaAgendaWork
+                                          (run [this] (work))
+                                          ;; there should be some fixed priority configured for which
+                                          ;; internal tasks run at.  Then some stuff could run before it
+                                          ;; when it wants, but the internal stuff should probably be
+                                          ;; let to run first?
+                                          (priority [this] 1e16)))))
 
 (defn run-agenda []
   (.process_agenda ^DynaAgenda work-agenda))
@@ -116,3 +124,14 @@
 (defn maybe-run-agenda []
   (when *auto-run-agenda-before-query*
     (run-agenda)))
+
+(defmacro converge-agenda [& body]
+  ;; rerun the query in the case that there is work on the agenda
+  ;; this can invoke the expression multiple times until it is fully done
+  `(let [f# (fn [] ~@body)]
+     (loop []
+       (run-agenda)
+       (let [r# (f#)]
+         (if (.is_done ^DynaAgenda work-agenda)
+           r#
+           (recur))))))

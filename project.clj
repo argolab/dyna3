@@ -8,7 +8,7 @@
                  ;[org.clojure/tools.macro "0.1.5"]
                  [aprint "0.1.3"]  ;; for formatted printing
                  ;[clj-python/libpython-clj "2.00-beta-22"]
-                 [com.clojure-goes-fast/clj-java-decompiler "0.3.0"] ;; for debugging what the generated code looks like
+                 ;[com.clojure-goes-fast/clj-java-decompiler "0.3.0"] ;; for debugging what the generated code looks like
                  [org.antlr/antlr4-runtime "4.7.2"] ;; for the front end parser
                  [org.jline/jline "3.20.0"]  ;; for the front end repl
                  [robert/hooke "1.3.0"]
@@ -16,9 +16,10 @@
                                         ;[datalevin "0.6.6"]
                                         ;[io.replikativ/datahike "0.5.1504"]
 
-                 [org.clojure/tools.analyzer.jvm "0.7.3"]
+                 ;[org.clojure/tools.analyzer.jvm "0.7.3"]
                  [instaparse "1.4.12"]
 
+                 [org.clojure/data.csv "1.0.1"]
                  ;[reply "0.5.1"]
                  ]
   :repl-options {:init-ns dyna.core}
@@ -38,7 +39,11 @@
   :antlr-dest-dir "target/gen-src"
 
   :profiles {:uberjar {:main dyna.DynaMain
-                       ;:aot [dyna.core] ;; this makes it start faster but run slower....
+                       ;; clojure only requires java 8, and we shouldn't need any of the "newer" features ourselves also
+                       ;; so this should make this work with any version released after 1.8 (march 2014)
+                       :javac-options ["-source" "1.8" "-target" "1.8"]
+
+                                        ;:aot [dyna.core] ;; this makes it start faster but run slower....
                        }}
   :main dyna.core
 

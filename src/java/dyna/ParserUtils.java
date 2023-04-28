@@ -6,7 +6,7 @@ import clojure.lang.ILookup;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Static method for use by parser
+ * Static method used by parser
  */
 class ParserUtils {
 
@@ -15,15 +15,15 @@ class ParserUtils {
     static private final IFn clojure_gensym;
     static private final IFn clojure_check_aggregator_defined;
 
-
     static {
         clojure_gensym = Clojure.var("clojure.core", "gensym");
-        clojure_check_aggregator_defined = Clojure.var("dyna.aggregator", "is-aggregator-defined?");
+        clojure_check_aggregator_defined = Clojure.var("dyna.rexpr-aggregators", "is-aggregator-defined?");
     }
 
     public static boolean aggregator_defined(String name) {
-        return "max=".equals(name) || "min=".equals(name) || "prob+=".equals(name);
-        // Object result = clojure_check_aggregator_defined.invoke(name);
+        Object result = clojure_check_aggregator_defined.invoke(name);
+        return (Boolean)result;
+        //return "max=".equals(name) || "min=".equals(name) || "prob+=".equals(name);
         // return true;
     }
 

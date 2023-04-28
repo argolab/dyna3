@@ -1,8 +1,8 @@
 (ns dyna.programs-test
+  (:require [dyna.core])
   (:require [dyna.simple-test :refer [str-test]])
   (:require [clojure.test :refer :all])
   (:require [clojure.java.io :refer [as-file as-relative-path]])
-  (:require [dyna.core])
   (:require [dyna.system :refer [make-new-dyna-system run-under-system]])
   (:require [dyna.ast-to-rexpr :refer [import-file-url]])
   ;(:require [dyna.utils :refer [debug-repl]])
@@ -32,6 +32,8 @@
 ;;          (catch DynaUserAssert e#
 ;;            (is false)
 ;;            (throw e#))))))
+
+(deftest dummy) ;; for intellij
 
 (defmacro make-file-test [fname]
   `(deftest ~(symbol fname)
