@@ -76,7 +76,7 @@
 (deftype AgendaReprocessWork [^IMemoContainer memo-container term ^double priority]
   IDynaAgendaWork
   (run [this]
-    (println "running agenda work" term)
+    (println "running agenda work" term) ;; this should get controlled by some flag, so a user can see if they screwed up their priority functions/memoization
     (memo-refresh-value-for-key memo-container term))
   (priority [this]
     priority)

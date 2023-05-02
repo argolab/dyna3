@@ -171,7 +171,7 @@
 (def-rewrite
   :match {:rexpr (aggregator-op-inner (:any incoming) (:any-list projected-vars) (:rexpr R))
           :check (not (or (is-constant? incoming) (some #{incoming} (exposed-variables R))))}
-  :is-check-rewrite true
+  :is-debug-check-rewrite true
   :run-at :construction
   (do
     (debug-repl "bad agg op inner")

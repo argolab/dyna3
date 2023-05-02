@@ -378,7 +378,7 @@
 (def-rewrite
   :match (disjunct-op (:any-list var-list) rexprs)
   :run-at :construction
-  :is-check-rewrite true
+  :is-debug-check-rewrite true
   (let [var-set (into #{} var-list)]
     (when-not (every? (fn [[var-bindings x]] (if (and (rexpr? x)
                                                       ;; the variables which are exposed should be a subset of what is not ground

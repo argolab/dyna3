@@ -1060,7 +1060,7 @@
             rewrite-func-var (gensym 'rewrite-func)
             run-in-jit (:run-in-jit kw-args true) ;; indicate that this can be run inside of the JIT compiled, code
             jit-compiler-rewrite (:jit-compiler-rewrite kw-args false)]
-        (when (and (not (and (:is-check-rewrite kw-args) (not system/check-rexpr-arguments)))
+        (when (and (not (and (:is-debug-check-rewrite kw-args) (not system/check-rexpr-arguments)))
                    (not (and (:is-debug-rewrite kw-args) (not system/debug-statements))))
           (let [ret `(let [~rewrite-func-var ~rewriter-function]
                        (locking dyna.rexpr-constructors/modification-lock
@@ -1644,7 +1644,7 @@
 (def-rewrite
   :match (proj (:free A) (:rexpr R))
   :run-at :construction
-  :is-check-rewrite true
+  :is-debug-check-rewrite true
   (do
     (when-not (contains? (exposed-variables R) A)
       (debug-repl "proj var not in body")

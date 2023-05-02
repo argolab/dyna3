@@ -48,7 +48,7 @@ help() {
     echo "     --csv-import [term name] [file name]"
     echo "     --csv-export [term name] [file name]"
     echo "     --time                Time the different parts of the runtime report when the program exits"
-    echo "     --fast-math           Do not check the math for overflow"
+    echo "     --fast-math           Do not check the math operations for numerical overflow"
     echo "     --random-seed=42      Set a random seed"
     echo "     --version             Print out version"
     echo ""
@@ -85,7 +85,7 @@ fi
 
 dyna_args=""
 import_args=""
-jvm_args=""
+jvm_args="-Xss16m "
 memory="4G"
 perf_mode="safe"
 debug_mode="false"
@@ -159,7 +159,7 @@ while [ $# -gt 0 ]; do
         --random-seed*)
             seed="${1#*=}"
             [[ $seed =~ ^[0-9]+$ ]] || {
-                echo "--random-seed was unexpected, expected something like: --random-seed=42"
+                echo "--random-seed expected a number, expected something like: --random-seed=42"
                 exit 1
             }
             jvm_args+="-Ddyna.random_seed=$seed "
@@ -218,8 +218,6 @@ fi
 
 jvm_args="-Xmx$memory -Dclojure.compiler.direct-linking=true -Ddyna.print_rewrites_performed=false -Ddyna.debug=$debug_mode -Ddyna.trace_rexpr_construction=$debug_mode -Ddyna.debug_repl=$debug_mode -Ddyna.check_rexprs_args=$debug_mode $jvm_args"
 # -XX:-StackTraceInThrowable  # disable stack traces entirely
-
-jvm_args+=" -Ddyna.check_rexprs_args=true"  # TODO: some bug when this is false...
 
 exec $DYNA_JVM $jvm_args "-Ddyna.runtimejar=$self" -jar "$self" $import_args $dyna_args
 exit 1  # should not get to this line

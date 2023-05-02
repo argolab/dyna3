@@ -59,7 +59,7 @@ class DynaMain {
         // then we can call this from other places which might serve as entry points to the runtime
         synchronized (loading_lock) {
             is_loading = true;
-            if("true".equals(System.getProperty("dyna.unchecked_math"))) {
+            if(Boolean.getBoolean("dyna.unchecked_math")) {
                 ((Var)Clojure.var("clojure.core", "*unchecked-math*")).bindRoot(true);
             }
 
