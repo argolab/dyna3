@@ -91,7 +91,7 @@
 
 
 
-(deftype MemoContainerGenericRexpr []
+#_(deftype MemoContainerGenericRexpr []
   ;; this is a generic version of the memo table.  It uses R-exprs to control
   ;; when it will access some value, as well as for the internal representation.
   ;; The internal representations are treated as "opaque" which means that they
@@ -157,7 +157,8 @@
           (system/push-agenda-work (AgendaReprocessWork. this kk prio))))))
   (memo-rewrite-access [this variables variable-values]
     (let [control-arg (conj (vec (map #(if (nil? %) meta-free-dummy-free-value %) variable-values)) nil)
-          control-setting (memo-controller control-arg)]
+          control-setting (try (memo-controller control-arg)
+                               (catch Exception err :defer))]
       (cond (= control-setting :fallthrough)
             (let [vm (zipmap argument-variables variables)]
               (remap-variables orig-rexpr vm))
@@ -212,7 +213,8 @@
             )))
   (memo-get-iterator [this variables variable-values]
     (let [control-arg (conj (vec (map #(if (nil? %) meta-free-dummy-free-value %) variable-values)) nil)
-          control-setting (memo-controller control-arg)]
+          control-setting (try (memo-controller control-arg)
+                               (catch Exception err :defer))]
       #_(when-not (= :defer control-setting)
         (debug-repl "get iter"))
       (cond (= control-setting :fallthrough) #{} ;; in the fallthrough case this
@@ -674,16 +676,20 @@
                                (make-variable "$1") (make-variable 'Result)}
                               0 {})]
     (fn [signature]
-      (let [ctx (context/make-empty-context rexpr)
-            res (context/bind-context-raw ctx
-                                          (set-value! (make-variable 'Input) (DynaTerm. (:name call-name) signature))
-                                          (simplify-fully-no-guess rexpr))
-            val (get-value-in-context (make-variable 'Result) ctx)]
-        (if-not (and (= (make-multiplicity 1) res) (number? val))
-          (do
-            (dyna-warning (str "$priority did not return a numerical priority for " (:name call-name) "/" (:arity call-name)))
-            unset-priority-default-work)
-          val)))))
+      (try
+        (let [ctx (context/make-empty-context rexpr)
+              res (context/bind-context-raw ctx
+                                            (set-value! (make-variable 'Input) (DynaTerm. (:name call-name)
+                                                                                          (vec (map #(if (nil? %) meta-free-dummy-free-value %) signature))))
+                                            (simplify-fully-no-guess rexpr))
+              val (get-value-in-context (make-variable 'Result) ctx)]
+          (if-not (and (= (make-multiplicity 1) res) (number? val))
+            (do
+              (dyna-warning (str "$priority did not return a numerical priority for " (:name call-name) "/" (:arity call-name)))
+              unset-priority-default-work)
+            val))
+        (catch Exception err
+          unset-priority-default-work)))))
 
 (defn- convert-user-term-to-have-memos [rexpr mapf]
   ;; this takes an R-expr and adds one or more memo tables to the R-expr such that it will support memoization
