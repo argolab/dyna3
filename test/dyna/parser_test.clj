@@ -46,3 +46,9 @@ f = 123.
 
 w = f.a.b.c(123,456).e.w(9).
 "))
+
+(deftest incomplete
+  (try
+    (do (parse-string "fib(0) += 0" :fragment-allowed false)
+        (is false))
+    (catch RuntimeException err (is true))))

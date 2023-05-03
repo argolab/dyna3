@@ -8,4 +8,6 @@ public class DynaUserError extends RuntimeException {
 
     public DynaUserError() {}
     public DynaUserError(String msg) { super(msg); }
+    public DynaUserError(String msg, Exception cause) { super(msg, cause); }
+
 }

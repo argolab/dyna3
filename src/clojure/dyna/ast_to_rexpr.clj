@@ -15,7 +15,7 @@
   (:require [aprint.core :refer [aprint]])
   (:import [org.antlr.v4.runtime CharStream CharStreams UnbufferedTokenStream])
   (:import [org.antlr.v4.runtime.misc Interval])
-  (:import [dyna DynaTerm DynaUserAssert ParserUnbufferedInputStream DynaUserError])
+  (:import [dyna DynaTerm DynaUserAssert ParserUnbufferedInputStream DynaUserError DynaSyntaxError])
   (:import [java.net URL])
   (:import [java.nio.file Paths])
   (:import [java.io FileNotFoundException]))
@@ -999,7 +999,7 @@ This is most likely not what you want."))))
                              ret)
 
             ["$syntax_error" 1] (let [[message] (.arguments ast)]
-                                  (throw (DynaUserError. (str "Syntax Error: " message))))
+                                  (throw (DynaSyntaxError. (str "Syntax Error: " message))))
 
             ;; call without any qualification on it.  Just generate the user term
             (let [arity (.arity ast)
@@ -1075,15 +1075,15 @@ This is most likely not what you want."))))
     ;;   (debug-repl)
     ;;   (println "report error" exception))
     (reportFailedPredicate [recognizer exception]
-                                        ;(debug-repl)
-      (when print-parser-errors
-        (println "==========> report failed predicate" exception)))
+      (if print-parser-errors
+        (println "==========> report failed predicate" exception)
+        (throw (DynaSyntaxError.))))
     (reportInputMismatch [recognizer exception]
-                                        ;(debug-repl)
-      (when print-parser-errors
-        (println "==========> report input missmatch" exception)))
+      (if print-parser-errors
+        (println "==========> report input missmatch" exception)
+        (throw (DynaSyntaxError.))))
     (reportNoViableAlternative [recognizer exception]
-      (when print-parser-errors
+      (if print-parser-errors
         (let [token (.getStartToken exception)
               offending (.getOffendingToken exception)
               stream (.getInputStream token)
@@ -1098,20 +1098,23 @@ This is most likely not what you want."))))
           (println (.getText stream (Interval. ^int (.getStartIndex token) ^int (.getStopIndex offending))))
           (println "--------------------")
           (println "possible missing tokens: " (join " OR " continuations))
-          (println "===================================================================================================="))))
+          (println "===================================================================================================="))
+        (throw (DynaSyntaxError.))))
     (reportUnwantedToken [recognizer]
-      (when print-parser-errors
-        (println "=============> unwanted token")))
+      (if print-parser-errors
+        (println "=============> unwanted token")
+        (throw (DynaSyntaxError.))))
     (reportMissingToken [recognizer]
-      (when print-parser-errors
-        (proxy-super reportMissingToken recognizer)))))
+      (if print-parser-errors
+        (proxy-super reportMissingToken recognizer)
+        (throw (DynaSyntaxError.))))))
 
 (def lexer-error-handler
   (proxy [org.antlr.v4.runtime.ConsoleErrorListener] []
     (syntaxError [recognizer offendingSymbol line charPositionInLine msg e]
       (when print-parser-errors
         (proxy-super syntaxError recognizer offendingSymbol line charPositionInLine msg e))
-      (throw (RuntimeException. "syntax error" e)))))
+      (throw (DynaSyntaxError. "syntax error" e)))))
 
 
 
@@ -1133,7 +1136,7 @@ This is most likely not what you want."))))
               (.program parser))
           e (.getNumberOfSyntaxErrors parser)]
       (if (not= e 0)
-        (throw (RuntimeException. "syntax error")) ;; this would be nice if
+        (throw (DynaSyntaxError.)) ;; this would be nice if
         ;; there was more of an error
         ;; message, but this should
         ;; get printed out by the
