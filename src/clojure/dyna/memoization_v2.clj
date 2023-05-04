@@ -689,7 +689,9 @@
               unset-priority-default-work)
             val))
         (catch Exception err
-          unset-priority-default-work)))))
+          (do
+            (dyna-warning (str "$priority did not return a numerical priority for " (:name call-name) "/" (:arity call-name)))
+            unset-priority-default-work))))))
 
 (defn- convert-user-term-to-have-memos [rexpr mapf]
   ;; this takes an R-expr and adds one or more memo tables to the R-expr such that it will support memoization

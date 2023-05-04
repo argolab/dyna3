@@ -899,6 +899,7 @@
 
 ;; if this value is used, then $free will return true.  This should make it easier to run this against
 ;; though it would only match against $free rather than having it actually match against an unbound value
+;; this might be better if is changed to some dummy type rather than having this represented as a DynaTerm, so it is forced to be checked by $free
 (def meta-free-dummy-free-value (DynaTerm. "$free_meta_representing_unbound_value" []))
 
 (def-rewrite

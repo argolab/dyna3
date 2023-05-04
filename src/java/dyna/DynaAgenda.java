@@ -20,7 +20,7 @@ public class DynaAgenda {
         }
     }
 
-    public void process_agenda() {
+    public void process_agenda() throws InterruptedException {
         if(queue.isEmpty())
             return;
         System.err.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Running agenda~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
@@ -28,6 +28,8 @@ public class DynaAgenda {
         long agenda_start_processing = System.currentTimeMillis();
         try {
             while(true) {
+                if(Thread.interrupted())
+                    throw new InterruptedException();
                 //System.out.println("Running work");
                 IDynaAgendaWork work;
                 synchronized (this) {
@@ -51,6 +53,12 @@ public class DynaAgenda {
 
     public boolean is_done() {
         return queue.isEmpty();
+    }
+
+    public synchronized void clear_agenda() {
+        // to be only called from the REPL by the user.  This will potentially cause things to break
+        queue.clear();
+        queued_work.clear();
     }
 
     public final boolean print_progress = Boolean.parseBoolean(System.getProperty("dyna.print_agenda_progress", "false"));
