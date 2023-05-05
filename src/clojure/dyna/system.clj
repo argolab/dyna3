@@ -28,6 +28,8 @@
 
 (def ^:dynamic *use-optimized-rexprs* true)
 
+(def ^:dynamic *generate-new-jit-rewrites* false)
+
 ;; terms which are included by the system.  These will get automattically
 ;; replaced once the objects are created in the first place these should not be
 ;; recursive statements or anything

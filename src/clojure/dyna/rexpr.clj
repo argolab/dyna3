@@ -16,6 +16,7 @@
          simplify-inference
          simplify-fast)
 (def ^{:redef true} simplify-construct identity) ;; should get rid of this and have the constructors just called directly based off the type of object which is created
+(def ^{:redef true} simplify-jit-create-rewrites identity) ;; will be redefined in rexpr_jit.dyna when the jit is enabled.  This will create new rewrites for any JIT type inside of the R-expr and apply those rewrites (if they were newly created)
 (declare find-iterators)
 
 
@@ -1228,9 +1229,18 @@
         (recur nrif)
         nrif))))
 
+(defn simplify-fully-with-jit [rexpr]
+  (loop [cr rexpr]
+    (let [nr (simplify-fully-no-guess cr)
+          ;; simplify-jit will create new rewrites and perform those rewrites when applicable
+          jr (simplify-jit-create-rewrites nr)]
+      (if (= nr jr)
+        jr
+        (recur jr)))))
+
 (defn simplify-fully [rexpr]
   (loop [cri rexpr]
-    (let [nri (simplify-fully-no-guess cri)
+    (let [nri (simplify-fully-with-jit cri)
           nri2 (binding [*memoization-make-guesses-handler* (fn [memo-table variable variable-values]
                                                               ;; it is possible that there are multiple *different* kinds of guesses which could be made
                                                               ;; this function could be replaced with something that is smarter and chooses between multiple different options for what to guess about

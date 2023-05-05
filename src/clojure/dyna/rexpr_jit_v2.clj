@@ -1,11 +1,14 @@
-(ns dyna.rexpr-jit
+(ns dyna.rexpr-jit-v2
   (:require [dyna.utils :refer :all])
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.base-protocols :refer :all])
   (:require [dyna.rexpr-disjunction]) ;; make sure is loaded first
   (:require [dyna.rexpr-aggregators-optimized])
   (:require [dyna.rexpr-constructors :refer [is-disjunct-op?]])
-  (:import [dyna.rexpr proj-rexpr]))
+  (:require [dyna.system :as system])
+  (:require [dyna.context :as context])
+  (:import [dyna.rexpr proj-rexpr])
+  (:import [dyna RexprValue Rexpr]))
 
 ;; this is going to want to cache the R-expr when there are no arguments which are "variables"
 ;; so something like multiplicy can be just a constant value
@@ -113,11 +116,8 @@
 (defn- convert-to-primitive-rexpr [rexpr]
   (cond
     (is-jit-placeholder? rexpr) rexpr  ;; this is already a placeholder, so this just gets returned
-
     (or (is-disjunct? rexpr) (is-disjunct-op? rexpr)) (???) ;; not handling disjuncts in the JIT atm.  These can be a disjunct over other compiled units
-
     (is-user-call? rexpr) (???) ;; this is not going to be supported.  A user call can return "arbitrary code" which is not something that the JIT should ever handle
-
     :else (rewrite-rexpr-children-no-simp (primitive-rexpr rexpr) convert-to-primitive-rexpr)))
 
 (defn- get-placeholder-rexprs [rexpr]
@@ -125,13 +125,13 @@
         z (if (is-jit-placeholder? c) [c] (get-placeholder-rexprs c))]
     z))
 
-(defn get-rexpr-arg-map [rexpr]
+#_(defn get-rexpr-arg-map [rexpr]
   (let [rtype (rexpr-name rexpr)
         signature (get @rexpr-containers-signature rtype)
         args (get-arguments rexpr)]
     (zipmap (map cdar signature) args)))
 
-(defn get-variables-and-path [rexpr]
+(defn- get-variables-and-path [rexpr]
   (cond (is-proj? rexpr) (let [body-path (get-variables-and-path (:body rexpr))
                                var (:var rexpr)
                                child-uses (some #(contains? (exposed-variables %) var)
@@ -166,7 +166,7 @@
                                                                 (???)))))]
           (into {} (apply concat (vals litems))))))
 
-(defn get-variables-values-letexpr [root-var vars-path]
+(defn- get-variables-values-letexpr [root-var vars-path]
   ;; construct the vector arguments of a let expression with something which will be able to return all of the different values
   (let [so-far (transient {})
         gen-code (transient [])
@@ -187,7 +187,7 @@
         ]
     [(into {} vm) (persistent! gen-code)]))
 
-(defn synthize-rexpr-cljcode [rexpr]
+(defn- synthize-rexpr-cljcode [rexpr]
   ;; this should just generate the required clojure code to convert the rexpr
   ;; (argument) into a single synthic R-expr.  This is not going to evaluate the code and do the conversion
 
@@ -216,7 +216,7 @@
                           ;; such that we can get the fields on the origional
                           ;; expression?  But in the case that there
                           (~'rexpr-jit-info ~'[this]
-                                          (get @dyna.rexpr-jit/rexprs-types-constructed (quote ~new-rexpr-name))))
+                                          (get @dyna.rexpr-jit-v2/rexprs-types-constructed (quote ~new-rexpr-name))))
 
         conversion-function-expr `(fn [~root-rexpr]
                                    (let ~var-gen-code ;; this is going to get access to all of the
@@ -269,10 +269,12 @@
     (let [convert-fn (if @is-new
                        (do (binding [*ns* dummy-namespace]
                              (eval `(do
-                                      (ns dyna.rexpr-jit)
+                                      (ns dyna.rexpr-jit-v2)
                                       ~(:make-rexpr-type rtype))))
                            (let [f (binding [*ns* dummy-namespace]
-                                     (eval (:conversion-function-expr rtype)))]
+                                     (eval `(do
+                                              (ns dyna.rexpr-jit-v2)
+                                              ~(:conversion-function-expr rtype))))]
                              (swap! rexpr-convert-to-jit-functions assoc rexpr f)
                              f))
                        (get @rexpr-convert-to-jit-functions rexpr))]
@@ -297,7 +299,7 @@
 ;;      ret))
 ;;   ([rexpr matcher] (check-matches rexpr matcher {})))
 
-(defn- compute-match
+#_(defn- compute-match
   ([rexpr matcher matched-variables]
    (let [rname (rexpr-name rexpr)
          args (get-arguments rexpr)]
@@ -346,7 +348,7 @@
          r (compute-match rexpr matcher m)]
      [r (persistent! m)])))
 
-(defn- compute-rewrite-ranking [rewrite]
+#_(defn- compute-rewrite-ranking [rewrite]
   ;; bigger numbers will be perfable rewrites.  Rewrites which directly compute
   ;; a value should be prefered over something which checks for 0 for example.
   (cond (:is-assignment-rewrite (:kw-args rewrite) false) 100
@@ -359,7 +361,7 @@
                       (and (seqable? x) (some r x))))
         (get-arguments rexpr)))
 
-(defn- make-rexpr-type-in-jit [construct-func]
+#_(defn- make-rexpr-type-in-jit [construct-func]
   (fn [& args]
     ;; this will allow us to intercept which functions are called when it is
     ;; doing the construction
@@ -462,7 +464,7 @@
                 (debug-repl "??? transform form")
                 form)))
 
-(defn- simplify-jit-generic [rexpr simplify-method]
+#_(defn- simplify-jit-generic [rexpr simplify-method]
   ;; this is called when there is no rewrite for a specific type already defined
   ;; this is going to have to look through the possible rewrites which are defined for a given type
   (let [simplify-mode (:simplify-mode *jit-current-compilation-unit*)
@@ -545,7 +547,7 @@
     ;(debug-repl "generic simplify")
     ret))
 
-(defn simplify-jit [rexpr]
+#_(defn simplify-jit [rexpr]
   (debug-binding
    [*current-simplify-stack* (conj *current-simplify-stack* rexpr)
     *current-simplify-running* simplify-jit]
@@ -560,14 +562,14 @@
      ret
      )))
 
-(defn- simplify-jit-top [rexpr]
+#_(defn- simplify-jit-top [rexpr]
   (loop [r rexpr]
     (let [ret (simplify-jit r)]
       (if (not= r ret)
         (recur ret)
         ret))))
 
-(defn synthize-rewrite-cljcode [rexpr & vargs]
+#_(defn synthize-rewrite-cljcode [rexpr & vargs]
   ;; I suppose that the R-expr should be the representation of
   (let [jinfo (rexpr-jit-info rexpr)
         kwargs (apply hash-map vargs)
@@ -672,7 +674,7 @@
             ;(debug-repl "rrs")
             full-rewrite))))))
 
-(defn synthize-rewrite-rule [rexpr & vargs]
+#_(defn synthize-rewrite-rule [rexpr & vargs]
   ;; Given that there are lots of expressions which are combined together, this
   ;; could find that there are multiple modes which could be constructed as a
   ;; result.  If something would find that there is osme expression which would
@@ -682,7 +684,7 @@
       (let [rewrite-code (apply synthize-rewrite-cljcode rexpr vargs)]
         (when rewrite-code
           (binding [*ns* dummy-namespace]
-            (eval `(do (ns dyna.rexpr-jit)
+            (eval `(do (ns dyna.rexpr-jit-v2)
                        ~rewrite-code))))))))
 
 
@@ -713,3 +715,44 @@
             ;(debug-repl "projqq")
             nr)
           (make-proj A ret))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def ^{:dynamic true :private true} *has-jit-rexpr-in-expression* (volatile! false))
+
+(defn simplify-jit-create-rewrites-fast [rexpr]
+  ;; create rewrites which correspond with simplify-fast
+  ;; these rewrites can only look at the bindings to variable values
+  ;; just like normal simplify, we are going to have that
+  (debug-binding
+   [*current-simplify-stack* (conj *current-simplify-stack* rexpr)
+    *current-simplify-running* simplify-jit-create-rewrites-fast]
+   (let [ret ((get @rexpr-rewrites-func (type rexpr) simplify-identity) rexpr simplify-jit-create-rewrites-fast)]
+     (if (or (nil? ret) (= ret rexpr))
+       (let [jinfo (rexpr-jit-info rexpr)]
+         (if-not (nil? jinfo)
+           (do
+             (vreset! *has-jit-rexpr-in-expression* true) ;; record that we found something that could be generated, even if we don't end up doing the generation
+             (debug-repl "maybe jit"))
+           ;; then nothing has changed, so we are going to check if this is a JIT type and then attempt to generate a new rewrite for it
+           rexpr))
+       (do
+         (dyna-assert (rexpr? ret))
+         ret)))))
+
+(defn simplify-jit-create-rewrites-inference [rexpr]
+  ;; create rewrites which can run during the interface state.  If there is nothing
+  rexpr)
+
+(intern 'dyna.rexpr 'simplify-jit-create-rewrites
+        (fn [rexpr]
+            ;; this is called from the main rewrite function which will create new rewrites inside of the R-expr
+          (if-not system/*generate-new-jit-rewrites*
+            rexpr
+            (do
+              (assert (context/has-context))
+              (binding [*has-jit-rexpr-in-expression* (volatile! false)]
+                (let [fr (simplify-jit-create-rewrites-fast rexpr)]
+                  (if (and (= fr rexpr) @*has-jit-rexpr-in-expression*)
+                    (simplify-jit-create-rewrites-inference)
+                    fr)))))))

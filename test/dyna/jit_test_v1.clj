@@ -1,40 +1,14 @@
-(ns dyna.jit-test
+(comment
+  (ns dyna.jit-test
     (:require [clojure.test :refer :all])
     (:require [dyna.core])
-    (:require [dyna.rexpr :refer [simplify simplify-fully]])
+    (:require [dyna.rexpr :refer [simplify]])
     (:require [dyna.utils :refer :all])
     (:require [dyna.rexpr-constructors :refer :all])
-    (:require [dyna.rexpr-jit-v2 :refer :all])
+    (:require [dyna.rexpr-jit :refer :all])
     (:require [dyna.base-protocols :refer :all])
-    (:require [dyna.context :as context])
-    (:require [dyna.system :refer [*generate-new-jit-rewrites*]]))
+    (:require [dyna.context :as context]))
 
-(deftest basic-jit1
-  (let [rexpr (make-conjunct [(make-add (make-variable 'a) (make-variable 'b) (make-variable 'c))
-                              (make-times (make-variable 'c) (make-constant 7) (make-variable 'd))])
-        [synth-rexpr _](synthize-rexpr rexpr)]
-    (is (not (nil? synth-rexpr)))
-    (is (-> synth-rexpr type .getSimpleName (.startsWith "jit-rexpr")))))
-
-
-(deftest basic-jit2
-  ;; (a + b)*7 = d
-  (let [rexpr (make-conjunct [(make-add (make-variable 'a) (make-variable 'b) (make-variable 'c))
-                              (make-times (make-variable 'c) (make-constant 7) (make-variable 'd))])
-        [synth-rexpr _](synthize-rexpr rexpr)]
-    (is (-> synth-rexpr type .getSimpleName (.startsWith "jit-rexpr")))
-    (let [ctx (context/make-empty-context synth-rexpr)]
-      (ctx-set-value! ctx (make-variable 'a) 3)
-      (ctx-set-value! ctx (make-variable 'b) 2)
-      (binding [*generate-new-jit-rewrites* false]
-        (let [res (context/bind-context-raw ctx (simplify-fully synth-rexpr))]
-          (is (identical? res synth-rexpr))))
-      (binding [*generate-new-jit-rewrites* true]
-        (let [res (context/bind-context-raw ctx (simplify-fully synth-rexpr))]
-          (is (= (make-multiplicity 1) res))
-          (is (= 35 (ctx-get-value ctx (make-variable 'd)))))))))
-
-(comment
 
   #_(deftest basic-jit
       (let [rexpr (make-unify (make-variable 'a) (make-variable 'b))
@@ -42,7 +16,11 @@
                                         ; (debug-repl)
         ))
 
-
+  (deftest basic-jit2
+    (let [rexpr (make-conjunct [(make-add (make-variable 'a) (make-variable 'b) (make-variable 'c))
+                                (make-times (make-variable 'c) (make-constant 7) (make-variable 'd))])
+          [synth-rexpr _](synthize-rexpr rexpr)]
+      (is (not (nil? synth-rexpr)))))
 
   (deftest basic-jit3
     (let [rexpr (make-proj (make-variable 'c)  ;; d = (a + 1)*7
