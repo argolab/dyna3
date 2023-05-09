@@ -655,7 +655,8 @@
 
 
 (def-base-rexpr disjunct [:rexpr-list args]
-  (is-non-empty-rexpr? [this] (some is-non-empty-rexpr? args)))
+  (is-non-empty-rexpr? [this] (some is-non-empty-rexpr? args))
+  (rexpr-jit-info [this] {:jittable false}))
 
 (defn deep-equals-list-compare [a b]
   (if (and (empty? a) (empty? b))
@@ -762,13 +763,14 @@
                           (cons [#{} this]
                                 (when body-is-conjunctive
                                   (for [[proj-out rexpr] (all-conjunctive-rexprs body)]
-                                    [(conj proj-out incoming) rexpr])))))
+                                    [(conj proj-out incoming) rexpr]))))
+  (rexpr-jit-info [this] {:jittable false}))
 
 (def-base-rexpr if [:rexpr cond
                     :rexpr true-branch
                     :rexpr false-branch]
-
-  (is-constraint? [this] (and (is-constant? true-branch) (is-constant? false-branch))))
+  (is-constraint? [this] (and (is-constant? true-branch) (is-constant? false-branch)))
+  (rexpr-jit-info [this] {:jittable false}))
 
 
 ;; (defn set-variable [var value]
@@ -795,7 +797,8 @@
                                  s (conj stack name)]
                              (if (nil? ut)
                                0 ;; then there is no term defined for this, so it is just nothing
-                               (apply min (map #(check-rexpr-basecases % s) (:rexprs ut))))))))
+                               (apply min (map #(check-rexpr-basecases % s) (:rexprs ut)))))))
+  (rexpr-jit-info [this] {:jittable false}))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -1867,7 +1870,8 @@
 
 
 (def-base-rexpr delayed-rexpr-renamed [:var-map vmap
-                                       :unchecked deferred-rexpr])
+                                       :unchecked deferred-rexpr]
+  (rexpr-jit-info [this] {:jittable false}))
 
 (def-rewrite
   :match (delayed-rexpr-renamed (:unchecked vmap) (:unchecked deferred-rexpr))

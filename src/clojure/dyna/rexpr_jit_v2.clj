@@ -281,6 +281,29 @@
       ;; return the converted rexpr as well as the type information for this expression
       [(convert-fn rexpr) rtype])))
 
+
+
+(defn convert-to-jitted-rexpr [rexpr]
+  ;; there are some R-expr types which we do not want to JIT, so those are going to be things that we want to replace with a placeholder in the expression
+  (let [pl (volatile! {})
+        rp (fn rr [rexpr]
+             (let [jinfo (rexpr-jit-info rexpr)]
+               (if-not (:jittable jinfo true)
+                 (let [id (count @pl)
+                       exposed (exposed-variables rexpr)]
+                   ;; should the nested expressions also become JITted?  In the
+                   ;; case of an aggregator, we might want to pass through the
+                   ;; aggregation to handle its children?  Though those will be
+                   ;; their own independent compilation units
+                   (make-jit-placeholder id exposed (find-iterators rexpr)))
+                 (rewrite-rexpr-children-no-simp rexpr rr))))
+        nr (rp rexpr)
+        ]
+
+    )
+
+  )
+
 (defn- get-matchers-for-value [val]
   (into [] (map first (filter (fn [[name func]] (func val)) @rexpr-matchers))))
 
@@ -718,6 +741,14 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+
+(defn- maybe-create-rewrite-fast [context rexpr jinfo]
+  (debug-repl "maybe create rewrite")
+  (???)
+  rexpr)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (def ^{:dynamic true :private true} *has-jit-rexpr-in-expression* (volatile! false))
 
 (defn simplify-jit-create-rewrites-fast [rexpr]
@@ -733,7 +764,7 @@
          (if-not (nil? jinfo)
            (do
              (vreset! *has-jit-rexpr-in-expression* true) ;; record that we found something that could be generated, even if we don't end up doing the generation
-             (debug-repl "maybe jit"))
+             (maybe-create-rewrite-fast (context/get-context) rexpr jinfo))
            ;; then nothing has changed, so we are going to check if this is a JIT type and then attempt to generate a new rewrite for it
            rexpr))
        (do

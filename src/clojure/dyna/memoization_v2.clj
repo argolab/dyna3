@@ -20,7 +20,7 @@
                                                       *aggregator-op-should-eager-run-iterators*]])
   (:require [dyna.rexpr-disjunction :refer [trie-diterator-instance]])
   (:require [clojure.set :refer [union difference]])
-  (:import [dyna DynaUserError IDynaAgendaWork DynaTerm InvalidAssumption UnificationFailure DIterable])
+  (:import [dyna DynaUserError IDynaAgendaWork DynaTerm InvalidAssumption UnificationFailure DIterable DynaAgenda])
   (:import [dyna.assumptions Watcher Assumption])
   (:import [dyna.prefix_trie PrefixTrie])
   (:import [clojure.lang IFn]))
@@ -53,17 +53,22 @@
 ;; name.  This is an extra step of indirection which we can "defer."  This will
 ;; have that the placeholder will be able to get rewritten as needed
 (def-base-rexpr memoization-placeholder [:unchecked name
-                                         :var-map args-map])
+                                         :var-map args-map]
+  (rexpr-jit-info [this] {:jittable false}))
 ;; if this should expand the memoization-placeholder or just leave it as is.
 (def ^{:private true :dynamic true} *expand-memoization-placeholder* true)
 
 (def-base-rexpr memoized-access [:unchecked memoization-container
-                                 :var-list variable-mapping])
+                                 :var-list variable-mapping]
+  (rexpr-jit-info [this] {:jittable false}))
 (def ^{:private true :dynamic true} *lookup-memoized-values* true)
 
 
 (def ^{:private true :dynamic true} *memoization-forward-placeholder-bindings* nil)
-(def-base-rexpr memoization-filled-in-values-placeholder [:var-list variable-mapping])
+(def-base-rexpr memoization-filled-in-values-placeholder [:var-list variable-mapping]
+  (rexpr-jit-info [this]
+                  (println "TODO: make the fill in values placeholder able to be jitted, this should be reading values from the context or something")
+                  {:jittable false}))
 
 (def-rewrite
   :match {:rexpr (memoization-filled-in-values-placeholder (:unchecked var-mapping))
@@ -76,7 +81,8 @@
 (deftype AgendaReprocessWork [^IMemoContainer memo-container term ^double priority]
   IDynaAgendaWork
   (run [this]
-    (println "running agenda work" term) ;; this should get controlled by some flag, so a user can see if they screwed up their priority functions/memoization
+    (when DynaAgenda/print_agenda_work
+      (println "running agenda work" term)) ;; this should get controlled by some flag, so a user can see if they screwed up their priority functions/memoization
     (memo-refresh-value-for-key memo-container term))
   (priority [this]
     priority)

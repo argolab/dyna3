@@ -88,7 +88,8 @@
 
   (exposed-variables [this] (filter is-variable?
                                     (into #{out-variable ast}
-                                          (vals variable-name-mapping)))))
+                                          (vals variable-name-mapping))))
+  (rexpr-jit-info [this] {:jittable false}))
 
 
 (declare import-file-url)
