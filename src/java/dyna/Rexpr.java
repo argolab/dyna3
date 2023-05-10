@@ -37,7 +37,7 @@ public interface Rexpr {
 
     boolean is_constraint_QMARK_();
 
-    String rexpr_name();
+    Object rexpr_name();
 
     boolean is_empty_rexpr_QMARK_();
 

@@ -12,9 +12,11 @@
 (deftest basic-jit1
   (let [rexpr (make-conjunct [(make-add (make-variable 'a) (make-variable 'b) (make-variable 'c))
                               (make-times (make-variable 'c) (make-constant 7) (make-variable 'd))])
-        [synth-rexpr _](synthize-rexpr rexpr)]
+        [synth-rexpr _](synthize-rexpr rexpr)
+        prim-r (primitive-rexpr synth-rexpr)]
     (is (not (nil? synth-rexpr)))
-    (is (-> synth-rexpr type .getSimpleName (.startsWith "jit-rexpr")))))
+    (is (-> synth-rexpr type .getSimpleName (.startsWith "jit-rexpr")))
+    (is (= prim-r rexpr))))
 
 
 (deftest basic-jit2
