@@ -384,7 +384,8 @@
 
        (defn ~(symbol (str "make-no-simp-" name))
          {:rexpr-constructor (quote ~name)
-          :rexpr-constructor-type ~(symbol rname)}
+          :rexpr-constructor-type ~(symbol rname)
+          :no-simp-rexpr-constructor true}
          ~(vec (map cdar vargroup))
          ~@(when system/check-rexpr-arguments
              (map (fn [x] `(if (not (~(resolve (symbol (str "check-argument-" (symbol (car x))))) ~(cdar x)))

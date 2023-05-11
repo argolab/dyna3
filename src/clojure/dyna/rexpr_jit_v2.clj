@@ -755,6 +755,8 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defmacro ^:private bad-gen [] (throw (RuntimeException. "BAD code generation.  Attempted to use some code in the generated output which should have never been used")))
+
 (def ^{:private true :dynamic true} *jit-generating-rewrite-for-rexpr* nil
   ;; set to the root R-expr which we are creating a rewrite for
   )
@@ -791,6 +793,13 @@
      :rexpr-type nil ;; the R-expr which is represented by this expression
      :r-value nil ;; some instance of RexprValue (such as a variable or a constant).  I suppose that this might also be a constant
      })
+
+  (comment
+    {:type (one of :rexpr, :rexpr-value, {})  ;; :rexpr means it is an R-expr type, rexpr-values means it is something like constant or variable.  Value is a value like `5`
+           ;; can also be {:seq-of :rexpr} or whatever the type is
+     :constant-value nil  ;; the value of this expression
+     :cljcode-expr  nil   ;; code which can be placed in the generated program to return this value
+     })
   (cond (symbol? expr) (let [local-symbol (get *locally-bound-variables* expr)]
                          (if-not (nil? local-symbol)
                             (do (debug-repl "ll")
@@ -823,7 +832,11 @@
           ;(debug-repl)
           (cond
             (contains? m :dyna-jit-inline) ((:dyna-jit-inline m) expr)
-            (contains? m :rexpr-constructor) (let []
+            (contains? m :rexpr-constructor) (let [args-vals (vec (map jit-evaluate-cljform (rest expr)))
+                                                   rr (apply (var-get var) (map :rexpr-type args-vals))
+                                                   ]
+                                               (binding [*rewrites-allowed-to-run* #{:construction}]
+                                                 )
                                                (debug-repl "evaluate r-expr constructor")
                                                (???))
             (:macro m) (jit-evaluate-cljform (macroexpand expr))
@@ -931,7 +944,7 @@
 
 
 (defn- simplify-jit-internal-rexpr-generic-rewrites [rexpr]
-  (let [rewrites (get @rexpr-rewrites-source (type rexpr) [])
+  (let [rewrites (get @rexpr-rewrites-source (type (:rexpr-type rexpr)) [])
         matching-rewrites (into [] (remove nil? (map (fn [rr]
                                                        (let [run-at (:run-at rr [:standard])]
                                                          (when (some *rewrites-allowed-to-run* run-at)
@@ -940,14 +953,13 @@
                                                                (when success
                                                                  (assoc rr :matching-vars matching)))))))
                                                      rewrites)))]
-
-    ))
+    (debug-repl "todo")) )
 
 (defn- simplify-jit-internal-rexpr [rexpr]
   (debug-binding
    [*current-simplify-stack* (conj *current-simplify-stack* rexpr)
     *current-simplify-running* simplify-jit-internal-rexpr]
-   (let [jit-specific-rewrites (get @rexpr-rewrites-during-jit-compilation (type rexpr) [])
+   (let [jit-specific-rewrites (get @rexpr-rewrites-during-jit-compilation (type (:rexpr-type rexpr)) [])
          jit-res (first (remove nil? (for [f jit-specific-rewrites]
                                        (f rexpr simplify-jit-internal-rexpr))))
          ret (if (nil? jit-res)
@@ -986,7 +998,15 @@
         *current-simplify-running* nil]
        (let [prim-r (primitive-rexpr rexpr)
              zz (debug-repl "pr0")
-             result (simplify-jit-internal-rexpr-loop prim-r)]
+             prim-r-jit-val {:rexpr-type prim-r
+                             :value-expr '(do
+                                            ;; the variable rexpr corresponds with the current matched R-expr.  If we were to call primitive-rexpr on it
+                                            ;; then we should get back something which is equivalent to it
+                                            ;(primitive-rexpr rexpr)
+                                            ;;(???) ;; this expression should never be evaluated directly
+                                            (bad-gen))
+                             }
+             result (simplify-jit-internal-rexpr-loop prim-r-jit-val)]
 
          (debug-repl "pr1")
          ))
