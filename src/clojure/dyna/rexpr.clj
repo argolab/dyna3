@@ -132,6 +132,7 @@
                                 r))
          Rexpr
          ~'(primitive-rexpr [this] this) ;; this is a primitive expression so we are going to just always return ourselves
+         ;~'(primitive-rexpr-jit-placeholder [this] (primitive-rexpr this))
          ~'(is-constraint? [this] false) ;; if this is going to return a multiplicity of at most 1
          (~'rexpr-name ~'[this] (quote ~(symbol name))) ;; the name for this type of R-expr
          (~'get-variables ~'[this]

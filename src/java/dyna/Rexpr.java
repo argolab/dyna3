@@ -9,6 +9,8 @@ import clojure.lang.IFn;
 public interface Rexpr {
     Rexpr primitive_rexpr();
 
+    //Rexpr primitive_rexpr_jit_placeholder();
+
     Object get_variables();
 
     Object get_children();
