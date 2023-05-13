@@ -177,7 +177,7 @@ public final class ClojureHashMap extends AFn implements IPersistentMap,
         int k = hash(key), v = hash(value);
         for(int i = 0; i < 8; i++) {
             int g = hashPairCodes[(v >> (i*4) & 15) + i*16];
-            k = Integer.rotateLeft(k, g & 15) * (1 + (g&255)) ^ (g >> 8);
+            k = Integer.rotateLeft(k, g & 15) * (1 + ((g>>4)&255)) ^ (g >> 12);
         }
         return k;
     }

@@ -849,6 +849,7 @@
 
 (defmacro def-rewrite-matcher
   ([name var body mapper-func]
+   (assert (= 1 (count var))) ;; I think this is always true already...
    `(do (swap! rexpr-matchers assoc (quote ~name)
                (fn ~var ~body))
         (swap! rexpr-matchers-mappers (quote ~name)  ;; I don't think that this is used atm...

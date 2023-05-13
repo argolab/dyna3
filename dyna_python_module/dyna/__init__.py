@@ -12,9 +12,18 @@ from . import java_configure_jvm
 class Dyna:
 
     def __init__(self):
+        self.__system_v = None
+
+    @property
+    def __system(self):
+        v = self.__system_v
+        if v is not None:
+            return v
         # this will reference the python class which wrap the java class.  This will block until the dyna runtime is loaded
         from .java_wrapper import DynaInstance
-        self.__system = DynaInstance()
+        v = DynaInstance()
+        self.__system_v = v
+        return v
 
     def define_function(self, name=None, arity=None):
         """

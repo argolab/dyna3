@@ -74,13 +74,14 @@
 
 
 (deftest unordered-vector-test
-  (let [v (ClojureUnorderedVector. [1 2 3 4])
-        v2 (ClojureUnorderedVector. [3 4 2 1])
+  (let [v (ClojureUnorderedVector/create [1 2 3 4])
+        v2 (ClojureUnorderedVector/create [3 4 2 1])
         v3 (into ClojureUnorderedVector/EMPTY (range 100))]
     (assert (= 3 (get v 2)))
     (assert (= v v2))
     (assert (= 100 (count v3)))
-    (print (hash v3))))
+    (assert (= 1655435961 (hash v3))) ;; the hash code should be stable
+    ))
 
 (deftest new-hash-map-test
   (let [v ClojureHashMap/EMPTY
@@ -94,7 +95,7 @@
     (assert (= 8 (get v3 7)))
     (assert (= 21 (count v4)))
     (assert (every? #(some #{[% (+ 1 %)]} v4) (range 20)))
-    (assert (= -784201506 (hash v3))) ;; the hash should be stable
+    (assert (= 1932828094 (hash v3))) ;; the hash should be stable
     (assert (= v3 v5))
     (assert (= v3 v6))
     (assert (= v5 v3))

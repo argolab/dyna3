@@ -848,6 +848,10 @@
                                     :invoke (fn [form]
                                               (jit-evaluate-cljform (macroexpand form)))}
 
+                                   (contains? @evaluate-symbol-meta expr)
+                                   {:type :function
+                                    :invoke (:dyna-jit-inline (get @evaluate-symbol-meta expr))}
+
                                    :else
                                    (debug-repl "symbol ??")))))
         (vector? expr) (let [vs (map jit-evaluate-cljform expr)
@@ -962,8 +966,9 @@
 
 (swap! evaluate-symbol-meta assoc 'let*
        {:dyna-jit-inline (fn [form]
-                           (let [[bindings & body] form
+                           (let [[_ bindings & body] form
                                  [rbind rbody] ((fn rec [varassigns body]
+                                                  (debug-repl)
                                                   (if (empty? varassigns)
                                                     (let [acts (map jit-evaluate-cljform body)]
                                                       (if (empty? acts)
@@ -1005,6 +1010,12 @@
                            (debug-repl "attempting to evaluate function creation") ;; this is not going to work that well.... I suppose that this could create the function and handle renamed variables....
                            (???))})
 
+(def ^:private matchers-override
+  {:rexpr (fn [arg]
+            (rexpr? arg))
+   :rexpr-list (fn [arg]
+                 (every? rexpr? arg))})
+
 (defn- compute-match
   ([rexpr matcher1 matched-variables]
    (let [matcher (if (map? matcher1)
@@ -1037,16 +1048,33 @@
                                           (symbol? (cdar match-expr)))
                                      (let [match-requires (car match-expr)
                                            match-requires-meta (get @rexpr-matchers-meta match-requires)
+                                           match-success (if (contains? matchers-override match-requires)
+                                                           ((matchers-override match-requires) arg)
+                                                           (binding [*locally-bound-variables* (assoc *locally-bound-variables*
+                                                                                                      (first (:matcher-args match-requires-meta))
+                                                                                                      (get *locally-bound-variables* (cdar match-expr)))]
+                                                             (jit-evaluate-cljform (:matcher-body match-requires-meta))))]
+                                       (debug-repl "match with conditions")
+                                       (???)
+                                       false
+                                       )
+                                     #_(let [match-requires (car match-expr)
                                            zzzz (debug-repl "z")
-
-                                           ;; match-success (jit-evaluate-cljform-let
-                                           ;;                [(first (:matcher-args match-requires-meta)) (cdar match-expr)]
-                                           ;;                (:matcher-body match-requires-meta))
+                                           match-success (binding [*locally-bound-variables* (assoc *locally-bound-variables*
+                                                                                                    (first (:matcher-args match-requires-meta)) (get *locally-bound-variables* (cdar match-expr)))]
+                                                           (jit-evaluate-cljform (:matcher-body match-requires-meta))
+                                             ;; match-success (jit-evaluate-cljform-let
+                                             ;;                [(first (:matcher-args match-requires-meta)) (cdar match-expr)]
+                                             ;;                (:matcher-body match-requires-meta))
+                                             )
                                            ]
 
                                        (debug-repl "match with conditions")
                                        (???)
-                                       false)))))]
+                                       false)
+
+                                     :else (???) ;; TODO: handle other matching cases in the program
+                                     ))))]
          (when rexpr-match-success
            ;; TODO: need to handle these other checks when checking if this matches
            (assert (not (contains? matcher :check)))
@@ -1081,7 +1109,8 @@
     *current-simplify-running* simplify-jit-internal-rexpr]
    (let [jit-specific-rewrites (get @rexpr-rewrites-during-jit-compilation (type (:rexpr-type rexpr)) [])
          jit-res (first (remove nil? (for [f jit-specific-rewrites]
-                                       (f rexpr simplify-jit-internal-rexpr))))
+                                       (f (:rexpr-type rexpr) simplify-jit-internal-rexpr))))
+         vv (debug-repl "vv")
          ret (if (nil? jit-res)
                (simplify-jit-internal-rexpr-generic-rewrites rexpr)
                jit-res)]
