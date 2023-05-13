@@ -583,6 +583,13 @@
 (def-user-term "string" 1 (make-is-string v0 v1))
 
 (comment
+  ;; the unify-with-return is basically the same as ==.  Which returns a boolean
+  ;; value if two expressions can unify together if the unify-with-return was
+  ;; the last expression in a term, then it might end up not checking the
+  ;; unification properly so we actually want to /always/ unify when using
+  ;; $unify, and then have that == can be the conditional version which
+  ;; sometimes returns false
+
   (def-base-rexpr unify-with-return [:var A :var B :var Return]
     (is-constraint? [this] true))
 
@@ -658,7 +665,7 @@
 (def-user-term "map" 1 (make-is-map v0 v1))
 ;(def-user-term "$map_merge" 2) ;; take two maps and combine them together
 
-;; there should be some way to isnert a value into a map overriding, but this will have that
+;; there should be some way to insert a value into a map overriding, but this will have that
 ;(def-user-term "$map_insert" )
 
 (def-rewrite
@@ -705,7 +712,7 @@
   (let [pm (get-value Map)
         kl (get-value KeyList)]
     (if-not (and (instance? DynaMap pm)
-                   (instance? DynaTerm kl))
+                 (instance? DynaTerm kl))
       false
       (let [l (.list_to_vec ^DynaTerm kl)]
         (if (nil? l) false
@@ -814,7 +821,10 @@
        :match {:rexpr (~type1 ~'(:free Var) ~'(:any Result))
                :context (~type2 ~'(:free Var) (is-true? ~'_))}
        :run-at :inference
-       (make-unify ~'Result (make-constant false)))
+       :assigns-variable ~'Result
+       false ;; the value getting assigned to the result
+       ;(make-unify ~'Result (make-constant false))
+       )
      (def-rewrite
        :match {:rexpr (~type2 ~'(:free Var) ~'(:any Result))
                :context (~type1 ~'(:free Var) (is-true? ~'_))}

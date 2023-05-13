@@ -1034,6 +1034,39 @@
                             (make-multiplicity 0)))
     :else body))
 
+(defmacro def-rewrite-direct [functor-name runs-at function]
+  ;; use like (def-rewrite-direct foo [:standard] (fn [rexpr simplify] ...))
+  ;; The function is always called, so it needs to do its own pattern matching
+  ;; internally
+  (let [rewrite-func-var (gensym 'rewrite-func)]
+    `(let [~rewrite-func-var ~function]
+       (locking dyna.rexpr-constructors/modification-lock
+         ~@(for [run-at (if (seqable? runs-at) runs-at [runs-at])]
+             `(let [[rewrite-collection# rewrite-collection-func#] ;; the collection-func is NOT set here...... it is setup in def-base-rexpr
+                    ~(case run-at
+                       :standard `[(var-get #'rexpr-rewrites) (var-get #'rexpr-rewrites-func)]
+                       :construction `[(var-get #'rexpr-rewrites-construct) (var-get #'rexpr-rewrites-construct-func)]
+                       :inference `[(var-get #'rexpr-rewrites-inference) (var-get #'rexpr-rewrites-inference-func)]
+                       :jit-compiler `[(var-get #'rexpr-rewrites-during-jit-compilation) nil])
+                    functor-name# ~(symbol (str functor-name "-rexpr"))]
+                ;; this is now also protected by the modification lock above???, so we don't need the atomic I guess....
+                (swap-vals! rewrite-collection# (fn [old#] (assoc old# functor-name# (conj (get old# functor-name# #{}) ~rewrite-func-var))))
+                (let [combined-func# (~combine-rewrite-function
+                                      ~(symbol "dyna.rexpr-constructors" (str (case run-at
+                                                                                :standard "simplify-"
+                                                                                :construction "simplify-construct-"
+                                                                                :inference "simplify-inference-"
+                                                                                :jit-compiler "simplify-jit-compilation-step-")
+                                                                              functor-name))
+                                      ~rewrite-func-var)]
+                  (intern 'dyna.rexpr-constructors '~(symbol (str (case run-at
+                                                                    :standard "simplify-"
+                                                                    :construction "simplify-construct-"
+                                                                    :inference "simplify-inference-"
+                                                                    :jit-compiler "simplify-jit-compilation-step-")
+                                                                  functor-name))
+                          combined-func#))))))))
+
 (defmacro def-rewrite [& args]
   (let [kw-args (apply hash-map (if (= (mod (count args) 2) 0)
                                   args
@@ -1069,51 +1102,23 @@
             jit-compiler-rewrite (:jit-compiler-rewrite kw-args false)]
         (when (and (not (and (:is-debug-check-rewrite kw-args) (not system/check-rexpr-arguments)))
                    (not (and (:is-debug-rewrite kw-args) (not system/debug-statements))))
-          (let [ret `(let [~rewrite-func-var ~rewriter-function]
-                       (locking dyna.rexpr-constructors/modification-lock
-                         ~@(for [run-at (if (seqable? runs-at) runs-at [runs-at])]
-                             `(let [[rewrite-collection# rewrite-collection-func#] ;; the collection-func is NOT set here...... it is setup in def-base-rexpr
-                                    ~(case run-at
-                                       :standard `[(var-get #'rexpr-rewrites) (var-get #'rexpr-rewrites-func)]
-                                       :construction `[(var-get #'rexpr-rewrites-construct) (var-get #'rexpr-rewrites-construct-func)]
-                                       :inference `[(var-get #'rexpr-rewrites-inference) (var-get #'rexpr-rewrites-inference-func)]
-                                       :jit-compiler `[(var-get #'rexpr-rewrites-during-jit-compilation) nil])
-                                    functor-name# ~(symbol (str functor-name "-rexpr"))]
-                                ;; this is now also protected by the modification lock above???, so we don't need the atomic I guess....
-                                (swap-vals! rewrite-collection# (fn [old#] (assoc old# functor-name# (conj (get old# functor-name# #{}) ~rewrite-func-var))))
-                                ;; TODO: the first function is going to be the identity, which does not make since
-                                (let [combined-func# (~combine-rewrite-function
-                                                      ~(symbol "dyna.rexpr-constructors" (str (case run-at
-                                                                                                :standard "simplify-"
-                                                                                                :construction "simplify-construct-"
-                                                                                                :inference "simplify-inference-"
-                                                                                                :jit-compiler "simplify-jit-compilation-step-")
-                                                                                              functor-name))
-                                                      ~rewrite-func-var)]
-                                  (intern 'dyna.rexpr-constructors '~(symbol (str (case run-at
-                                                                                    :standard "simplify-"
-                                                                                    :construction "simplify-construct-"
-                                                                                    :inference "simplify-inference-"
-                                                                                    :jit-compiler "simplify-jit-compilation-step-")
-                                                                                  functor-name))
-                                          combined-func#)
-                                        ;(swap-vals! rewrite-collection-func# assoc functor-name# combined-func#)
-                                  ))))
-                       ~(when run-in-jit ;; then we are going to save the representation of this rule somewhere
-                          `(swap! dyna.rexpr/rexpr-rewrites-source
-                                  (fn [x#]
-                                    (let [prev# (get x# ~(symbol (str functor-name "-rexpr")) [])]
-                                      (assoc x# ~(symbol (str functor-name "-rexpr"))
-                                             (conj prev# {:matcher (quote ~matcher)
-                                                          :rewrite (quote ~rewrite)
-                                                          ;; this is the source of the rewrite function
-                                                          :rewrite-func (quote ~rewriter-function)
-                                                          :kw-args (quote ~kw-args)
-                                                          :rewrite-body (quote ~(last args))
-                                                          :namespace *ns*
-                                                          }))))))
-                       )]
-                                        ;(when (= :jit-compiler runs-at)  (debug-repl "q1"))
+          (let [ret
+                `(let []
+                   (def-rewrite-direct ~functor-name ~runs-at ~rewriter-function)
+                   ~(when run-in-jit ;; then we are going to save the representation of this rule somewhere
+                      `(swap! dyna.rexpr/rexpr-rewrites-source
+                              (fn [x#]
+                                (let [prev# (get x# ~(symbol (str functor-name "-rexpr")) [])]
+                                  (assoc x# ~(symbol (str functor-name "-rexpr"))
+                                         (conj prev# {:matcher (quote ~matcher)
+                                                      :rewrite (quote ~rewrite)
+                                                      ;; this is the source of the rewrite function
+                                                      :rewrite-func (quote ~rewriter-function)
+                                                      :kw-args (quote ~kw-args)
+                                                      :rewrite-body (quote ~(last args))
+                                                      :namespace *ns*
+                                                      })))))))
+                ]
             ret))))))
 
 (defmacro def-iterator [& args]
@@ -1862,6 +1867,19 @@
   :run-at [:standard :construction]
   :assigns-variable result
   (apply function (map get-value arguments)))
+
+(def-rewrite
+  :match (simple-function-call (:unchecked function) (:any result) (:ground-var-list arguments))
+  :run-at :jit-compiler
+  :assigns-variable result
+  ;; this is going to want to generate something which calls the function, but also we want the generation to go in directly instead of be indirected through
+  (do
+    (comment
+      ;; something like this
+      (jit-macro
+       `(~function ~@(map (jit-evaluate-cljform )))
+       ))
+    (???)))
 
 (defn make-function-call
   {:rexpr-constructor 'simple-function-call
