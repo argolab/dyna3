@@ -786,6 +786,12 @@
 (def ^{:private true :dynamic true} *jit-generating-in-context* nil
   ;; set to the context which the root R-expr is present in
   )
+
+(def ^{:private true :dynamic true} *current-assignment-to-exposed-vars* {}
+  ;; variables which are exposed will have some current value.  These values can be looked up using the *jit-generating-in-context*
+  ;; with this indirecting through what needs to happen for a given value
+  )
+
 (def ^{:private true :dynamic true} *rewrites-allowed-to-run* #{:construction :standard}
   ;; which rewrites are we allowed to attempt to run at this point the inference
   ;; rewrites might not be run all of the time depending on if we are building a
@@ -805,6 +811,7 @@
 (def ^{:private true :dynamic true} *locally-bound-variables* {}
   ;; the variable names are going to be given new generated names, so we need to track some mapping here
   )
+
 
 (def ^{:private true :dynamic true} *precondition-checks-to-perform* nil
   ;; this will be a (transient []) of conditions which need to get checked before we can apply the rewrite
@@ -979,8 +986,20 @@
 (alter-meta! #'is-ground? assoc :dyna-jit-inline (fn [[_ var]]
                                                    (let [varj (jit-evaluate-cljform var)]
                                                      (assert (= :rexpr-value (:type varj)))
-                                                     (debug-repl "handle is-ground?")
-                                                     (???))))
+                                                     (cond (is-constant? (:constant-value varj)) {:type :value :constant-value true :cljcode-expr true}
+
+                                                           (contains? varj :matched-variable)
+                                                           (let [v (:matched-variable varj)
+                                                                 cv (*current-assignment-to-exposed-vars* (:exposed-name v))
+                                                                 b (is-bound-in-context? cv *jit-generating-in-context*)]
+                                                             (assert (instance? jit-exposed-variable-rexpr v))
+                                                             (debug-repl "rr")
+                                                             {:type :value
+                                                              :current-value b
+                                                              :cljcode-expr `(is-ground? ~(:exposed-name v))})
+                                                           :else (do (debug-repl "todo")
+                                                                     (???))
+                                                           ))))
 
 (alter-meta! #'is-constant? assoc :dyna-jit-inline (fn [[_ var]]
                                                      (let [varj (jit-evaluate-cljform var)]
@@ -1158,15 +1177,17 @@
                                     m
                                     (let [[[f fi] & r] l]
                                       (recur (update-in m [f :index] conj fi)
-                                             r))))]
+                                             r))))
+        local-name-to-context (zipmap (:variable-order jinfo) (get-arguments rexpr))]
     ;(debug-repl "aa")
     (binding [*jit-generating-rewrite-for-rexpr* rexpr
               *jit-generating-in-context* context
               *rewrites-allowed-to-run* #{:construction :standard}
               *jit-consider-expanding-placeholders* false ;; TODO: this should eventually be true
-              *jit-call-simplify-on-placeholders* false]
+              *jit-call-simplify-on-placeholders* false
+              *current-assignment-to-exposed-vars* local-name-to-context]
       (debug-binding
-       ;; clear these out, as we
+       ;; restart these values, as we are running a nested version of simplify for ourselves
        [*current-simplify-stack* ()
         *current-simplify-running* nil]
        (let [;prim-r (primitive-rexpr rexpr)
@@ -1183,6 +1204,7 @@
                      :cljcode-expr '(do
                                       (bad-gen))
                      :rexpr-type (:prim-rexpr-placeholders jinfo)}
+             ;;rr (debug-repl)
              result (simplify-jit-internal-rexpr-loop prim-r)]
 
          (debug-repl "pr1")
