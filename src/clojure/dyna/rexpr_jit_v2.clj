@@ -983,7 +983,22 @@
                            (debug-repl "attempting to evaluate function creation") ;; this is not going to work that well.... I suppose that this could create the function and handle renamed variables....
                            (???))})
 
-(alter-meta! #'is-ground? assoc :dyna-jit-inline (fn [[_ var]]
+;; for expressions which can be evaluated when there is a current value, but otherwise we are not going to know
+;; what the expression returns
+(doseq [x [#'is-ground?
+           #'is-constant?
+           #'is-variable?]]
+  (alter-meta! x assoc :dyna-jit-inline (fn [[n & args]]
+                                          (let [varj (map jit-evaluate-cljform args)
+                                                ]
+                                            (debug-repl "ff")
+                                            {:type :value
+                                             :cljcode-expr `(~n ~@(map :cljcode-expr  varj))
+                                             :current-value (???)}
+                                            )
+                                          )))
+
+#_(alter-meta! #'is-ground? assoc :dyna-jit-inline (fn [[_ var]]
                                                    (let [varj (jit-evaluate-cljform var)]
                                                      (assert (= :rexpr-value (:type varj)))
                                                      (cond (is-constant? (:constant-value varj)) {:type :value :constant-value true :cljcode-expr true}
@@ -1001,12 +1016,12 @@
                                                                      (???))
                                                            ))))
 
-(alter-meta! #'is-constant? assoc :dyna-jit-inline (fn [[_ var]]
+#_(alter-meta! #'is-constant? assoc :dyna-jit-inline (fn [[_ var]]
                                                      (let [varj (jit-evaluate-cljform var)]
                                                        (assert (= :rexpr-value (:type varj)))
                                                        (???))))
 
-(alter-meta! #'is-variable? assoc :dyna-jit-inline (fn [[_ var]]
+#_(alter-meta! #'is-variable? assoc :dyna-jit-inline (fn [[_ var]]
                                                      (let [varj (jit-evaluate-cljform var)]
                                                        (???))))
 
@@ -1040,7 +1055,123 @@
    :rexpr-list (fn [arg]
                  (every? rexpr? arg))})
 
+
+
 (defn- compute-match
+  ([rexpr matcher1 to-check-expressions currently-bound-variables]
+   (let [matcher (if (map? matcher1) matcher1 {:rexpr matcher1})
+         rexpr-matcher (:rexpr matcher)
+         rname (rexpr-name rexpr)
+         args (get-arguments rexpr)
+         rsignature (get @rexpr-containers-signature rname)]
+     (if (= rname (first rexpr-matcher))
+       (let [match-result (vec (for [[match-expr arg [arg-sig _]] (zipseq (rest rexpr-matcher) args rsignature)]
+                                 (let [t (case arg-sig
+                                           :var :rexpr-value
+                                           :rexpr :rexpr
+                                           :mult :value
+                                           :value :rexpr-value
+                                           :str :value
+                                           :unchecked :unknown
+                                           :opaque-constant :value
+                                           :boolean :value
+                                           :file-name :value
+                                           :hidden-var :rexpr-value
+                                           :rexpr-list (???)
+                                           :var-list (???)
+                                           :var-map (???)
+                                           (do (debug-repl)
+                                               (???)))
+                                       curval (if (instance? jit-exposed-variable-rexpr arg)
+                                                {:type t
+                                                 :current-value (*current-assignment-to-exposed-vars* (:exposed-name arg))
+                                                 :cljcode-expr (:exposed-name arg)
+                                                 :matched-variable arg}
+                                                (let []
+                                                  (debug-repl "todo...")
+                                                  (???) ;; this should figure out if this is a value, R-expr or rexpr-value type
+                                                  ;; how this is represented is going to have
+                                                  {:type t
+                                                   :constant-value arg})
+                                                )]
+                                   (debug-repl "33")
+                                   (cond (= '_ match-expr) true
+                                         (symbol? match-expr) (let []
+                                                                (debug-repl "TODO")
+                                                                (if (contains? currently-bound-variables match-expr)
+                                                                  (do
+                                                                    (conj! to-check-expressions `(= ~arg ~(get currently-bound-variables match-expr)))
+                                                                    ;; if the current
+                                                                    (???) ;; TODO: this needs handle the current value check.
+                                                                    )
+                                                                  (do
+                                                                    (assoc! currently-bound-variables match-expr curval)
+                                                                    true)))
+                                         (and (= 2 (count match-expr))
+                                              (not (contains? @rexpr-containers-signature (car match-expr)))
+                                              (symbol? (cdar match-expr)))
+                                         (let [match-requires (car match-expr)
+                                               match-requires-meta (get @rexpr-matchers-meta match-requires)
+                                               match-success (if (contains? matchers-override match-requires)
+                                                               ((matchers-override match-requires) arg)
+                                                               (binding [*locally-bound-variables* {(first (:matcher-args match-requires-meta))
+                                                                                                    curval}]
+                                                                 (debug-repl)
+                                                                 (jit-evaluate-cljform (:matcher-body match-requires-meta))))]
+                                           ;; this is a match wtih a check
+                                           (debug-repl "match check")
+                                           (???))
+
+                                         (contains? @rexpr-containers-signature (car match-expr))
+                                         (let []
+                                           ;; this is matching against a nested R-expr, in which case we need to look up what the current value is
+                                           ;; and then recurse to the compute match function
+                                           (???))
+
+                                         ))
+                                 ))]
+         (every? true? match-result))
+       false ;; then the r-expr type failed to match, so we can just return false and stop
+       )
+
+     #_(when (= rname (first rexpr-matcher))
+       (let [var-local-bindings (into {} (for [[match-expr arg [arg-sig _]] (zipseq (rest rexpr-matcher) args rsignature)]
+                                           (let [t ]
+                                             (cond (= '_ match-expr) nil
+                                                   (symbol? match-expr) [match-expr {:matched-variable arg :type t}]
+
+                                                   [(cdar match-expr) {:matched-variable arg
+                                                                       :matched-condition (car match-expr)
+                                                                       :type t}]
+                                                   :else (do (debug-repl "todo?")
+                                                             (???))))))
+             currently-bound-values (volatile! {})
+             match-result (vec (remove nil?
+                                       (for [[match-expr arg] (zipseq (rest rexpr-matcher) args)]
+                                         (cond (= '_ match-expr) nil
+                                               (symbol? match-expr) (if (contains? @currently-bound-values match-expr)
+                                                                      (do `(= ~match-expr) (???))
+                                                                      (do (vswap! currently-bound-values assoc match-expr arg)
+                                                                          nil))
+                                               ))))
+
+             match-result
+             (binding [*locally-bound-variables* var-local-bindings]
+               (vec (for [[match-expr arg] (zipseq (rest rexpr-matcher) args)]
+                      (cond (= '_ match-expr) true
+                            (symbol? match-expr) (???))
+                      )))]
+
+         )
+       )))
+  ([rexpr matcher1]
+   (let [to-check (transient [])
+         currently-bound (transient {})
+         currently-matches (compute-match rexpr matcher1 to-check currently-bound)]
+     [currently-matches (persistent! to-check) (persistent! currently-bound)]))
+  )
+
+(defn- compute-match-1
   ([rexpr matcher1 matched-variables]
    (let [matcher (if (map? matcher1)
                    matcher1
@@ -1095,10 +1226,12 @@
                                                                                                       (first (:matcher-args match-requires-meta))
                                                                                                       (get *locally-bound-variables* (cdar match-expr)))]
                                                              (jit-evaluate-cljform (:matcher-body match-requires-meta))))]
-                                       (debug-repl "match with conditions")
-                                       (???)
-                                       false
-                                       )
+                                       (assert (= :value (:type match-success)))
+                                       (if (or (:constant-value match-success) (:current-value match-success))
+                                         true
+                                         (do
+                                           (debug-repl "failed match")
+                                           (???))))
                                      #_(let [match-requires (car match-expr)
                                            zzzz (debug-repl "z")
                                            match-success (binding [*locally-bound-variables* (assoc *locally-bound-variables*
