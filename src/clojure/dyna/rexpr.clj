@@ -1,7 +1,7 @@
 (ns dyna.rexpr
   (:require [dyna.utils :refer :all])
   (:require [dyna.base-protocols :refer :all])
-  (:require [dyna.rexpr-constructors])
+  (:require [dyna.rexpr-constructors :refer [expose-globally]])
   (:require [dyna.context :as context])
   (:require [dyna.system :as system])
   (:require [dyna.iterators :as iterators])
@@ -134,6 +134,8 @@
          ~'(primitive-rexpr [this] this) ;; this is a primitive expression so we are going to just always return ourselves
          ;~'(primitive-rexpr-jit-placeholder [this] (primitive-rexpr this))
          ~'(is-constraint? [this] false) ;; if this is going to return a multiplicity of at most 1
+         ~'(variable-functional-dependencies [this] nil) ;; if this is a constraint where there is some known functional dependencies between vars
+         ;; return as a map of sets to sets
          (~'rexpr-name ~'[this] (quote ~(symbol name))) ;; the name for this type of R-expr
          (~'get-variables ~'[this]
           (filter is-variable?
@@ -430,7 +432,9 @@
                                                                                           (last dyna.rexpr/*current-simplify-stack*))])
                               ~@(map cdar vargroup))))
        (swap! rexpr-constructors assoc ~(str name) ~(symbol (str "make-" name)))
-       (defn ~(symbol (str "is-" name "?")) ~'[rexpr]
+       (defn ~(symbol (str "is-" name "?"))
+         {:inline (fn ~'[x] (list 'instance? ~(symbol rname) ~'x))}
+         ~'[rexpr]
          (instance? ~(symbol rname) ~'rexpr))
        (defmethod print-method ~(symbol rname) ~'[this ^java.io.Writer w]
          (assert (not (nil? ~'w)))
@@ -445,9 +449,12 @@
                   ~@(remove nil? (for [[var-type vname] vargroup]
                                    (when (= :rexpr var-type)
                                      `(deep-equals (~(keyword vname) ~'a) (~(keyword vname) ~'b))))))))
-       (intern 'dyna.rexpr-constructors '~(symbol (str "make-" name)) ~(symbol (str "make-" name)))
-       (intern 'dyna.rexpr-constructors '~(symbol (str "make-no-simp-" name)) ~(symbol (str "make-no-simp-" name)))
-       (intern 'dyna.rexpr-constructors '~(symbol (str "is-" name "?")) ~(symbol (str "is-" name "?")))
+       ;(intern 'dyna.rexpr-constructors '~(symbol (str "make-" name)) ~(symbol (str "make-" name)))
+       ;(intern 'dyna.rexpr-constructors '~(symbol (str "make-no-simp-" name)) ~(symbol (str "make-no-simp-" name)))
+       ;(intern 'dyna.rexpr-constructors '~(symbol (str "is-" name "?")) ~(symbol (str "is-" name "?")))
+       (expose-globally ~(symbol (str "make-" name)))
+       (expose-globally ~(symbol (str "make-no-simp-" name)))
+       (expose-globally ~(symbol (str "is-" name "?")))
        (swap! rexpr-rewrites-func           assoc ~(symbol rname) (fn ~'[a b] (~(symbol "dyna.rexpr-constructors" (str "simplify-" name)) ~'a ~'b)))
        (swap! rexpr-rewrites-construct-func assoc ~(symbol rname) (fn ~'[a b] (~(symbol "dyna.rexpr-constructors" (str "simplify-construct-" name)) ~'a ~'b)))
        (swap! rexpr-rewrites-inference-func assoc ~(symbol rname) (fn ~'[a b] (~(symbol "dyna.rexpr-constructors" (str "simplify-inference-" name)) ~'a ~'b)))
@@ -461,7 +468,8 @@
 
 (defn make-structure [name args]
   (DynaTerm. name nil nil args))
-(intern 'dyna.rexpr-constructors 'make-structure make-structure)
+;(intern 'dyna.rexpr-constructors 'make-structure make-structure)
+(expose-globally make-structure)
 
 (def ^:const null-term (DynaTerm/null_term))
 
@@ -500,7 +508,8 @@
 
 (defn make-variable [varname]
   (variable-rexpr. varname))
-(intern 'dyna.rexpr-constructors 'make-variable make-variable)
+;(intern 'dyna.rexpr-constructors 'make-variable make-variable)
+(expose-globally make-variable)
 
 (defmethod print-method variable-rexpr [^variable-rexpr this ^java.io.Writer w]
   (.write w (str "(variable " (.varname this) ")")))
@@ -510,7 +519,8 @@
 (defn make-unique-variable
   ([] (make-variable (gensym 'unique-var)))
   ([base-name] (variable-rexpr. (gensym base-name))))
-(intern 'dyna.rexpr-constructors 'make-unique-variable make-unique-variable)
+;(intern 'dyna.rexpr-constructors 'make-unique-variable make-unique-variable)
+(expose-globally make-unique-variable)
 
 (defrecord constant-value-rexpr [value]
   RexprValue
@@ -532,7 +542,8 @@
   (assert (not (nil? val))) ;; otherwise this is a bug
   (dyna-debug (assert (not (instance? constant-value-rexpr val))))
   (constant-value-rexpr. val))
-(intern 'dyna.rexpr-constructors 'make-constant make-constant)
+                                        ;(intern 'dyna.rexpr-constructors 'make-constant make-constant)
+(expose-globally make-constant)
 
 (let [tv (make-constant true)
       fv (make-constant false)]
@@ -584,15 +595,21 @@
 ;;   (assert (string? name))
 ;;   (structured-rexpr. name values))
 
-(defn is-constant? [x] (instance? constant-value-rexpr x))
+(defn is-constant?
+  {:inline (fn [x] `(instance? constant-value-rexpr ~x))}
+  [x] (instance? constant-value-rexpr x))
+;(intern 'dyna.rexpr-constructors 'is-constant? is-constant?)
+(expose-globally is-constant?)
 
-(defn is-variable? [variable]
-  (instance? variable-rexpr variable))
-(intern 'dyna.rexpr-constructors 'is-variable? is-variable?)
+(defn is-variable?
+  {:inline (fn [x] `(instance? variable-rexpr ~x))}
+  [variable] (instance? variable-rexpr variable))
+                                        ;(intern 'dyna.rexpr-constructors 'is-variable? is-variable?)
+(expose-globally is-variable?)
 
-(defn rexpr? [rexpr]
-  (and (instance? Rexpr rexpr)
-       (not (or (is-variable? rexpr) (is-constant? rexpr)))))
+(defn rexpr?
+  {:inline (fn [x] `(instance? Rexpr ~x))}
+  [rexpr] (instance? Rexpr rexpr))
 
 
 ;; these are checks which are something that we might want to allow ourselves to turn off
@@ -646,6 +663,17 @@
         1 true-mul
         (prev x)))))
 
+(defn fixpoint-functional-dependencies-map [m]
+  (loop [m m]
+    (let [n (volatile! m)]
+      (doseq [[k v] m
+              [k2 v2] m]
+        (when (subset? (union k2 v2) k)
+          (vswap! n update k2 union v)))
+      (if (not= @n m)
+        (recur @n)
+        @n))))
+
 (def-base-rexpr conjunct [:rexpr-list args]
   (is-constraint? [this] (every? is-constraint? args))
 
@@ -653,7 +681,13 @@
                           (cons [#{} this]
                                 (for [a args
                                       v (all-conjunctive-rexprs a)]
-                                  v))))
+                                  v)))
+  (variable-functional-dependencies [this]
+                                    (let [r (volatile! {})]
+                                      (doseq [x args
+                                              [k v] (variable-functional-dependencies x)]
+                                        (vswap! r update k union v))
+                                      (fixpoint-functional-dependencies-map @r))))
 
 
 (def-base-rexpr disjunct [:rexpr-list args]
@@ -709,7 +743,9 @@
 
 (def-base-rexpr unify [:value a ;; this should be changed to just use :var
                        :value b]
-  (is-constraint? [this] true))
+  (is-constraint? [this] true)
+  (variable-functional-dependencies [this] {#{a} #{b}
+                                            #{b} #{a}}))
 
 (def-deep-equals unify [a b]
   (when (instance? unify-rexpr b)
@@ -727,7 +763,10 @@
                                                ;; variable
                                  :str name
                                  :var-list arguments]
-  (is-constraint? [this] true))
+  (is-constraint? [this] true)
+  (variable-functional-dependencies [this] (let [a (into #{} (filter is-variable? (cons dynabase arguments)))]
+                                             {a #{out}
+                                              #{out} a})))
 
 ;; read the dynabase from a particular constructed structure.  This will require that structure become ground
 ;; the file reference is also required to make a call to a top level expression
@@ -828,7 +867,8 @@
     (make-proj (first vars)
                (make-proj-many (rest vars) R))))
 
-(intern 'dyna.rexpr-constructors 'make-proj-many make-proj-many)
+;(intern 'dyna.rexpr-constructors 'make-proj-many make-proj-many)
+(expose-globally make-proj-many)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1153,15 +1193,14 @@
   #{[variable iterator]})
 
 
-(defn is-variable-set? [variable]
+#_(defn is-variable-set? [variable]
   (or (instance? constant-value-rexpr variable)
       (context/need-context
        (ctx-is-bound? (context/get-context) variable))))
-(intern 'dyna.rexpr-constructors 'is-variable-set? is-variable-set?)
+#_(intern 'dyna.rexpr-constructors 'is-variable-set? is-variable-set?)
 
-(defn is-constant? [variable]
+#_(defn is-constant? [variable]
   (instance? constant-value-rexpr variable))
-(intern 'dyna.rexpr-constructors 'is-constant? is-constant?)
 
 (defn get-variable-value [variable]
   (if (instance? constant-value-rexpr variable)
@@ -1297,24 +1336,26 @@
 ;; this would have some which expressions are the expressions
 ;; this is going to have to have some context in which an expression
 
-(defn is-ground? [var-name]
+#_(defn is-ground? [var-name]
   (or (and (is-variable? var-name)
            (is-variable-set? var-name))
       (is-constant? var-name)))
+
+#_(def is-ground? is-bound?)
 
 (def-rewrite-matcher :str [string] (string? string))
 
 (def-rewrite-matcher :ground [var-name]
                                         ; this should be redfined such that it will return the ground value for the variable
                                         ; though we might not want to have the matchers identifying a given expression
-  (is-ground? var-name))
+  (is-bound? var-name))
 
 (def-rewrite-matcher :not-ground [var] ;; TODO: I think I can just use :free instead of :not-ground, through the is only used by the unification construction
   (and (is-variable? var) (not (is-bound? var))))
 
 (def-rewrite-matcher :free [var-name]
   (and (is-variable? var-name)
-       (not (is-variable-set? var-name))
+       (not (is-bound? var-name) #_(is-variable-set? var-name))
        var-name))
 
 ;; (def-rewrite-matcher :computes [var-name] ;; this can be the the same as free, but it should represent that it will compute something
@@ -1344,7 +1385,7 @@
   (every? is-variable? var-list))
 
 (def-rewrite-matcher :ground-var-list [var-list]
-  (every? is-ground? var-list))
+  (every? is-bound? var-list))
 
 (def-rewrite-matcher :any [v]
                      (or (is-variable? v) (is-constant? v)))
@@ -1436,7 +1477,7 @@
   :run-at [:standard :construction :inference] ; this will want to run at construction and when it encounters the value so that we can use it as early as possible
   (when (context/has-context)
     ;;(debug-repl)
-    (assert (not (is-ground? A))) ;; otherwise the setting the value into the context should fail
+    (assert (not (is-bound? A))) ;; otherwise the setting the value into the context should fail
     (set-value! A (get-value B))
     (make-multiplicity 1)))
 
@@ -1860,7 +1901,8 @@
 (def-base-rexpr simple-function-call [:unchecked function
                                       :var result
                                       :var-list arguments]
-  (is-constraint? [this] true))
+  (is-constraint? [this] true)
+  (variable-functional-dependencies [this] {(into #{} (filter is-variable? arguments)) #{result}}))
 
 (def-rewrite
   :match (simple-function-call (:unchecked function) (:any result) (:ground-var-list arguments))

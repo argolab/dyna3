@@ -55,6 +55,34 @@
                                           nr))))]
      [(persistent! var-unifies) mr])))
 
+(defn optimize-lift-up-det-variables [rexpr]
+  ;; variables which are determinstic from other variables which are set, should be lifted as high as possible in the context
+  ;; this will allow for variables to get shared in multiple places without having to be aliased together
+  ;; e.g.  (proj X (sum-agg (proj Y  (X=foo[Y])))) ===> (proj X (proj Y (X=foo[Y]) * (sum-agg ...)))
+  (???)
+  )
+
+(defn optimize-redudant-constraints [rexpr]
+  ;; calls to the same constraint should be optimized to only perform that call once
+  )
+
+
+(defn optimize-conjunct-of-disjuncts [rexpr]
+  ;; there might be something which can only be optimized in the presence of
+  ;; some subset of a disjunctive branch if we can eleminate those other
+  ;; branches, then we might be able to identify that there is some branch which
+  ;; we can entirely elminate from the program
+  )
+
+(defn optimize-refold-program [rexpr]
+  ;; look for places where we might want to generate a new R-expr after we have expanded the program some depth
+  ;; this might be useful in the case of recursive programs.
+  )
+
+(defn optimize-remove-unnecessary-nested-aggregators [rexpr]
+  ;; if there are
+  )
+
 ;; (defn- check-rexpr-basecases
 ;;   ([rexpr stack]
 ;;    (if )
@@ -65,7 +93,7 @@
 ;;   ())
 
 
-(defn optimize-disjuncts [rexpr]
+#_(defn optimize-disjuncts [rexpr]
   ;; look through the disjuncts and figure out if there are any branches which
   ;; are unnecessary of where extra constraints could be added to the branches.
 

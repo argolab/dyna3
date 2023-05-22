@@ -313,7 +313,7 @@
            ret)
 
 
-         (or (every? is-ground? exposed) *aggregator-op-should-eager-run-iterators*)
+         (or (every? is-bound? exposed) *aggregator-op-should-eager-run-iterators*)
          (let [iterators (find-iterators nR)
                result-rexprs (volatile! nil)]
            ;; will loop over assignments to all of the variables

@@ -28,7 +28,7 @@
 (declare make-variable
          make-unique-variable
          is-variable?
-         is-variable-set?
+         ;is-variable-set?
          make-constant
          is-constant?
          make-structure
@@ -39,3 +39,13 @@
 
 
 (def modification-lock (Object.))
+
+(defmacro expose-globally
+  ;; this namespace basically contains references to variables which need to be access from other files
+  ;; this means that some function contained in this file might have multiple variables which reference it....
+  ([name]
+   `(do (intern 'dyna.rexpr-constructors (quote ~(symbol name)) ~name)
+        (alter-meta! (var ~name) assoc :all-vars #{(var ~(symbol "dyna.rexpr-constructors" (str name)))
+                                                   (var ~name)})
+        (alter-meta! (var ~(symbol "dyna.rexpr-constructors" (str name)))
+                     merge (dissoc (meta (var ~name)) :ns)))))

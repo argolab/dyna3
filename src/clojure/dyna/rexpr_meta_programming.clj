@@ -148,7 +148,7 @@
           }
   :run-at :inference
   (let [args (concat arguments2 arguments)
-        has-dynabase (not (and (is-ground? dynabase) (dnil? (get-value dynabase))))
+        has-dynabase (not (and (is-bound? dynabase) (dnil? (get-value dynabase))))
         call-name (if has-dynabase
                     {:name name-str
                      :arity (count args)}

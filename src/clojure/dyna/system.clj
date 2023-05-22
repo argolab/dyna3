@@ -4,16 +4,16 @@
 ;; variables which control how the system runs
 
 (def check-rexpr-arguments
-  (= "true" (System/getProperty "dyna.check_rexprs_args" "true")))
+  (Boolean/parseBoolean (System/getProperty "dyna.check_rexprs_args" "true")))
 
 (def print-rewrites-performed
-  (= "true" (System/getProperty "dyna.print_rewrites_performed" "false")))
+  (Boolean/parseBoolean (System/getProperty "dyna.print_rewrites_performed" "false")))
 
 (def track-where-rexpr-constructed
-  (= "true" (System/getProperty "dyna.trace_rexpr_construction" "true")))
+  (Boolean/parseBoolean (System/getProperty "dyna.trace_rexpr_construction" "true")))
 
 (def debug-statements
-  (= "true" (System/getProperty "dyna.debug" "true")))
+  (Boolean/parseBoolean (System/getProperty "dyna.debug" "true")))
 
 (def status-counters
   dyna.StatusCounters/run_counters
@@ -24,9 +24,10 @@
 
 
 (def ^:dynamic *auto-run-agenda-before-query*
-  (= "true" (System/getProperty "dyna.auto_run_agenda" "true")))
+  (Boolean/parseBoolean (System/getProperty "dyna.auto_run_agenda" "true")))
 
-(def ^:dynamic *use-optimized-rexprs* true)
+(def ^:dynamic *use-optimized-rexprs*
+  (Boolean/parseBoolean (System/getProperty "dyna.optimized_rexprs" "true")))
 
 (def ^:dynamic *generate-new-jit-rewrites* false)
 

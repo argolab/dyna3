@@ -39,6 +39,8 @@ public interface Rexpr {
 
     boolean is_constraint_QMARK_();
 
+    Object variable_functional_dependencies();
+
     Object rexpr_name();
 
     boolean is_empty_rexpr_QMARK_();

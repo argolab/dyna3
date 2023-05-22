@@ -613,7 +613,7 @@ This is most likely not what you want."))))
                                             (cond (and (= "$memo" functor-name) (= 1 functor-arity))
                                                   (handle-dollar-memo-rexpr rexpr-opt source-file dynabase)
 
-                                                  (= "$priority" functor-name)
+                                                  (and (= "$priority" functor-name) (= 1 functor-arity))
                                                   (handle-dollar-priority-rexpr rexpr-opt source-file dynabase)
 
                                                   :else

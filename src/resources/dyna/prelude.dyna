@@ -8,7 +8,7 @@
 
 :- export list/1.
 
-% for annotation that somethign is a list.  This will match against all list types
+% for annotation that something is a list.  This will match against all list types
 list_rec([]).
 list_rec([_|A]) :- list_rec(A).
 

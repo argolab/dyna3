@@ -105,7 +105,11 @@
   `(do
      (def-base-rexpr ~name ~(vec (flatten (for [i (range 0 nargs)]
                                             [:var (symbol (str "v" i))])))
-       (is-constraint? [this] true))
+       (is-constraint? [this] true)
+       (variable-functional-dependencies ~'[this]
+                                         ~(into {} (for [rr rewrites
+                                                         :when (not= :allground (car rr))]
+                                                     [(into #{} (get-variables-in-expression (cdar rr))) #{(car rr)}]))))
      ~@(for [rr rewrites]
          (construct-rewrite-for-expression name nargs rr)
         )

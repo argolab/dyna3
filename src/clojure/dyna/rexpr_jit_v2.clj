@@ -4,7 +4,7 @@
   (:require [dyna.base-protocols :refer :all])
   (:require [dyna.rexpr-disjunction]) ;; make sure is loaded first
   (:require [dyna.rexpr-aggregators-optimized])
-  (:require [dyna.rexpr-constructors :refer [is-disjunct-op?]])
+  (:require [dyna.rexpr-constructors :refer [is-disjunct-op? get-user-term]])
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
   (:import [dyna.rexpr proj-rexpr])
@@ -983,70 +983,56 @@
                            (debug-repl "attempting to evaluate function creation") ;; this is not going to work that well.... I suppose that this could create the function and handle renamed variables....
                            (???))})
 
+(defn- set-jit-method [v f]
+  (if (var? v)
+    (doseq [x (:all-vars (meta v) (list v))]
+      (alter-meta! x assoc :dyna-jit-inline f))
+    (doseq [x v]
+      (set-jit-method x f))))
+
 ;; for expressions which can be evaluated when there is a current value, but otherwise we are not going to know
 ;; what the expression returns
-(doseq [x [#'is-ground?
-           #'is-constant?
-           #'is-variable?]]
-  (alter-meta! x assoc :dyna-jit-inline (fn [[n & args]]
-                                          (let [varj (map jit-evaluate-cljform args)
-                                                ]
-                                            (debug-repl "ff")
-                                            {:type :value
-                                             :cljcode-expr `(~n ~@(map :cljcode-expr  varj))
-                                             :current-value (???)}
-                                            )
-                                          )))
+(set-jit-method
+ [#'is-bound?
+  #'is-constant?
+  #'is-variable?]
+ (fn [[n & args]]
+   (let [varj (map jit-evaluate-cljform args)
+         all-args-constant (every? #(contains? % :constant-value) varj)
+         all-args-known (every? #(or (contains? % :constant-value) (contains? % :current-value)) varj)]
 
-#_(alter-meta! #'is-ground? assoc :dyna-jit-inline (fn [[_ var]]
-                                                   (let [varj (jit-evaluate-cljform var)]
-                                                     (assert (= :rexpr-value (:type varj)))
-                                                     (cond (is-constant? (:constant-value varj)) {:type :value :constant-value true :cljcode-expr true}
+     (debug-repl "ff")
+     {:type :value
+      :cljcode-expr `(~n ~@(map :cljcode-expr  varj))
+      :current-value (???)}
+     )
+   ))
 
-                                                           (contains? varj :matched-variable)
-                                                           (let [v (:matched-variable varj)
-                                                                 cv (*current-assignment-to-exposed-vars* (:exposed-name v))
-                                                                 b (is-bound-in-context? cv *jit-generating-in-context*)]
-                                                             (assert (instance? jit-exposed-variable-rexpr v))
-                                                             (debug-repl "rr")
-                                                             {:type :value
-                                                              :current-value b
-                                                              :cljcode-expr `(is-ground? ~(:exposed-name v))})
-                                                           :else (do (debug-repl "todo")
-                                                                     (???))
-                                                           ))))
+(set-jit-method
+ [#'context/make-empty-context
+  #'context/make-nested-context-disjunct
+  #'context/make-nested-context-proj
+  #'context/make-nested-context-if-conditional
+  #'context/make-nested-context-aggregator
+  #'context/make-nested-context-memo-conditional
+  #'context/make-nested-context-aggregator-op-outer
+  #'context/make-nested-context-aggregator-op-inner
+  #'context/bind-context
+  #'context/bind-context-raw
+  #'context/bind-no-context
+  #'get-user-term]
+ (fn [form]
+   (throw (RuntimeException. "Unsupported in JITted code"))))
 
-#_(alter-meta! #'is-constant? assoc :dyna-jit-inline (fn [[_ var]]
-                                                     (let [varj (jit-evaluate-cljform var)]
-                                                       (assert (= :rexpr-value (:type varj)))
-                                                       (???))))
+(set-jit-method #'context/has-context (fn [form]
+                                        {:cljcode-expr true
+                                         :constant-value true
+                                         :type :value}))
 
-#_(alter-meta! #'is-variable? assoc :dyna-jit-inline (fn [[_ var]]
-                                                     (let [varj (jit-evaluate-cljform var)]
-                                                       (???))))
+(set-jit-method #'debug-repl (fn [form]
+                               {:cljcode-expr form
+                                :type :value}))
 
-(doseq [x [#'context/make-empty-context
-           #'context/make-nested-context-disjunct
-           #'context/make-nested-context-proj
-           #'context/make-nested-context-if-conditional
-           #'context/make-nested-context-aggregator
-           #'context/make-nested-context-memo-conditional
-           #'context/make-nested-context-aggregator-op-outer
-           #'context/make-nested-context-aggregator-op-inner
-           #'context/bind-context
-           #'context/bind-context-raw
-           #'context/bind-no-context]]
-  (alter-meta! x assoc :dyna-jit-inline (fn [form]
-                                         (throw (RuntimeException. "unsupported in JIIted code")))))
-
-(alter-meta! #'context/has-context assoc :dyna-jit-inline (fn [form]
-                                                            {:cljcode-expr true
-                                                             :constant-value true
-                                                             :type :value}))
-
-(alter-meta! #'debug-repl assoc :dyna-jit-inline (fn [form]
-                                                   {:cljcode-expr form
-                                                    :type :value}))
 
 
 (def ^:private matchers-override

@@ -5,6 +5,7 @@
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
   (:require [dyna.assumptions :refer [invalidate! make-assumption make-invalid-assumption depend-on-assumption compute-with-assumption]])
+  (:require [dyna.rexpr-constructors :refer [expose-globally]])
   (:require [clojure.set :refer [subset? union]])
   (:import [dyna.rexpr user-call-rexpr]))
 
@@ -161,7 +162,8 @@
                                                         (assoc x name (empty-user-defined-term name)))))
                    name))
                 u))))))))
-(intern 'dyna.rexpr-constructors 'get-user-term get-user-term)
+;(intern 'dyna.rexpr-constructors 'get-user-term get-user-term)
+(expose-globally get-user-term)
 
 (defn- combine-user-rexprs-bodies [term-bodies]
   ;; this will combine multiple rexprs from a uesr's definition together
