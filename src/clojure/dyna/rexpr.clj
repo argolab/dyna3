@@ -5,6 +5,7 @@
   (:require [dyna.context :as context])
   (:require [dyna.system :as system])
   (:require [dyna.iterators :as iterators])
+  (:require [dyna.assumptions :refer [depend-on-assumption]])
   (:require [clojure.set :refer [union difference subset?]])
   (:require [clojure.string :refer [trim]])
   (:require [aprint.core :refer [aprint]])
@@ -839,7 +840,16 @@
                              (if (nil? ut)
                                0 ;; then there is no term defined for this, so it is just nothing
                                (apply min (map #(check-rexpr-basecases % s) (:rexprs ut)))))))
-  (rexpr-jit-info [this] {:jittable false}))
+  (rexpr-jit-info [this] {:jittable false})
+  (variable-functional-dependencies [this]
+                                    (let [ut (dyna.rexpr-constructors/get-user-term name)]
+                                      (debug-repl "user call functional deps")
+                                      (???)))
+  (is-constraint? [this]
+                  (let [ut (dyna.rexpr-constructors/get-user-term name)]
+                    (depend-on-assumption (:is-constraint ut))
+                    (debug-repl "user call is constraint")
+                    (???))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
