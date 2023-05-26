@@ -440,3 +440,11 @@ assert map(((X) += X + 1), [1,2,3]) = [2,3,4].
 
 assert Seven=7, map(((X) max= X; Seven), [1,5,10]) = [7,7,10].
 ")
+
+
+;; (str-test times-determine-one "
+;; r(X) = X.
+;; t(Y) = A * Y = A.
+
+;; asser
+;; ")

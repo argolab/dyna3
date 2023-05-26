@@ -170,14 +170,35 @@
 (def-user-term "/" 2 (make-times v2 v1 v0))
 
 
+(defn- is-equal? [val] (fn [x] (= x (make-constant val))))
+
 (def-rewrite
+  :match (times ((is-equal? 1) _) (:any B) (:any C))
+  (make-unify B C))
+
+(def-rewrite
+  :match (times (:any A) ((is-equal? 1) _) (:any C))
+  (make-unify A C))
+
+#_(def-rewrite
+  :match (times (:any A) (:any B) B)
+  :assigns-variable A
+  1)
+
+(def-rewrite
+  :match (times (:any A) (:any B) A)
+  :assigns-variable B
+  1)
+
+
+#_(def-rewrite
   :match (times (:ground A) (:any B) (:any C))
   (let [av (get-value A)]
     (cond (= av 1) (make-unify B C)
           (and (= B C) (not= av 1)) (make-multiplicity 0)
           :else nil)))
 
-(def-rewrite
+#_(def-rewrite
   :match (times (:any A) (:ground B) (:any C))
   (let [bv (get-value B)]
     (cond (= bv 1) (make-unify A C)
@@ -189,6 +210,7 @@
   (:allground (= v2 (min v0 v1)))
   (v2 (min v0 v1)))
 (def-user-term "min" 2 (make-min v0 v1 v2))
+
 
 ;; if the output of the min is already known, then at least one of the arguments must
 (def-rewrite
