@@ -8,7 +8,7 @@
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
   (:import [dyna.rexpr proj-rexpr])
-  (:import [dyna RexprValue Rexpr]))
+  (:import [dyna RexprValue Rexpr DynaJITRunningCheckFailed]))
 
 ;; this is going to want to cache the R-expr when there are no arguments which are "variables"
 ;; so something like multiplicy can be just a constant value
@@ -443,6 +443,9 @@
       (debug-repl "todo: unknown current value type")
       (???))))
 
+(defn- has-current-value? [value]
+  (or (contains? value :constant-value) (contains? value :current-value)))
+
 (defn- jit-evaluate-cljform [expr]
   (comment
     {:value-expr nil ;; some expression which is clojure code which can be evaluated to get this value
@@ -494,8 +497,17 @@
                                      (and (ifn? (var-get var)) (= (find-ns 'clojure.core) (:ns m)))
                                      {:type :function
                                       :invoke (fn [[func & args]]
-                                                {:type :value
-                                                 :cljcode-expr `(~func ~@(map #(:cljcode-expr (jit-evaluate-cljform %)) args))})}
+
+                                                (let [avals (vec (map jit-evaluate-cljform args))
+                                                      can-eval (every? has-current-value? avals)
+                                                      ret {:type :value
+                                                           :cljcode-expr `(~(var-get var) ~@(map :cljcode-expr avals))}
+                                                      result (when can-eval
+                                                               (apply (var-get var) (map get-current-value avals)))]
+                                                  (if can-eval
+                                                    (assoc ret (if (every? #(contains? % :constant-value) avals)
+                                                                 :constant-value :current-value)
+                                                           result))))}
 
                                      :else
                                      (do (debug-repl "symbol ??")
@@ -581,7 +593,7 @@
                                                         (let [[inner-binding res] (rec other body)]
                                                           [(cons local-variable-name (cons (:cljcode-expr value-expr) inner-binding)) res])))))
                                                 bindings body)]
-                             (assoc rbody :cljcode-expr `(let* ~(vec rbind) ~rbody))))})
+                             (assoc rbody :cljcode-expr `(let* ~(vec rbind) ~(:cljcode-expr rbody)))))})
 
 (swap! evaluate-symbol-meta assoc 'do
        {:dyna-jit-inline (fn [form]
@@ -648,7 +660,7 @@
          ;all-args-known (every? #(or (contains? % :constant-value) (contains? % :current-value)) varj)
          ]
      (merge {:type :value
-             :cljcode-expr `(~n ~@(map :cljcode-expr  varj))}
+             :cljcode-expr `(~n ~(:cljcode-expr varj))}
             (when (contains? varj :constant-value)
               {:constant-value result})
             (when (contains? varj :current-value)
@@ -666,7 +678,8 @@
   #'context/bind-context
   #'context/bind-context-raw
   #'context/bind-no-context
-  #'get-user-term]
+  #'get-user-term
+  #'push-thread-bindings]
  (fn [form]
    (throw (RuntimeException. "Unsupported in JITted code"))))
 
@@ -756,7 +769,8 @@
                                                                                                     curval}]
                                                                  (jit-evaluate-cljform (:matcher-body match-requires-meta))))]
                                            ;; this is a match wtih a check
-                                           ;(debug-repl "match check")
+                                           (debug-repl "match check")
+
                                            (if (get-current-value match-success)
                                              (do (add-precondition-on-same-value match-success)
                                                  true)
@@ -770,7 +784,13 @@
 
                                          ))
                                  ))]
-         (every? true? match-result))
+         (if (every? true? match-result)
+           (if (= (list :rexpr) (keys matcher))
+             true
+             (do
+               (println "TODO: rewrite matched which has additional checks that need to be performed first")
+               false))
+           false))
        false ;; then the r-expr type failed to match, so we can just return false and stop
        )))
   ([rexpr matcher1]

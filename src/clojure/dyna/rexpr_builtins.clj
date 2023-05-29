@@ -146,14 +146,39 @@
 (def-user-term "+" 2 (make-add v0 v1 v2))
 (def-user-term "-" 2 (make-add v2 v1 v0))
 
+
+(defn- is-equal? [val] (fn [x] (= x (make-constant val))))
+
 (def-rewrite
+  :match (add ((is-equal? 0) _) (:any B) (:any C))
+  (make-unify B C))
+
+(def-rewrite
+  :match (add (:any A) ((is-equal? 0) _) (:any C))
+  (make-unify A C))
+
+(def-rewrite
+  :match {:rexpr (add (:variable A) (:any B) (:variable C))
+          :check (= A C)}
+  :assigns-variable B
+  0)
+
+(def-rewrite
+  :match {:rexpr (add (:any A) (:variable B) (:variable C))
+          :check (= B C)}
+  :assigns-variable A
+  0)
+
+
+
+#_(def-rewrite
   :match (add (:ground A) (:any B) (:any C))
   (let [av (get-value A)]
     (cond (= av 0) (make-unify B C) ;; the value is zero, so can unify the variables together
           (and (= B C) (not= av 0)) (make-multiplicity 0) ;; the two variables equal will never work
           :else nil)))
 
-(def-rewrite
+#_(def-rewrite
   :match (add (:any A) (:ground B) (:any C))
   (let [bv (get-value B)]
     (cond (= bv 0) (make-unify A C)  ;; the value is zero, so can unify the variables together
@@ -170,8 +195,6 @@
 (def-user-term "/" 2 (make-times v2 v1 v0))
 
 
-(defn- is-equal? [val] (fn [x] (= x (make-constant val))))
-
 (def-rewrite
   :match (times ((is-equal? 1) _) (:any B) (:any C))
   (make-unify B C))
@@ -180,13 +203,15 @@
   :match (times (:any A) ((is-equal? 1) _) (:any C))
   (make-unify A C))
 
-#_(def-rewrite
-  :match (times (:any A) (:any B) B)
+(def-rewrite
+  :match {:rexpr (times (:any A) (:variable B) (:variable C))
+          :check (= B C)}
   :assigns-variable A
   1)
 
-(def-rewrite
-  :match (times (:any A) (:any B) A)
+(def-rewrite ;; A * B = A
+  :match {:rexpr (times (:variable A) (:any B) (:variable C))
+          :check (= A C)}
   :assigns-variable B
   1)
 

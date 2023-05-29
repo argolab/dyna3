@@ -946,6 +946,7 @@
                                                  ~rexpr-context
                                                  (do ;(debug-repl "ctx mm")
                                                    (when (and ~@(for [pv present-variables] ;; do not want to match something that has already been matched
+                                                                  ;; this should only consider the present variables which are R-exprs, whereas most of the present variables will
                                                                   `(not= ~pv ~rexpr-context)))
                                                      ~(make-rexpr-matching-function rexpr-context (conj present-variables rexpr-context) context-match body))))))))
 
@@ -959,20 +960,20 @@
         ;; this returns an array of [`(expression-that-checks-match) `variable-to-unpack-into expression-to-recursively-match-or-nil]
         match-args (vec (map (fn [a]
                                (cond
-                                 (and (symbol? a) (contains? present-variables a)) (let [r (gensym 'match-equals-var)] ;; this will check withan existing variable being the same as this value
-                                                                                     [`(= ~a ~r) r nil])
-                                 (= a '_) [`true (gensym 'do-not-care) nil]  ;; this is an expression like `_` where there could be many we ignore
-                                 (symbol? a) [`true a nil]  ;; this is an expression like `binding-var`
-                                 (and (= 2 (count a))   ;; this is an expression like `(:foo binding-var)`
-                                      (not (contains? @rexpr-containers-signature (car a)))
-                                      (symbol? (cdar a)))
-                                   (let [var (if (= (cdar a) '_) (gensym 'do-not-reuse) (cdar a))
-                                         checker (get @rexpr-matchers (car a) (car a))]
-                                     (dyna-assert (not (keyword? checker))) ;; this should have already been resolved
-                                     [`(~checker ~var) var nil])
+                                      (and (symbol? a) (contains? present-variables a)) (let [r (gensym 'match-equals-var)] ;; this will check withan existing variable being the same as this value
+                                                                                          [`(= ~a ~r) r nil])
+                                      (= a '_) [`true (gensym 'do-not-care) nil] ;; this is an expression like `_` where there could be many we ignore
+                                      (symbol? a) [`true a nil] ;; this is an expression like `binding-var`
+                                      (and (= 2 (count a)) ;; this is an expression like `(:foo binding-var)`
+                                           (not (contains? @rexpr-containers-signature (car a)))
+                                           (symbol? (cdar a)))
+                                      (let [var (if (= (cdar a) '_) (gensym 'do-not-reuse) (cdar a))
+                                            checker (get @rexpr-matchers (car a) (car a))]
+                                        (dyna-assert (not (keyword? checker))) ;; this should have already been resolved
+                                        [`(~checker ~var) var nil])
 
-                                 ;; if we did not match one of the existing patterns, then this assumes that the inner part needs to get matched recursivly
-                                 :else [`true (gensym 'more-match) a]))
+                                      ;; if we did not match one of the existing patterns, then this assumes that the inner part needs to get matched recursivly
+                                      :else [`true (gensym 'more-match) a]))
                              (cdr rexpr-match)))
         present-variables (union present-variables (into #{} (map cdar match-args)))
         body2 (if (and (map? matcher) (contains? matcher :check))
@@ -989,6 +990,7 @@
     (dyna-assert (= (count (get @rexpr-containers-signature (symbol rexpr-type-matched))) (- (count rexpr-match) 1))
           ;  "The R-expr match expression does not contain the right number of arguments, it will never match"
                  )
+    (dyna-assert (apply distinct? (map second match-args)))
     (assert (subset? (keys matcher) #{:rexpr :context :check})
             "matcher map contains unexepxected key")
     `(when ;(~(symbol (str "is-" rexpr-type-matched "?")) ~source-variable)
@@ -1365,7 +1367,7 @@
 
 (def-rewrite-matcher :free [var-name]
   (and (is-variable? var-name)
-       (not (is-bound? var-name) #_(is-variable-set? var-name))
+       (not (is-bound? var-name))
        var-name))
 
 ;; (def-rewrite-matcher :computes [var-name] ;; this can be the the same as free, but it should represent that it will compute something

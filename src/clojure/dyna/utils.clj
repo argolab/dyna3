@@ -64,11 +64,12 @@
     ;; res
         ))
 
-(defn eval-with-locals
+(defn- eval-with-locals
   "Evals a form with given locals.  The locals should be a map of symbols to
   values."
-  [locals form]
-  (binding [*locals* locals]
+  [locals namespace form]
+  (binding [*locals* locals
+            *ns* namespace]
     (eval
      `(let ~(vec (mapcat #(list % `(*locals* '~%)) (keys locals)))
         ~form))))
@@ -78,7 +79,7 @@
 (def debug-useful-variables (atom {'aprint (constantly aprint)
                                    'reflect (constantly reflect)}))
 
-(defn- debug-repl-fn [prompt local-bindings ^Throwable traceback print-bindings]
+(defn- debug-repl-fn [prompt local-bindings ^Throwable traceback print-bindings current-namespace]
   (let [all-bindings  (merge (into {} (for [[k v] @debug-useful-variables]
                                         [k (v)]))
                              (into {} (for [[k v] (ns-publics 'dyna.rexpr-constructors)]
@@ -106,7 +107,7 @@
                      ;; TODO: this should attempt to lookup names in some context
                      :else res)))
      :prompt #(print prompt "=> ")
-     :eval (partial eval-with-locals all-bindings))))
+     :eval (partial eval-with-locals all-bindings current-namespace))))
 
 (if (= (System/getProperty "dyna.debug_repl" "true") "false")
   (defn- debug-repl-fn [prompt local-bindings ^Throwable traceback print-bindings]))
@@ -116,7 +117,7 @@
   "Starts a REPL with the local bindings available."
   ([] `(debug-repl "dr"))
   ([prompt] `(debug-repl ~prompt true))
-  ([prompt print-bindings] `(~debug-repl-fn ~prompt (debugger-get-local-bindings) (Throwable. "Entering Debugger") ~print-bindings)))
+  ([prompt print-bindings] `(~debug-repl-fn ~prompt (debugger-get-local-bindings) (Throwable. "Entering Debugger") ~print-bindings ~*ns*)))
 
 (defmacro debug-delay-ntimes [ntimes & body]
   (let [sym (gensym 'debug-delay)
