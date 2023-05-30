@@ -1367,8 +1367,7 @@
 
 (def-rewrite-matcher :free [var-name]
   (and (is-variable? var-name)
-       (not (is-bound? var-name))
-       var-name))
+       (not (is-bound? var-name))))
 
 ;; (def-rewrite-matcher :computes [var-name] ;; this can be the the same as free, but it should represent that it will compute something
 ;;   (and (is-variable? var-name)

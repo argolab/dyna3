@@ -293,9 +293,12 @@
   (let [shown-count (get @warnings-shown-so-far msg 0)]
     (when (< shown-count 3)
       (swap! warnings-shown-so-far update msg (fnil inc 0))
-      (println "=============================================")
-      (println "WARNING" msg)
-      (println "============================================="))))
+      (let [line-length (apply max (map count (.split (str msg) "\n")))
+            pre (apply str (repeat line-length "="))]
+        (println pre)
+        (print (str "\033[0;31m" (apply str (repeat (quot line-length 8) "Warning ")) "\033[0m\n"))
+        (println msg)
+        (println pre)))))
 
 
 ;; the clojure protocols are a bit more heavy weight than Java interfaces, as

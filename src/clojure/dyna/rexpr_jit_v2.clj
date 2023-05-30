@@ -393,7 +393,7 @@
   )
 
 
-(def ^{:private true :dynamic true} *precondition-checks-to-perform* nil
+(def ^{:private true :dynamic true} *precondition-checks-performed* nil
   ;; this will be a (transient []) of conditions which need to get checked before we can apply the rewrite
   ;; these will get generated before
   )
@@ -402,11 +402,34 @@
 
 (def ^{:private true :dynamic true} *jit-simplify-call-counter* nil)
 (def ^{:private true :dynamic true} *jit-simplify-rewrites-found* nil)
-(def ^{:private true :dynamic true} *jit-simplify-rewrites-picked-to-run* nil)
+(def ^{:private true :dynamic true} *jit-simplify-rewrites-picked-to-run* (constantly false))
+
+(def ^{:private true :dynamic true} *jit-generate-functions* nil)
+
+(defn- generate-cljcode [generate-functions]
+  (if (empty? generate-functions)
+    identity
+    (let [f (first generate-functions)
+          r (generate-cljcode generate-functions)]
+      (fn [inner] (f (partial r inner))))))
+
+(def ^{:private true :dynamic true} *jit-cached-expression-results* nil)
+
+(defn- add-to-expression-cache!
+  ([expression result]
+   (when-not (nil? *jit-cached-expression-results*)
+     (assoc! *jit-cached-expression-results* expression result)))
+  ([value]
+   (add-to-expression-cache! (:cljcode-expr value) value)))
 
 (defn- add-precondition-to-check [condition]
-  (when (and (not (nil? *precondition-checks-to-perform*)) (not (contains? *preconditions-known-true* condition)))
-    (conj! *precondition-checks-to-perform* condition)))
+  (if (and (not (nil? *precondition-checks-performed*)) (contains? *precondition-checks-performed* condition))
+    nil
+    (do
+      (when-not (nil? *precondition-checks-performed*)
+        (conj! *precondition-checks-performed* condition))
+      `(when-not ~condition
+         (throw (DynaJITRunningCheckFailed.))))))
 
 (defn- add-precondition-on-same-value [value]
   (case (:type value)
@@ -421,12 +444,20 @@
                    ;; that we should condition on, or this is going to be some internal value, which is not going to change then.
                    ;; When it is something which is internal, then the value will be able to reference an internal variable, but that will again require that it is a static variable.
                    ;; I don't think that there is a way in which we will allow for this to not be a static variable given how we are generating the JIT representations.
+                   (debug-repl "todo precondtion rexpr value")
                    (???))
     :value (when-not (contains? value :constant-value)
              (assert (contains? value :current-value)) ;; otherwise we can not have that this will be the same as what it is currently, so it needs to know the currentl value
-             (add-precondition-to-check `(= ~(:current-value value) (:cljcode-expr value))))
+             (add-precondition-to-check `(= ~(:current-value value) ~(:cljcode-expr value))))
 
     (???)))
+
+(defn- concat-code [& args]
+  (let [a (remove #(or (nil? %) (boolean? %) (string? %) (number? %)) (drop-last args))
+        l (last args)]
+    (if (#{:rexpr :rexpr-value :value} (:type l))
+      (assoc l :cljcode-expr `(let* [] ~@a ~(:cljcode-expr l)))
+      `(let* [] ~@a ~l))))
 
 (def ^:private evaluate-symbol-meta (atom {}))  ;; symbols like 'do, are compiler builtins and not variables, so we can't easily associate meta with them
 
@@ -622,12 +653,12 @@
                            (let [condv (jit-evaluate-cljform cond)
                                  cval (get-current-value condv)]
                              (if cval
-                               (do
-                                 (add-precondition-to-check (:cljcode-expr condv))
-                                 (jit-evaluate-cljform true-b))
-                               (do
-                                 (add-precondition-to-check `(not ~(:cljcode-expr condv)))
-                                 (jit-evaluate-cljform false-b)))))})
+                               (concat-code
+                                (add-precondition-to-check (:cljcode-expr condv))
+                                (jit-evaluate-cljform true-b))
+                               (concat-code
+                                (add-precondition-to-check `(not ~(:cljcode-expr condv)))
+                                (jit-evaluate-cljform false-b)))))})
 
 (defn- set-jit-method [v f]
   (if (var? v)
@@ -708,7 +739,9 @@
          rexpr-matcher (:rexpr matcher)
          rname (rexpr-name rexpr)
          args (get-arguments rexpr)
-         rsignature (get @rexpr-containers-signature rname)]
+         rsignature (get @rexpr-containers-signature rname)
+         ;runtime-checks (transient [])
+         ]
      (if (= rname (first rexpr-matcher))
        (let [match-result (vec (for [[match-expr arg [arg-sig _]] (zipseq (rest rexpr-matcher) args rsignature)]
                                  (let [t (case arg-sig
@@ -751,7 +784,8 @@
                                                                 (debug-repl "TODO")
                                                                 (if (contains? currently-bound-variables match-expr)
                                                                   (do
-                                                                    (conj! to-check-expressions `(= ~arg ~(get currently-bound-variables match-expr)))
+                                                                    (conj! to-check-expressions `(when-not (= ~arg ~(get currently-bound-variables match-expr))
+                                                                                                   (throw (DynaJITRunningCheckFailed.))))
                                                                     ;; if the current
                                                                     (???) ;; TODO: this needs handle the current value check.
                                                                     )
@@ -769,10 +803,10 @@
                                                                                                     curval}]
                                                                  (jit-evaluate-cljform (:matcher-body match-requires-meta))))]
                                            ;; this is a match wtih a check
-                                           (debug-repl "match check")
+                                           ;(debug-repl "match check")
 
                                            (if (get-current-value match-success)
-                                             (do (add-precondition-on-same-value match-success)
+                                             (do (conj! to-check-expressions (add-precondition-on-same-value match-success))
                                                  true)
                                              false))
 
@@ -786,7 +820,9 @@
                                  ))]
          (if (every? true? match-result)
            (if (= (list :rexpr) (keys matcher))
-             true
+             (do
+               (debug-repl "rr pick")
+               true)
              (do
                (println "TODO: rewrite matched which has additional checks that need to be performed first")
                false))
@@ -799,6 +835,10 @@
          currently-matches (compute-match rexpr matcher1 to-check currently-bound)]
      [currently-matches (persistent! to-check) (persistent! currently-bound)])))
 
+(defn- simplify-perform-generic-rewrite [rexpr rewrite]
+  (debug-repl "TODO: perform rewrite")
+  (???))
+
 
 (defn- simplify-jit-internal-rexpr-generic-rewrites [rexpr]
   (vswap! *jit-simplify-call-counter* inc)
@@ -810,14 +850,17 @@
                                                              (let [[success matching] (compute-match rexpr (:matcher rr))]
                                                                ;(debug-repl "ss")
                                                                (when success
-                                                                 (assoc rr :matching-vars matching)))))))
+                                                                 (assoc rr
+                                                                        :matching-vars matching
+                                                                        :simplify-call-counter (vswap! *jit-simplify-call-counter* inc))))))))
                                                      rewrites)))]
     (doseq [mr matching-rewrites]
-      (vswap! *jit-simplify-rewrites-found* conj [@*jit-simplify-call-counter* *current-simplify-stack* mr]))
-    (let [picked (filter #(*jit-simplify-rewrites-picked-to-run* [*jit-simplify-call-counter* %]) matching-rewrites)]
+      (vswap! *jit-simplify-rewrites-found* conj [*current-simplify-stack* mr]))
+    (let [picked (filter *jit-simplify-rewrites-picked-to-run* matching-rewrites)]
       (if (empty? picked)
         nil
-        (do
+        (simplify-perform-generic-rewrite rexpr (first picked))
+        #_(do
           ;; going to perform the rewrite, which means that
 
           (debug-repl "need to perform rewrite")
@@ -850,18 +893,22 @@
                  (:rexpr-type rexpr)))]
     (let [possible-rewrites (binding [*jit-simplify-call-counter* (volatile! 0)
                                       *jit-simplify-rewrites-found* (volatile! #{})
-                                      *jit-simplify-rewrites-picked-to-run* #{}]
+                                      *jit-simplify-rewrites-picked-to-run* (constantly false)]
                               (let [nr (simplify-jit-internal-rexpr r)]
                                 (dyna-assert (= r nr)) ;; we did not pick anything to run, so the result should be the same
                                 @*jit-simplify-rewrites-found*))]
-      (debug-repl "pick between rewrites found")
-      (???))
-
-    #_(let [nr (binding [*jit-simplify-call-counter* (volatile! 0)]
-               (simplify-jit-internal-rexpr r))]
-      (if (not= r nr)
-        (recur nr)
-        nr))))
+      (when (> 1 (count possible-rewrites))
+        (debug-repl "pick between rewrites found")
+        (???))
+      (assert (not (empty? possible-rewrites)))
+      (let [picked-cc (:simplify-call-counter (cadar possible-rewrites))]
+        (binding [*jit-simplify-rewrites-picked-to-run* (fn [rr-md]
+                                                          (= (:simplify-call-counter rr-md) picked-cc))
+                  *jit-simplify-call-counter* (volatile! 0)
+                  *jit-simplify-rewrites-found* (volatile! #{})]
+          (let [nr (simplify-jit-internal-rexpr r)]
+            (debug-repl "result of doing rewrite")
+            (???)))))))
 
 
 

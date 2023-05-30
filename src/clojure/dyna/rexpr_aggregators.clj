@@ -7,7 +7,7 @@
                                          make-not-equals make-colon-line-tracking-min upcast-big-int]])
   (:require [dyna.context :as context])
   (:require [dyna.iterators :refer [run-iterator make-skip-variables-iterator]])
-  (:import (dyna UnificationFailure DynaTerm DynaUserError ParserUtils))
+  (:import (dyna UnificationFailure DynaTerm DynaUserError ParserUtils DynaMap))
   (:import [dyna.rexpr aggregator-rexpr])
 
   (:require [clojure.set :refer [subset?]]))
@@ -289,6 +289,20 @@
     :many-items (fn [val mult] val)))
 
 
+
+(def-aggregator "concat_list="
+  ;; concat lists together.
+  :identity DynaTerm/null_term
+  :combine (fn [a b] (let [av (.list_to_vec ^DynaTerm a)
+                           bv (.list_to_vec ^DynaTerm b)]
+                       (assert (and (not (nil? av)) (not (nil? bv))))
+                       (DynaTerm/make_list (concat av bv)))))
+
+(def-aggregator "merge_map="
+  ;; merge maps together.  should allow for multiple keys to get combined, but the order / overrides is non-deterministic
+  :identity (DynaMap. {})
+  :combine (fn [a b]
+             (DynaMap. (merge (.map-elements ^DynaMap a) (.map-elements ^DynaMap b)))))
 
 
 (def-rewrite
