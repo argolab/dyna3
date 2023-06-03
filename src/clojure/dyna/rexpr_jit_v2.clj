@@ -8,7 +8,7 @@
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
   (:import [dyna.rexpr proj-rexpr])
-  (:import [dyna RexprValue Rexpr DynaJITRunningCheckFailed]))
+  (:import [dyna RexprValue Rexpr DynaJITRuntimeCheckFailed]))
 
 ;; this is going to want to cache the R-expr when there are no arguments which are "variables"
 ;; so something like multiplicy can be just a constant value
@@ -372,6 +372,11 @@
   ;; with this indirecting through what needs to happen for a given value
   )
 
+(def ^{:private true :dynamic true} *local-variable-names-for-variable-values* nil;(volatile! nil)
+  ;; values from variables which have been read can be stored in a local variable.  these variables can just read from these local variables instead of looking through the context
+  ;; if a variable value's is read, then it should get saved to a local variable somewhere
+  )
+
 (def ^{:private true :dynamic true} *rewrites-allowed-to-run* #{:construction :standard}
   ;; which rewrites are we allowed to attempt to run at this point the inference
   ;; rewrites might not be run all of the time depending on if we are building a
@@ -413,6 +418,52 @@
           r (generate-cljcode generate-functions)]
       (fn [inner] (f (partial r inner))))))
 
+(defn- generate-cljcode-fn []
+  `(fn ~'[rexpr simplify]
+     #_(let [~'context (context/get-context)])
+     (try
+       (do ~((generate-cljcode *jit-generate-functions*)
+             (fn [x]
+               ;; TODO: the inner expression needs to return an R-expr which corresponds with the state of the JITted code after it has performed many steps
+               ;; either this should already be put into the JITted code here, or it should have already been generated somewhere else
+               `(???))))
+       (catch DynaJITRuntimeCheckFailed err nil))))
+
+(defn- add-to-generation! [value]
+  (cond (fn? value)
+        (when-not (nil? *jit-generate-functions*)
+          (conj! *jit-generate-functions* value))
+        (= :void (:type value)) nil
+
+        :else
+        (let [cljcode (if (and (map? value) (contains? value :cljcode-expr))
+                        (:cljcode-expr value)
+                        value)]
+          (assert (not (nil? cljcode)))
+          (add-to-generation! (fn [inner]
+                                `(do
+                                   ~cljcode
+                                   ~(inner)))))))
+
+(defn- generate-cljcode-to-materalize-rexpr [rexpr & {:keys [simplify-result] :or {simplify-result false}}]
+  ;; this is going to have to figure out which variables are referencing some value
+  ;; and then create a new R-expr type with holes, and generate the new "make R-expr"
+
+  ;; if simplify result is true, then we should pass the expression to simplify
+  ;; again.  This will allow for checkpoints to keep rewriting from its
+  ;; seralized state, whereas for an ending state, we might just want to return
+  ;; it, as it should go back into the control flow of "other" stuff
+  `(do
+     (debug-repl "TODO: gen return of R-expr")
+     (???)))
+
+(defn- add-return-rexpr-checkpoint! [rexpr]
+  (add-to-generation! (fn [inner]
+                        `(try
+                           (do ~(inner))
+                           (catch DynaJITRuntimeCheckFailed ~'_
+                             ~(generate-cljcode-to-materalize-rexpr rexpr :simplify-result true))))))
+
 (def ^{:private true :dynamic true} *jit-cached-expression-results* nil)
 
 (defn- add-to-expression-cache!
@@ -429,7 +480,7 @@
       (when-not (nil? *precondition-checks-performed*)
         (conj! *precondition-checks-performed* condition))
       `(when-not ~condition
-         (throw (DynaJITRunningCheckFailed.))))))
+         (throw (DynaJITRuntimeCheckFailed.))))))
 
 (defn- add-precondition-on-same-value [value]
   (case (:type value)
@@ -519,7 +570,9 @@
                                      (:macro m)
                                      {:type :function
                                       :invoke (fn [form]
-                                                (jit-evaluate-cljform (macroexpand form)))}
+                                                (try (jit-evaluate-cljform (binding [*ns* *rewrite-ns*]
+                                                                             (macroexpand form)))
+                                                     (catch StackOverflowError err (throw (RuntimeException. (str "Stack overflow " form))))))}
 
                                      (contains? @evaluate-symbol-meta expr)
                                      {:type :function
@@ -672,12 +725,15 @@
 (set-jit-method
  #'is-bound?
  (fn [[n arg]]
-   (let [varj (jit-evaluate-cljform arg)
-         ret {:type :value
-              :cljcode-expr `(is-bound? ~(:cljcode-expr varj))
-              :current-value (is-bound? (:current-value varj))}]
+   (let [varj (jit-evaluate-cljform arg)]
      (assert (= :rexpr-value (:type varj)))
-     ret)))
+     (if (contains? @*local-variable-names-for-variable-values* (:matched-variable varj))
+       {:type :value
+        :constant-value true
+        :cljcode-expr true}
+       {:type :value
+        :cljcode-expr `(is-bound? ~(:cljcode-expr varj))
+        :current-value (is-bound? (:current-value varj))}))))
 
 (set-jit-method
  [#'is-constant?
@@ -698,6 +754,65 @@
               {:current-value result})))))
 
 (set-jit-method
+ #'get-value
+ (fn [[_ var]]
+   (let [varj (jit-evaluate-cljform var)
+         ;cval (get-current-value varj)
+         ;result (get-value cval)
+         ]
+     (assert (= :rexpr-value (:type varj)))
+     (cond (is-constant? (:constant-value varj))
+           {:type :value
+            :constant-value (get-value (:constant-value varj))
+            :cljcode-expr (get-value (:constant-value varj))}
+
+           (contains? @*local-variable-names-for-variable-values* (:matched-variable varj))
+           (let []
+             {:type :value
+              :cljcode-expr (@*local-variable-names-for-variable-values* (:matched-variable varj))
+              :current-value (get-value (get-current-value varj))})
+
+           (instance? jit-exposed-variable-rexpr (:matched-variable varj))
+           (let [local-name (gensym 'local-cache)
+                 cval (get-current-value varj)]
+             (add-to-generation! (fn [inner]
+                                   `(let* [~local-name (get-value ~(:cljcode-expr varj))]
+                                      ~(inner))))
+             (assert (is-bound? cval))
+             (vswap! *local-variable-names-for-variable-values* assoc (:matched-variable varj) local-name)
+             {:type :value
+              :current-value (get-value cval)
+              :cljcode-expr local-name})
+
+           :else
+           (let []
+             (???)
+             {:type :value
+              ;:current-value result
+              ;:cljcode-expr `(get-value ~(:cljcode-expr varj))
+              }
+             )))))
+
+(set-jit-method
+ #'set-value!
+ (fn [[_ var value]]
+   (let [varj (jit-evaluate-cljform var)
+         valj (jit-evaluate-cljform value)
+         local-value-name (gensym 'local-value)]
+     (assert (= :value (:type valj)))
+     (assert (= :rexpr-value (:type varj)))
+     ;; this will have to track which variables are set.
+     ;; it should also have that this is going to set the value in the current context.  This will mean that it will be looking for it to find
+     (add-to-generation! (fn [inner]
+                           `(let* [~local-value-name ~(:cljcode-expr valj)]
+                              ~(when (instance? jit-exposed-variable-rexpr (:matched-variable varj))
+                                 `(set-value! ~(:cljcode-expr varj) ~local-value-name))
+                              ~(inner))))
+     (vswap! *local-variable-names-for-variable-values* assoc (:matched-variable varj) local-value-name)
+     {:type :void ;; indicate that this function does not have some value which is evaluated, but instead is some sideeffect?
+      })))
+
+(set-jit-method
  [#'context/make-empty-context
   #'context/make-nested-context-disjunct
   #'context/make-nested-context-proj
@@ -710,7 +825,12 @@
   #'context/bind-context-raw
   #'context/bind-no-context
   #'get-user-term
-  #'push-thread-bindings]
+  #'push-thread-bindings
+
+  #'get-value-in-context
+  #'is-bound-in-context?
+  #'get-representation-in-context
+  ]
  (fn [form]
    (throw (RuntimeException. "Unsupported in JITted code"))))
 
@@ -763,7 +883,10 @@
                                        curval (cond (instance? jit-exposed-variable-rexpr arg)
                                                     {:type t
                                                      :current-value (*current-assignment-to-exposed-vars* (:exposed-name arg))
-                                                     :cljcode-expr (:exposed-name arg)
+                                                     ;; access the field directly from the type.  The top level R-expr will be assigned to the variable rexpr
+                                                     ;;
+                                                     :cljcode-expr `(. ~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))})
+                                                                       ~(:exposed-name arg))    ;(:exposed-name arg)
                                                      :matched-variable arg}
                                                     (is-constant? arg)
                                                     {:type :rexpr-value
@@ -785,7 +908,7 @@
                                                                 (if (contains? currently-bound-variables match-expr)
                                                                   (do
                                                                     (conj! to-check-expressions `(when-not (= ~arg ~(get currently-bound-variables match-expr))
-                                                                                                   (throw (DynaJITRunningCheckFailed.))))
+                                                                                                   (throw (DynaJITRuntimeCheckFailed.))))
                                                                     ;; if the current
                                                                     (???) ;; TODO: this needs handle the current value check.
                                                                     )
@@ -807,6 +930,7 @@
 
                                            (if (get-current-value match-success)
                                              (do (conj! to-check-expressions (add-precondition-on-same-value match-success))
+                                                 (assoc! currently-bound-variables (cdar match-expr) curval)
                                                  true)
                                              false))
 
@@ -821,7 +945,7 @@
          (if (every? true? match-result)
            (if (= (list :rexpr) (keys matcher))
              (do
-               (debug-repl "rr pick")
+               ;(debug-repl "rr pick")
                true)
              (do
                (println "TODO: rewrite matched which has additional checks that need to be performed first")
@@ -836,8 +960,41 @@
      [currently-matches (persistent! to-check) (persistent! currently-bound)])))
 
 (defn- simplify-perform-generic-rewrite [rexpr rewrite]
-  (debug-repl "TODO: perform rewrite")
-  (???))
+  (let [kw-args (:kw-args rewrite)]
+    (cond (contains? kw-args :check)
+          (???)
+
+          (contains? kw-args :assigns-variable)
+          (binding [*locally-bound-variables* (merge {'rexpr {:type :rexpr
+                                                              :cljcode-expr '(bad-gen)
+                                                              :rexpr-type rexpr}}
+                                                     (:matching-vars rewrite))
+                    *rewrite-ns* (:namespace rewrite)]
+            (let [assigning-var (:assigns-variable kw-args)
+                  value-expression (:rewrite-body rewrite)
+                  expression `(set-value! ~assigning-var ~value-expression)
+                  ;vvv (jit-evaluate-cljform value-expression)
+                  ]
+              (add-to-generation! (jit-evaluate-cljform expression))
+              (make-multiplicity 1) ;; the result of assigning a variable will just be a mult1 expression
+              ))
+
+          (contains? kw-args :infers)
+          (???)
+
+          (contains? kw-args :assigns)
+          (???)
+
+          :else
+          (???))
+    #_(if (contains? :assigns-variable kw-args)
+      (do
+        ;; this is an assignment rewrite
+        )
+      (do
+        (debug-repl "TODO: handle non-assigns rewrite")
+        (???)))
+    ))
 
 
 (defn- simplify-jit-internal-rexpr-generic-rewrites [rexpr]
@@ -847,11 +1004,12 @@
                                                        (let [run-at (:run-at rr [:standard])]
                                                          (when (some *rewrites-allowed-to-run* run-at)
                                                            (binding [*rewrite-ns* (:namespace rr)]
-                                                             (let [[success matching] (compute-match rexpr (:matcher rr))]
-                                                               ;(debug-repl "ss")
+                                                             (let [[success runtime-checks currently-bound-vars] (compute-match rexpr (:matcher rr))]
                                                                (when success
+                                                                 ;(debug-repl "ss")
                                                                  (assoc rr
-                                                                        :matching-vars matching
+                                                                        :runtime-checks runtime-checks
+                                                                        :matching-vars currently-bound-vars
                                                                         :simplify-call-counter (vswap! *jit-simplify-call-counter* inc))))))))
                                                      rewrites)))]
     (doseq [mr matching-rewrites]
@@ -897,18 +1055,22 @@
                               (let [nr (simplify-jit-internal-rexpr r)]
                                 (dyna-assert (= r nr)) ;; we did not pick anything to run, so the result should be the same
                                 @*jit-simplify-rewrites-found*))]
-      (when (> 1 (count possible-rewrites))
-        (debug-repl "pick between rewrites found")
-        (???))
-      (assert (not (empty? possible-rewrites)))
-      (let [picked-cc (:simplify-call-counter (cadar possible-rewrites))]
-        (binding [*jit-simplify-rewrites-picked-to-run* (fn [rr-md]
-                                                          (= (:simplify-call-counter rr-md) picked-cc))
-                  *jit-simplify-call-counter* (volatile! 0)
-                  *jit-simplify-rewrites-found* (volatile! #{})]
-          (let [nr (simplify-jit-internal-rexpr r)]
-            (debug-repl "result of doing rewrite")
-            (???)))))))
+      (if (empty? possible-rewrites)
+        nr ;; then we are "done" and we just return this R-expr unrewritten
+        (do
+          (when (> 1 (count possible-rewrites))
+            (debug-repl "pick between rewrites found")
+            (???))
+          (assert (not (empty? possible-rewrites)))
+          (let [picked-cc (:simplify-call-counter (cadar possible-rewrites))]
+            (binding [*jit-simplify-rewrites-picked-to-run* (fn [rr-md]
+                                                              (= (:simplify-call-counter rr-md) picked-cc))
+                      *jit-simplify-call-counter* (volatile! 0)
+                      *jit-simplify-rewrites-found* (volatile! #{})]
+              (let [nr (simplify-jit-internal-rexpr r)]
+                (add-return-rexpr-checkpoint! nr)
+                (debug-repl "result of doing rewrite")
+                (recur nr)))))))))
 
 
 
@@ -930,7 +1092,8 @@
               *jit-consider-expanding-placeholders* false ;; TODO: this should eventually be true
               *jit-call-simplify-on-placeholders* false
               *current-assignment-to-exposed-vars* local-name-to-context
-              *current-simplify-stack* ()]
+              *current-simplify-stack* ()
+              *local-variable-names-for-variable-values* (volatile! nil)]
       (debug-binding
        ;; restart these values, as we are running a nested version of simplify for ourselves
        [*current-simplify-running* nil]
@@ -944,10 +1107,11 @@
              ;;                                ;;(???) ;; this expression should never be evaluated directly
              ;;                                (bad-gen))
              ;;                 }
-             prim-r {:type :rexpr
+             prim-r (:prim-rexpr-placeholders jinfo)
+             #_{:type :rexpr
                      :cljcode-expr '(do
                                       (bad-gen))
-                     :rexpr-type (:prim-rexpr-placeholders jinfo)}
+                :rexpr-type (:prim-rexpr-placeholders jinfo)}
              ;;rr (debug-repl)
              result (simplify-jit-internal-rexpr-loop prim-r)]
 

@@ -544,6 +544,9 @@ expressionRoot returns [DynaTerm rterm]
     | mp=assocativeMap { $rterm=$mp.rterm; }
     | db=dynabase { $rterm = $db.rterm; }
     | v=Variable '(' arguments ')' {
+            if($v.getText().equals("_")) {
+                throw new DynaUserError("Calling an unscore function is not supported");
+            }
             // for doing an indirect call to some value
             $arguments.args.add(0, DynaTerm.create("\$variable", $v.getText()));
             $rterm = DynaTerm.create_arr("\$call", $arguments.args);
