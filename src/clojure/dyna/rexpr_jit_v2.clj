@@ -546,8 +546,6 @@
         (symbol? expr) (let [local-symbol (get *locally-bound-variables* expr)]
                            (if-not (nil? local-symbol)
                              local-symbol
-                             #_(do (dyna-assert (contains? local-symbol :local-var))
-                                   (assoc local-symbol :cljcode-expr (:local-var local-symbol)))
                              (let [var (or (ns-resolve *rewrite-ns* expr)
                                            (get @evaluate-symbol-meta expr))
                                    m (meta var)]
@@ -587,6 +585,7 @@
                                                       ret {:type :value
                                                            :cljcode-expr `(~(var-get var) ~@(map :cljcode-expr avals))}
                                                       result (when can-eval
+                                                               (debug-repl "can eval")
                                                                (apply (var-get var) (map get-current-value avals)))]
                                                   (if can-eval
                                                     (assoc ret (if (every? #(contains? % :constant-value) avals)
@@ -786,6 +785,7 @@
 
            :else
            (let []
+             (debug-repl "some get value")
              (???)
              {:type :value
               ;:current-value result
@@ -888,10 +888,12 @@
                                                      :cljcode-expr `(. ~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))})
                                                                        ~(:exposed-name arg))    ;(:exposed-name arg)
                                                      :matched-variable arg}
+
                                                     (is-constant? arg)
                                                     {:type :rexpr-value
+                                                     :constant-value arg
                                                      :current-value arg
-                                                     :cljcode-expr arg}
+                                                     :cljcode-expr `(make-constant ~(get-value arg))}
 
                                                     :else
                                                     (let []
@@ -1006,7 +1008,7 @@
                                                            (binding [*rewrite-ns* (:namespace rr)]
                                                              (let [[success runtime-checks currently-bound-vars] (compute-match rexpr (:matcher rr))]
                                                                (when success
-                                                                 ;(debug-repl "ss")
+                                                                 (debug-repl "ss")
                                                                  (assoc rr
                                                                         :runtime-checks runtime-checks
                                                                         :matching-vars currently-bound-vars
@@ -1056,21 +1058,22 @@
                                 (dyna-assert (= r nr)) ;; we did not pick anything to run, so the result should be the same
                                 @*jit-simplify-rewrites-found*))]
       (if (empty? possible-rewrites)
-        nr ;; then we are "done" and we just return this R-expr unrewritten
+        r ;; then we are "done" and we just return this R-expr unrewritten
         (do
           (when (> 1 (count possible-rewrites))
             (debug-repl "pick between rewrites found")
             (???))
           (assert (not (empty? possible-rewrites)))
-          (let [picked-cc (:simplify-call-counter (cadar possible-rewrites))]
-            (binding [*jit-simplify-rewrites-picked-to-run* (fn [rr-md]
-                                                              (= (:simplify-call-counter rr-md) picked-cc))
-                      *jit-simplify-call-counter* (volatile! 0)
-                      *jit-simplify-rewrites-found* (volatile! #{})]
-              (let [nr (simplify-jit-internal-rexpr r)]
-                (add-return-rexpr-checkpoint! nr)
-                (debug-repl "result of doing rewrite")
-                (recur nr)))))))))
+          (let [picked-cc (:simplify-call-counter (cadar possible-rewrites))
+                nr (binding [*jit-simplify-rewrites-picked-to-run* (fn [rr-md]
+                                                                  (= (:simplify-call-counter rr-md) picked-cc))
+                          *jit-simplify-call-counter* (volatile! 0)
+                          *jit-simplify-rewrites-found* (volatile! #{})]
+                  (let [nr (simplify-jit-internal-rexpr r)]
+                    (add-return-rexpr-checkpoint! nr)
+                    (debug-repl "result of doing rewrite")
+                    nr))]
+            (recur nr)))))))
 
 
 
