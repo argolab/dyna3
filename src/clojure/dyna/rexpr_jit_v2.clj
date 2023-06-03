@@ -413,21 +413,10 @@
 
 (defn- generate-cljcode [generate-functions]
   (if (empty? generate-functions)
-    identity
+    (fn [f] (f))
     (let [f (first generate-functions)
-          r (generate-cljcode generate-functions)]
+          r (generate-cljcode (rest generate-functions))]
       (fn [inner] (f (partial r inner))))))
-
-(defn- generate-cljcode-fn []
-  `(fn ~'[rexpr simplify]
-     #_(let [~'context (context/get-context)])
-     (try
-       (do ~((generate-cljcode *jit-generate-functions*)
-             (fn [x]
-               ;; TODO: the inner expression needs to return an R-expr which corresponds with the state of the JITted code after it has performed many steps
-               ;; either this should already be put into the JITted code here, or it should have already been generated somewhere else
-               `(???))))
-       (catch DynaJITRuntimeCheckFailed err nil))))
 
 (defn- add-to-generation! [value]
   (cond (fn? value)
@@ -463,6 +452,19 @@
                            (do ~(inner))
                            (catch DynaJITRuntimeCheckFailed ~'_
                              ~(generate-cljcode-to-materalize-rexpr rexpr :simplify-result true))))))
+
+(defn- generate-cljcode-fn [final-rexpr]
+  `(fn ~'[rexpr simplify]
+     #_(let [~'context (context/get-context)])
+     (try
+       (do ~((generate-cljcode (persistent! *jit-generate-functions*))
+             (fn []
+               (generate-cljcode-to-materalize-rexpr final-rexpr)
+               ;; TODO: the inner expression needs to return an R-expr which corresponds with the state of the JITted code after it has performed many steps
+               ;; either this should already be put into the JITted code here, or it should have already been generated somewhere else
+               ;`(???)
+               )))
+       (catch DynaJITRuntimeCheckFailed ~'_ nil))))
 
 (def ^{:private true :dynamic true} *jit-cached-expression-results* nil)
 
@@ -585,7 +587,6 @@
                                                       ret {:type :value
                                                            :cljcode-expr `(~(var-get var) ~@(map :cljcode-expr avals))}
                                                       result (when can-eval
-                                                               (debug-repl "can eval")
                                                                (apply (var-get var) (map get-current-value avals)))]
                                                   (if can-eval
                                                     (assoc ret (if (every? #(contains? % :constant-value) avals)
@@ -670,11 +671,19 @@
                                                           [() l2])))
                                                     (let [[varname value & other] varassigns
                                                           value-expr (jit-evaluate-cljform value)
-                                                          local-variable-name (gensym varname)]
-                                                      (binding [*locally-bound-variables* (assoc *locally-bound-variables*
-                                                                                                 varname (assoc value-expr :local-var local-variable-name))]
-                                                        (let [[inner-binding res] (rec other body)]
-                                                          [(cons local-variable-name (cons (:cljcode-expr value-expr) inner-binding)) res])))))
+                                                          cljcode-expr (:cljcode-expr value-expr)]
+                                                      (if (or (symbol? cljcode-expr) (number? cljcode-expr) (string? cljcode-expr) (boolean? cljcode-expr)) ;; if "simple" don't make a new var
+                                                        (binding [*locally-bound-variables* (assoc *locally-bound-variables*
+                                                                                                   varname
+                                                                                                   (assoc value-expr :local-var cljcode-expr))]
+                                                          (let [[inner-binding res] (rec other body)]
+                                                            [inner-binding res]))
+                                                        (let [local-variable-name (gensym varname)]
+                                                          ;; make a new variable and assign the value to the variable, as it will be something that is "too complex" to potentially evaluate multiple times
+                                                          (binding [*locally-bound-variables* (assoc *locally-bound-variables*
+                                                                                                     varname (assoc value-expr :local-var local-variable-name))]
+                                                            (let [[inner-binding res] (rec other body)]
+                                                              [(cons local-variable-name (cons (:cljcode-expr value-expr) inner-binding)) res])))))))
                                                 bindings body)]
                              (assoc rbody :cljcode-expr `(let* ~(vec rbind) ~(:cljcode-expr rbody)))))})
 
@@ -766,10 +775,10 @@
             :cljcode-expr (get-value (:constant-value varj))}
 
            (contains? @*local-variable-names-for-variable-values* (:matched-variable varj))
-           (let []
+           (let [x (@*local-variable-names-for-variable-values* (:matched-variable varj))]
              {:type :value
-              :cljcode-expr (@*local-variable-names-for-variable-values* (:matched-variable varj))
-              :current-value (get-value (get-current-value varj))})
+              :cljcode-expr (strict-get x :var-name)
+              :current-value (strict-get x :current-value)})
 
            (instance? jit-exposed-variable-rexpr (:matched-variable varj))
            (let [local-name (gensym 'local-cache)
@@ -778,7 +787,8 @@
                                    `(let* [~local-name (get-value ~(:cljcode-expr varj))]
                                       ~(inner))))
              (assert (is-bound? cval))
-             (vswap! *local-variable-names-for-variable-values* assoc (:matched-variable varj) local-name)
+             (vswap! *local-variable-names-for-variable-values* assoc (:matched-variable varj) {:var-name local-name
+                                                                                                :current-value (get-value cval)})
              {:type :value
               :current-value (get-value cval)
               :cljcode-expr local-name})
@@ -801,14 +811,19 @@
          local-value-name (gensym 'local-value)]
      (assert (= :value (:type valj)))
      (assert (= :rexpr-value (:type varj)))
+     (assert (not (nil? *jit-generate-functions*)))
      ;; this will have to track which variables are set.
      ;; it should also have that this is going to set the value in the current context.  This will mean that it will be looking for it to find
      (add-to-generation! (fn [inner]
+                           (debug-repl "set-value gen")
                            `(let* [~local-value-name ~(:cljcode-expr valj)]
                               ~(when (instance? jit-exposed-variable-rexpr (:matched-variable varj))
                                  `(set-value! ~(:cljcode-expr varj) ~local-value-name))
                               ~(inner))))
-     (vswap! *local-variable-names-for-variable-values* assoc (:matched-variable varj) local-value-name)
+     (debug-repl "set-value stuff")
+     ;; if the value is set to the context, then it will have that this needs
+     (vswap! *local-variable-names-for-variable-values* assoc (:matched-variable varj) {:var-name local-value-name
+                                                                                        :current-value (get-current-value valj)})
      {:type :void ;; indicate that this function does not have some value which is evaluated, but instead is some sideeffect?
       })))
 
@@ -1008,7 +1023,7 @@
                                                            (binding [*rewrite-ns* (:namespace rr)]
                                                              (let [[success runtime-checks currently-bound-vars] (compute-match rexpr (:matcher rr))]
                                                                (when success
-                                                                 (debug-repl "ss")
+                                                                 ;(debug-repl "ss")
                                                                  (assoc rr
                                                                         :runtime-checks runtime-checks
                                                                         :matching-vars currently-bound-vars
@@ -1053,7 +1068,9 @@
                  (:rexpr-type rexpr)))]
     (let [possible-rewrites (binding [*jit-simplify-call-counter* (volatile! 0)
                                       *jit-simplify-rewrites-found* (volatile! #{})
-                                      *jit-simplify-rewrites-picked-to-run* (constantly false)]
+                                      *jit-simplify-rewrites-picked-to-run* (constantly false)
+                                      *jit-generate-functions* nil ;; make sure that we do not generate any code from selecting between rewrites
+                                      ]
                               (let [nr (simplify-jit-internal-rexpr r)]
                                 (dyna-assert (= r nr)) ;; we did not pick anything to run, so the result should be the same
                                 @*jit-simplify-rewrites-found*))]
@@ -1071,7 +1088,7 @@
                           *jit-simplify-rewrites-found* (volatile! #{})]
                   (let [nr (simplify-jit-internal-rexpr r)]
                     (add-return-rexpr-checkpoint! nr)
-                    (debug-repl "result of doing rewrite")
+                    ;(debug-repl "result of doing rewrite")
                     nr))]
             (recur nr)))))))
 
@@ -1096,7 +1113,8 @@
               *jit-call-simplify-on-placeholders* false
               *current-assignment-to-exposed-vars* local-name-to-context
               *current-simplify-stack* ()
-              *local-variable-names-for-variable-values* (volatile! nil)]
+              *local-variable-names-for-variable-values* (volatile! nil)
+              *jit-generate-functions* (transient [])]
       (debug-binding
        ;; restart these values, as we are running a nested version of simplify for ourselves
        [*current-simplify-running* nil]
@@ -1117,8 +1135,16 @@
                 :rexpr-type (:prim-rexpr-placeholders jinfo)}
              ;;rr (debug-repl)
              result (simplify-jit-internal-rexpr-loop prim-r)]
+         (if (not= result prim-r)
+           (let [gen-fn (generate-cljcode-fn result)]
+             ;; then there is something that we can generate
+             (debug-repl "pr1")
+             (???))
+           (do
+             ;; then there was nothing that can be rewritten, so this should
+             (???))
+           )
 
-         (debug-repl "pr1")
          ))
 
       ))
