@@ -36,6 +36,20 @@
           (is (= (make-multiplicity 1) res))
           (is (= 35 (ctx-get-value ctx (make-variable 'd)))))))))
 
+(deftest basic-jit3
+  (let [rexpr (make-proj (make-variable 'c)  ;; d = (a + 1)*7
+                         (make-conjunct [(make-add (make-variable 'a) (make-constant 1) (make-variable 'c))
+                                         (make-times (make-variable 'c) (make-constant 7) (make-variable 'd))]))
+        [synth-rexpr jit-type] (synthize-rexpr rexpr)]
+    (is (-> synth-rexpr type .getSimpleName (.startsWith "jit-rexpr")))
+
+    (let [ctx (context/make-empty-context synth-rexpr)]
+      (ctx-set-value! ctx (make-variable 'a) 3)
+      (binding [*generate-new-jit-rewrites* true]
+        (let [res (context/bind-context-raw ctx (simplify-fully synth-rexpr))]
+          (is (= (make-multiplicity 1) res))
+          (is (= 28 (ctx-get-value ctx (make-variable 'd)))))))))
+
 (comment
 
   #_(deftest basic-jit
@@ -46,27 +60,7 @@
 
 
 
-  (deftest basic-jit3
-    (let [rexpr (make-proj (make-variable 'c)  ;; d = (a + 1)*7
-                           (make-conjunct [(make-add (make-variable 'a) (make-constant 1) (make-variable 'c))
-                                           (make-times (make-variable 'c) (make-constant 7) (make-variable 'd))]))
-          [jit-rexpr jit-type] (synthize-rexpr rexpr)]
-      ;; make a new rewrite rule
-      (synthize-rewrite-rule jit-rexpr
-                             :arg-matches {(make-variable 'a) [:ground]
-                                           (make-variable 'd) [:free]} ;; a list of which pattern matches should be considered as matching
-                             :example-values {;(make-variable 'a)  22  ;; an "example" value which can be used to generate code for the rewrite, but not to condition specifically on this value
-                                              }
-                             :values {;(make-variable 'a) 22  ;; make a rewrite which is _specific_ to this particular value
-                                      })
 
-      (let [rr (make-conjunct [(make-unify (make-variable 'a) (make-constant 11))
-                               jit-rexpr])
-            ctx (context/make-empty-context rr)
-            res (context/bind-context-raw ctx (simplify rr))]
-                                        ;(debug-repl "res from jit") ;; this should have that the
-        (is (= res (make-multiplicity 1)))
-        (is (= (ctx-get-value ctx (make-variable 'd)) (* (+ 11 1) 7))))))
 
   (deftest basic-jit4
     (let [rexpr (make-proj-many [(make-variable 'c) (make-variable 'e)]

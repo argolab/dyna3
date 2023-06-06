@@ -205,16 +205,18 @@
 
 (defn- primitive-rexpr-cljcode [varmap rexpr]
   (cond (rexpr? rexpr)
-    (cond (is-proj? rexpr) (???)
-          :else (let [rname (rexpr-name rexpr)]
-                  `(~(symbol "dyna.rexpr-constructors" (str "make-" rname))
-                    ~@(map #(primitive-rexpr-cljcode varmap %) (get-arguments rexpr)))))
-    (is-constant? rexpr) rexpr
-    (is-variable? rexpr) (strict-get varmap rexpr)
-    (vector? rexpr) (into [] (map #(primitive-rexpr-cljcode varmap %) rexpr))
-    :else (do
-            (debug-repl "unknown mapping to constructor")
-            (???))))
+        (cond (is-proj? rexpr) (let [new-var (gensym 'projvar)]
+                                 `(let [~new-var (make-variable (Object.))]
+                                    (make-proj ~new-var ~(primitive-rexpr-cljcode (assoc varmap (:var rexpr) new-var) (:body rexpr)))))
+              :else (let [rname (rexpr-name rexpr)]
+                      `(~(symbol "dyna.rexpr-constructors" (str "make-" rname))
+                        ~@(map #(primitive-rexpr-cljcode varmap %) (get-arguments rexpr)))))
+        (is-constant? rexpr) rexpr
+        (is-variable? rexpr) (strict-get varmap rexpr)
+        (vector? rexpr) (into [] (map #(primitive-rexpr-cljcode varmap %) rexpr))
+        :else (do
+                (debug-repl "unknown mapping to constructor")
+                (???))))
 
 ;; (defn- primitive-rexpr-with-placeholders [varmap rexpr]
 ;;   (cond (rexpr? rexpr)
@@ -1221,3 +1223,13 @@
                   (if (and (= fr rexpr) @*has-jit-rexpr-in-expression*)
                     (simplify-jit-create-rewrites-inference rexpr)
                     fr)))))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def-rewrite
+  :match (proj (:any V) R)
+  :run-at :jit-compiler
+  (let []
+    (debug-repl "simplify jit proj")
+    (???)))
