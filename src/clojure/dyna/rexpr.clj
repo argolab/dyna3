@@ -1117,7 +1117,8 @@
                                                                     :inference "simplify-inference-"
                                                                     :jit-compiler "simplify-jit-compilation-step-")
                                                                   functor-name))
-                          combined-func#))))))))
+                          combined-func#)))))
+       ~rewrite-func-var)))
 
 (defmacro def-rewrite [& args]
   (let [kw-args (apply hash-map (if (= (mod (count args) 2) 0)

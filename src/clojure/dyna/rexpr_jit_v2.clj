@@ -8,7 +8,7 @@
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
   (:import [dyna.rexpr proj-rexpr])
-  (:import [dyna RexprValue Rexpr DynaJITRuntimeCheckFailed]))
+  (:import [dyna RexprValue Rexpr DynaJITRuntimeCheckFailed StatusCounters]))
 
 ;; this is going to want to cache the R-expr when there are no arguments which are "variables"
 ;; so something like multiplicy can be just a constant value
@@ -428,7 +428,7 @@
         (let [cljcode (if (and (map? value) (contains? value :cljcode-expr))
                         (:cljcode-expr value)
                         value)]
-          (assert (not (nil? cljcode)))
+          (dyna-assert (not (nil? cljcode)))
           (add-to-generation! (fn [inner]
                                 `(do
                                    ~cljcode
@@ -735,13 +735,17 @@
  (fn [[n arg]]
    (let [varj (jit-evaluate-cljform arg)]
      (assert (= :rexpr-value (:type varj)))
-     (if (contains? @*local-variable-names-for-variable-values* (:matched-variable varj))
+     (if (is-constant? (:constant-value varj))
        {:type :value
         :constant-value true
         :cljcode-expr true}
-       {:type :value
-        :cljcode-expr `(is-bound? ~(:cljcode-expr varj))
-        :current-value (is-bound? (:current-value varj))}))))
+       (if (contains? @*local-variable-names-for-variable-values* (:matched-variable varj))
+         {:type :value
+          :constant-value true
+          :cljcode-expr true}
+         {:type :value
+          :cljcode-expr `(is-bound? ~(:cljcode-expr varj))
+          :current-value (is-bound? (:current-value varj))})))))
 
 (set-jit-method
  [#'is-constant?
@@ -815,12 +819,10 @@
      ;; this will have to track which variables are set.
      ;; it should also have that this is going to set the value in the current context.  This will mean that it will be looking for it to find
      (add-to-generation! (fn [inner]
-                           (debug-repl "set-value gen")
                            `(let* [~local-value-name ~(:cljcode-expr valj)]
                               ~(when (instance? jit-exposed-variable-rexpr (:matched-variable varj))
                                  `(set-value! ~(:cljcode-expr varj) ~local-value-name))
                               ~(inner))))
-     (debug-repl "set-value stuff")
      ;; if the value is set to the context, then it will have that this needs
      (vswap! *local-variable-names-for-variable-values* assoc (:matched-variable varj) {:var-name local-value-name
                                                                                         :current-value (get-current-value valj)})
@@ -987,11 +989,15 @@
                                                               :rexpr-type rexpr}}
                                                      (:matching-vars rewrite))
                     *rewrite-ns* (:namespace rewrite)]
+            (doseq [c (:runtime-checks rewrite)
+                    :when (not (nil? c))]
+              (add-to-generation! c))
             (let [assigning-var (:assigns-variable kw-args)
                   value-expression (:rewrite-body rewrite)
                   expression `(set-value! ~assigning-var ~value-expression)
                   ;vvv (jit-evaluate-cljform value-expression)
                   ]
+              (debug-repl "perform")
               (add-to-generation! (jit-evaluate-cljform expression))
               (make-multiplicity 1) ;; the result of assigning a variable will just be a mult1 expression
               ))
@@ -1094,9 +1100,10 @@
 
 
 
-(defn- maybe-create-rewrite-fast [context rexpr jinfo]
+(defn- maybe-create-rewrite [context rexpr jinfo simplify-method & {:keys [simplify-inference] :or {simplify-inference false}}]
   ;; this first needs to check if it has already attempted to create a rewrite
   ;; for this scenario, in which case it might not do anything here
+  (assert (not simplify-inference))  ;; TODO:
   (let [argument-value-mappings (loop [m {}
                                        l (zipseq (get-arguments rexpr) (range))]
                                   (if (empty? l)
@@ -1136,20 +1143,24 @@
              ;;rr (debug-repl)
              result (simplify-jit-internal-rexpr-loop prim-r)]
          (if (not= result prim-r)
-           (let [gen-fn (generate-cljcode-fn result)]
-             ;; then there is something that we can generate
+           ;; then there is something that we can generate, and we are going to want to run that generation and then evaluate it against the current R-expr
+           (let [gen-fn (generate-cljcode-fn result)
+                 fn-evaled (binding [*ns* dummy-namespace]
+                             (eval `(do
+                                      (ns dyna.rexpr-jit-v2)
+                                      (def-rewrite-direct ~(:generated-name jinfo) [:standard] ~gen-fn))))]
+
              (debug-repl "pr1")
-             (???))
+             (let [rr (fn-evaled rexpr simplify-method)]
+               (debug-repl "pr2")
+               (assert (not= rexpr rr)) ;; otherwise there was no rewriting done, and the generated rewrite failed for some reason
+               rr))
            (do
-             ;; then there was nothing that can be rewritten, so this should
-             (???))
-           )
+             ;; then there was nothing that can be rewritten, so this should just return the same R-expr back
+             rexpr)))))))
 
-         ))
-
-      ))
-  (???)
-  rexpr)
+(defn- maybe-create-rewrites-inference [context rexpr jinfo]
+  (???))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -1168,7 +1179,7 @@
          (if-not (nil? jinfo)
            (do
              (vreset! *has-jit-rexpr-in-expression* true) ;; record that we found something that could be generated, even if we don't end up doing the generation
-             (maybe-create-rewrite-fast (context/get-context) rexpr jinfo))
+             (maybe-create-rewrite (context/get-context) rexpr jinfo simplify-jit-create-rewrites-fast))
            ;; then nothing has changed, so we are going to check if this is a JIT type and then attempt to generate a new rewrite for it
            rexpr))
        (do
@@ -1177,7 +1188,19 @@
 
 (defn simplify-jit-create-rewrites-inference [rexpr]
   ;; create rewrites which can run during the interface state.  If there is nothing
-  rexpr)
+  (debug-binding
+   [*current-simplify-stack* (conj *current-simplify-stack* rexpr)
+    *current-simplify-running* simplify-jit-create-rewrites-inference]
+   (let [ret ((get @rexpr-rewrites-inference-func (type rexpr) simplify-identity) rexpr simplify-jit-create-rewrites-inference)]
+     (if (or (nil? ret) (= ret rexpr))
+       (let [jinfo (rexpr-jit-info rexpr)]
+         (if-not (nil? jinfo)
+           (do
+             (???)
+             (maybe-create-rewrite (context/get-context rexpr jinfo simplify-jit-create-rewrites-inference :simplify-inference true)))
+           rexpr))
+       (do (dyna-assert (rexpr? ret))
+           ret)))))
 
 (intern 'dyna.rexpr 'simplify-jit-create-rewrites
         (fn [rexpr]
@@ -1189,5 +1212,5 @@
               (binding [*has-jit-rexpr-in-expression* (volatile! false)]
                 (let [fr (simplify-jit-create-rewrites-fast rexpr)]
                   (if (and (= fr rexpr) @*has-jit-rexpr-in-expression*)
-                    (simplify-jit-create-rewrites-inference)
+                    (simplify-jit-create-rewrites-inference rexpr)
                     fr)))))))

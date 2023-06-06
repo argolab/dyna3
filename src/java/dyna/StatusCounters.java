@@ -5,7 +5,8 @@ public class StatusCounters {
     static private long matches_attempted = 0;
     static private long matches_successful = 0;
     static private long rexprs_created = 0;
-    static private long primitive_builtin_evaluated = 0;
+    //static private long primitive_builtin_evaluated = 0;
+    static private long jit_rewrites_performed = 0;
 
     static private long program_start_time = 0;
     static private long agenda_work_processed = 0;
@@ -30,6 +31,7 @@ public class StatusCounters {
     public static void match_sucessful() { matches_successful++; }
     public static void rexpr_created() { rexprs_created++; }
     public static void program_start() { program_start_time = System.currentTimeMillis(); }
+    public static void jit_rewrite_performed() { jit_rewrites_performed++; }
 
     public static void agenda_processing_time(long work, long time) {
         agenda_work_processed += work;
