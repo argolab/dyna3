@@ -442,16 +442,38 @@
   ;; again.  This will allow for checkpoints to keep rewriting from its
   ;; seralized state, whereas for an ending state, we might just want to return
   ;; it, as it should go back into the control flow of "other" stuff
-  `(do
-     (debug-repl "TODO: gen return of R-expr")
-     (???)))
+  (if (is-empty-rexpr? rexpr)
+    `(throw (UnificationFailure.)) ;; faster specical case handling for when it gets a mult 0 meaning that unification has failed
+    (let [re (if-not (is-composit-rexpr? rexpr)
+               (let [local-vars-bound @*local-variable-names-for-variable-values*]
+                 ;; this is a simple primitive R-expr type (like multiplicity or builtin
+                 ;; like add) there is no reason to generate a more complex R-expr type for
+                 ;; this.  So we are going to just generate something which generates this type directly
+                 `(~(symbol "dyna.rexpr-constructors" (str "make-" (rexpr-name rexpr)))
+                   ~@(for [arg (get-arguments rexpr)]
+                       (cond (number? arg) arg
+                             (is-constant? arg) `(make-constant ~(get-value arg))
+                             (instance? jit-exposed-variable-rexpr arg)
+                             (if (contains? local-vars-bound arg)
+                               `(make-constant ~(strict-get (local-vars-bound arg) :var-name))
+                               `(. ~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))})
+                                   ~(:exposed-name arg)))
+                             :else (do (debug-repl "arg type")
+                                       (???))))))
+               `(do
+                  (debug-repl "TODO: gen return of R-expr")
+                  (???)))]
+      (if (and simplify-result (not (is-multiplicity? rexpr)))
+        `(~'simplify ~re)
+        re))))
 
 (defn- add-return-rexpr-checkpoint! [rexpr]
-  (add-to-generation! (fn [inner]
-                        `(try
-                           (do ~(inner))
-                           (catch DynaJITRuntimeCheckFailed ~'_
-                             ~(generate-cljcode-to-materalize-rexpr rexpr :simplify-result true))))))
+  (let [materalize-code (generate-cljcode-to-materalize-rexpr rexpr :simplify-result true)]
+    (add-to-generation! (fn [inner]
+                          `(try
+                             (do ~(inner))
+                             (catch DynaJITRuntimeCheckFailed ~'_
+                               ~materalize-code))))))
 
 (defn- generate-cljcode-fn [final-rexpr]
   `(fn ~'[rexpr simplify]
@@ -1125,22 +1147,7 @@
       (debug-binding
        ;; restart these values, as we are running a nested version of simplify for ourselves
        [*current-simplify-running* nil]
-       (let [;prim-r (primitive-rexpr rexpr)
-             ;zz (debug-repl "pr0")
-             ;; prim-r-jit-val {:rexpr-type prim-r
-             ;;                 :value-expr '(do
-             ;;                                ;; the variable rexpr corresponds with the current matched R-expr.  If we were to call primitive-rexpr on it
-             ;;                                ;; then we should get back something which is equivalent to it
-             ;;                                ;(primitive-rexpr rexpr)
-             ;;                                ;;(???) ;; this expression should never be evaluated directly
-             ;;                                (bad-gen))
-             ;;                 }
-             prim-r (:prim-rexpr-placeholders jinfo)
-             #_{:type :rexpr
-                     :cljcode-expr '(do
-                                      (bad-gen))
-                :rexpr-type (:prim-rexpr-placeholders jinfo)}
-             ;;rr (debug-repl)
+       (let [prim-r (:prim-rexpr-placeholders jinfo)
              result (simplify-jit-internal-rexpr-loop prim-r)]
          (if (not= result prim-r)
            ;; then there is something that we can generate, and we are going to want to run that generation and then evaluate it against the current R-expr
