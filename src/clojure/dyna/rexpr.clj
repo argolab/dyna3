@@ -9,7 +9,7 @@
   (:require [clojure.set :refer [union difference subset?]])
   (:require [clojure.string :refer [trim]])
   (:require [aprint.core :refer [aprint]])
-  (:import [dyna UnificationFailure DynaTerm StatusCounters Rexpr RexprValue RContext]))
+  (:import [dyna UnificationFailure DynaTerm StatusCounters Rexpr RexprValue RexprValueVariable RContext]))
 
 (defn simplify-identity [a b] a)
 
@@ -191,7 +191,7 @@
           (debug-try
            (cache-field ~'cached-exposed-variables
                         (set
-                         (filter #(not (is-constant? %)) ;is-variable?
+                         (filter is-variable?
                                  (difference (union (set (get-variables ~'this))
                                                     ~@(keep
                                                        #(if (= :rexpr (car %))
@@ -452,12 +452,12 @@
           `(def-deep-equals ~(symbol name) ~'[a b]
              (and (instance? ~(symbol rname) ~'b)
                   ;; check the non-rexprs first as those should be faster
-                  ~@(remove nil? (for [[var-type vname] vargroup]
-                                   (when (not= var-type :rexpr)
-                                     `(= (~(keyword vname) ~'a) (~(keyword vname) ~'b)))))
-                  ~@(remove nil? (for [[var-type vname] vargroup]
-                                   (when (= :rexpr var-type)
-                                     `(deep-equals (~(keyword vname) ~'a) (~(keyword vname) ~'b))))))))
+                  ~@(for [[var-type vname] vargroup
+                          :when (not= var-type :rexpr)]  ;; this is going to end up handling lists, which likely aren't going to be equal to each other
+                      `(= (~(keyword vname) ~'a) (~(keyword vname) ~'b)))
+                  ~@(for [[var-type vname] vargroup
+                          :when (= :rexpr var-type)]
+                      `(deep-equals (~(keyword vname) ~'a) (~(keyword vname) ~'b))))))
        ;(intern 'dyna.rexpr-constructors '~(symbol (str "make-" name)) ~(symbol (str "make-" name)))
        ;(intern 'dyna.rexpr-constructors '~(symbol (str "make-no-simp-" name)) ~(symbol (str "make-no-simp-" name)))
        ;(intern 'dyna.rexpr-constructors '~(symbol (str "is-" name "?")) ~(symbol (str "is-" name "?")))
@@ -500,7 +500,7 @@
 (declare make-constant)
 
 (defrecord variable-rexpr [varname]
-  RexprValue
+  RexprValueVariable
   (get-value [this] (ctx-get-value (context/get-context) this))
   (get-value-in-context [this ctx] (ctx-get-value ctx this))
   (set-value! [this value]
@@ -607,13 +607,11 @@
 (defn is-constant?
   {:inline (fn [x] `(instance? constant-value-rexpr ~x))}
   [x] (instance? constant-value-rexpr x))
-;(intern 'dyna.rexpr-constructors 'is-constant? is-constant?)
 (expose-globally is-constant?)
 
 (defn is-variable?
-  {:inline (fn [x] `(instance? variable-rexpr ~x))}
-  [variable] (instance? variable-rexpr variable))
-                                        ;(intern 'dyna.rexpr-constructors 'is-variable? is-variable?)
+  {:inline (fn [x] `(instance? RexprValueVariable ~x))}
+  [variable] (instance? RexprValueVariable variable))
 (expose-globally is-variable?)
 
 (defn rexpr?

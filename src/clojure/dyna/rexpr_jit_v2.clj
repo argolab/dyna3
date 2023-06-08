@@ -8,7 +8,7 @@
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
   (:import [dyna.rexpr proj-rexpr])
-  (:import [dyna RexprValue Rexpr DynaJITRuntimeCheckFailed StatusCounters]))
+  (:import [dyna RexprValue RexprValueVariable Rexpr DynaJITRuntimeCheckFailed StatusCounters]))
 
 ;; this is going to want to cache the R-expr when there are no arguments which are "variables"
 ;; so something like multiplicy can be just a constant value
@@ -30,7 +30,7 @@
   ;; out before they reach the top.  We are going to give these variables a name
   ;; when we synthize the R-expr such that we will be able to track them in the
   ;; context of the program
-  RexprValue
+  RexprValueVariable
   (get-value [this] (???))
   (get-value-in-context [this ctx] (???))
   (set-value! [this value] (???))
@@ -49,7 +49,7 @@
   ;; For variables which are exposed on the current synthized R-expr.  These
   ;; variables can be access by doing `(. rexpr ~exposed-name) to read a field
   ;; off of the R-expr
-  RexprValue
+  RexprValueVariable
   (get-value [this] (???))
   (get-value-in-context [this ctx] (???))
   (set-value! [this value] (???))
@@ -66,7 +66,7 @@
   ;; if there is a variable which is projected out, but still used by one of our
   ;; holes.  Then that variable is a hidden variable as the name of the variable
   ;; could change depending on the hole, but it is still not exposed out
-  RexprValue
+  RexprValueVariable
   (get-value [this] (???))
   (get-value-in-context [this ctx] (???))
   (set-value! [this value] (???))
@@ -457,9 +457,16 @@
                              `(make-constant ~(strict-get (local-vars-bound arg) :var-name))
                              :else (do (debug-repl "arg type")
                                        (???))))))
-               `(do
-                  (debug-repl "TODO: gen return of R-expr")
-                  (???)))]
+               (let [local-vars-bound @*local-variable-names-for-variable-values*
+                     exposed (exposed-variables rexpr)
+                     remapped-locals (into {} (for [v exposed
+                                                    :when (or (instance? jit-local-variable-rexpr v)
+                                                              (instance? jit-hidden-variable-rexpr v))]
+                                                [v (jit-exposed-variable-rexpr (gensym 'bound-local))]))]
+                 (debug-repl "new synth")
+                 `(do
+                    (debug-repl "TODO: gen return of R-expr")
+                    (???))))]
       (if (and simplify-result (not (is-multiplicity? rexpr)))
         `(~'simplify ~re)
         re))))
@@ -834,6 +841,9 @@
 
            (or (is-constant? (:constant-value varj)) (is-constant? (:matched-variable varj))) {:type :value :constant-value false :cljcode-expr false}
 
+           ;; the exposed variable needs to be handled specially because it
+           ;; depends on what is in the placeholder for that value.  So it could
+           ;; be a constant
            (instance? jit-exposed-variable-rexpr (:matched-variable varj))
            {:type :value
             :current-value (is-variable? (get-current-value varj))
@@ -1147,7 +1157,7 @@
                   expression `(set-value! ~assigning-var ~value-expression)
                   ;vvv (jit-evaluate-cljform value-expression)
                   ]
-              (debug-repl "perform")
+              ;(debug-repl "perform")
               (add-to-generation! (jit-evaluate-cljform expression))
               (make-multiplicity 1) ;; the result of assigning a variable will just be a mult1 expression
               ))
@@ -1325,7 +1335,9 @@
 
 (defn simplify-jit-create-rewrites-inference [rexpr]
   ;; create rewrites which can run during the interface state.  If there is nothing
-  (debug-binding
+  (println "jit inference simplification")
+  rexpr
+  #_(debug-binding
    [*current-simplify-stack* (conj *current-simplify-stack* rexpr)
     *current-simplify-running* simplify-jit-create-rewrites-inference]
    (let [ret ((get @rexpr-rewrites-inference-func (type rexpr) simplify-identity) rexpr simplify-jit-create-rewrites-inference)]
@@ -1358,21 +1370,18 @@
 (def-rewrite
   :match (proj V R)
   :run-at :jit-compiler
-  (let [zz (cond (instance? jit-local-variable-rexpr V)
-                (let [r (simplify R)]
-                  (when-not (= R r)
-                    (if (is-bound-jit? V)
-                      r
-                      (make-no-simp-proj V r))))
+  (cond (instance? jit-local-variable-rexpr V)
+        (let [r (simplify R)]
+          (when-not (= R r)
+            (if (is-bound-jit? V)
+              r
+              (make-no-simp-proj V r))))
 
-                (instance? jit-hidden-variable-rexpr V)
-                (let [r (simplify R)]
-                  (when-not (= R r)
-                    (debug-repl "proj hidden var result")
-                    (???)))
+        (instance? jit-hidden-variable-rexpr V)
+        (let [r (simplify R)]
+          (when-not (= R r)
+            (debug-repl "proj hidden var result")
+            (???)))
 
-                :else
-                (???))]
-    (debug-repl "proj d")
-    zz
-    ))
+        :else
+        (???)))
