@@ -54,15 +54,7 @@
   (let [symbols (map key @clojure.lang.Compiler/LOCAL_ENV)]
     (into {} (for [s symbols]
                ;; this removes type tag info which causes the compiler to choke on the information
-               [`(quote ~s) (vary-meta s dissoc :tag)]))
-    ;;res (zipmap (map (fn [sym] `(quote ~sym)) symbols) (map symbol symbols))
-    ;;(aprint res)
-    ;;res
-    ;;     res `{}~@(apply concat (for [s symbols]
-    ;;                              `((quote ~(symbol s)) ~(symbol s))))]
-    ;; (print res)
-    ;; res
-        ))
+               [`(quote ~s) (vary-meta s dissoc :tag)]))))
 
 (defn- eval-with-locals
   "Evals a form with given locals.  The locals should be a map of symbols to

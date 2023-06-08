@@ -37,6 +37,8 @@ public interface Rexpr {
 
     Rexpr remap_variables_handle_hidden(ILookup renaming_map);
 
+    Object rewrite_all_args(IFn remap_function);
+
     boolean is_constraint_QMARK_();
 
     Object variable_functional_dependencies();

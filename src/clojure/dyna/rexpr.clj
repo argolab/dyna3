@@ -191,7 +191,7 @@
           (debug-try
            (cache-field ~'cached-exposed-variables
                         (set
-                         (filter is-variable?
+                         (filter #(not (is-constant? %)) ;is-variable?
                                  (difference (union (set (get-variables ~'this))
                                                     ~@(keep
                                                        #(if (= :rexpr (car %))
@@ -356,6 +356,14 @@
                                        ;; creating too many similar objects
                   ~'this
                   result#)))))
+
+         (~'rewrite-all-args ~'[this rewriting-function]
+          (let [result# (~(symbol (str "make-no-simp-" name))
+                         ~@(for [[typ v] vargroup]
+                             `(~'rewriting-function ~typ ~v)))]
+            (if (= result# ~'this)
+              ~'this
+              result#)))
 
          (~'is-empty-rexpr? ~'[this] false)
          (~'is-non-empty-rexpr? [this] false)
