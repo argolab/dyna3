@@ -326,14 +326,6 @@
   :run-at :construction
   (make-unify C (make-constant false)))
 
-;; (def-rewrite
-;;   :match {:rexpr (lessthan (:any A) (:any B) (is-true? _))
-;;           :context (lessthan (:any C) (:any D) (is-true? _))}
-;;   :run-at :inference
-;;   (do
-;;     ;(debug-repl "match lessthan")
-;;     nil))
-
 
 (def-rewrite
   :match {:rexpr (lessthan-eq (:any A) (:any B) (is-true? _))

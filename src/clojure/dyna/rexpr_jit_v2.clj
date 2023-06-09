@@ -4,11 +4,11 @@
   (:require [dyna.base-protocols :refer :all])
   (:require [dyna.rexpr-disjunction]) ;; make sure is loaded first
   (:require [dyna.rexpr-aggregators-optimized])
-  (:require [dyna.rexpr-constructors :refer [is-disjunct-op? get-user-term is-add?]])
+  (:require [dyna.rexpr-constructors :refer [is-disjunct-op? get-user-term is-aggregator-op-outer? is-aggregator-op-inner?]])
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
   (:import [dyna.rexpr proj-rexpr])
-  (:import [dyna RexprValue RexprValueVariable Rexpr DynaJITRuntimeCheckFailed StatusCounters]))
+  (:import [dyna RexprValue RexprValueVariable Rexpr DynaJITRuntimeCheckFailed StatusCounters UnificationFailure]))
 
 ;; this is going to want to cache the R-expr when there are no arguments which are "variables"
 ;; so something like multiplicy can be just a constant value
@@ -354,9 +354,11 @@
 
 (defn- is-composit-rexpr? [rexpr]
   ;; meaning that there is some sub-rexprs here, in which case, we might want to constructed
-  (some (fn r [x] (or (rexpr? x)
-                      (and (seqable? x) (some r x))))
-        (get-arguments rexpr)))
+  (or (is-conjunct? rexpr) (is-disjunct? rexpr) (is-disjunct-op? rexpr) (is-proj? rexpr)
+      (is-aggregator? rexpr) (is-aggregator-op-outer? rexpr) (is-aggregator-op-inner? rexpr)
+      (some (fn r [x] (or (rexpr? x)
+                          (and (seqable? x) (some r x))))
+            (get-arguments rexpr))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -380,11 +382,17 @@
   ;; if a variable value's is read, then it should get saved to a local variable somewhere
   )
 
-(def ^{:private true :dynamic true} *rewrites-allowed-to-run* #{:construction :standard}
-  ;; which rewrites are we allowed to attempt to run at this point the inference
-  ;; rewrites might not be run all of the time depending on if we are building a
-  ;; "standard" rewrite or an "inference" rewrite
+;; (def ^{:private true :dynamic true} *rewrites-allowed-to-run* #{:construction :standard}
+;;   ;; which rewrites are we allowed to attempt to run at this point the inference
+;;   ;; rewrites might not be run all of the time depending on if we are building a
+;;   ;; "standard" rewrite or an "inference" rewrite
+;;   )
+(def ^{:private true :dynamic true} *rewrites-allowed-to-use-inference-context* false
+  ;; we can perform inferences inside of the JITted context, however when
+  ;; dealing with the outer context this will only look at variable bindings
+  ;; unless this value is true.  The reason is that those inferences are still allowed to run when "fast"
   )
+
 (def ^{:private true :dynamic true} *jit-consider-expanding-placeholders* false
   ;; If we want embed the placeholder in the resulting JITted type.
   )
@@ -448,7 +456,7 @@
   ;; seralized state, whereas for an ending state, we might just want to return
   ;; it, as it should go back into the control flow of "other" stuff
   (if (is-empty-rexpr? rexpr)
-    `(throw (UnificationFailure.)) ;; faster specical case handling for when it gets a mult 0 meaning that unification has failed
+    `(throw (UnificationFailure. "JIT multiplicity 0")) ;; faster specical case handling for when it gets a mult 0 meaning that unification has failed
     (let [re (if-not (is-composit-rexpr? rexpr)
                (let [local-vars-bound @*local-variable-names-for-variable-values*]
                  ;; this is a simple primitive R-expr type (like multiplicity or builtin
@@ -1155,8 +1163,6 @@
                (println "TODO: rewrite matched which has additional checks that need to be performed first")
                false))
            (do
-             #_(when (is-add? rexpr)
-               (debug-repl "add matching"))
              false)))
        (do
          false) ;; then the r-expr type failed to match, so we can just return false and stop
@@ -1170,9 +1176,22 @@
 (defn- simplify-perform-generic-rewrite [rexpr rewrite]
   (let [kw-args (:kw-args rewrite)]
     (cond (contains? kw-args :check)
-          (do
-            (debug-repl "picked perform with check")
-            (???))
+          (binding [*locally-bound-variables* (merge {'rexpr {:type :rexpr
+                                                              :cljcode-expr `(bad-gen)
+                                                              :rexpr-type rexpr}}
+                                                     (:matching-vars rewrite))
+                    *rewrite-ns* (:namespace rewrite)]
+            (doseq [c (:runtime-checks rewrite)
+                    :when (not (nil? c))]
+              (add-to-generation! c))
+            (let [expression (jit-evaluate-cljform (:check kw-args))]
+              (if (get-current-value expression)
+                (do (add-to-generation! `(when-not ~(:cljcode-expr expression)
+                                           (throw (UnificationFailure. "JIT check rewrite"))))
+                    (make-multiplicity 1))
+                (do (add-to-generation! `(when ~(:cljcode-expr expression)
+                                           (throw (DynaJITRuntimeCheckFailed.))))
+                    (make-multiplicity 0)))))
 
           (contains? kw-args :assigns-variable)
           (binding [*locally-bound-variables* (merge {'rexpr {:type :rexpr
@@ -1199,8 +1218,12 @@
           (contains? kw-args :assigns)
           (???)
 
+          ;; the other rewrites are
+
           :else
-          (???))
+          (do
+            (debug-repl "perform generic rewrite")
+            (???)))
     #_(if (contains? :assigns-variable kw-args)
       (do
         ;; this is an assignment rewrite
@@ -1216,15 +1239,13 @@
   (let [rewrites (get @rexpr-rewrites-source (type rexpr) [])
         matching-rewrites (into [] (remove nil? (map (fn [rr]
                                                        (let [run-at (:run-at rr [:standard])]
-                                                         (when (some *rewrites-allowed-to-run* run-at)
-                                                           (binding [*rewrite-ns* (:namespace rr)]
-                                                             (let [[success runtime-checks currently-bound-vars] (compute-match rexpr (:matcher rr))]
-                                                               (when success
-                                                                 ;(debug-repl "ss")
-                                                                 (assoc rr
-                                                                        :runtime-checks runtime-checks
-                                                                        :matching-vars currently-bound-vars
-                                                                        :simplify-call-counter (vswap! *jit-simplify-call-counter* inc))))))))
+                                                         (binding [*rewrite-ns* (:namespace rr)]
+                                                           (let [[success runtime-checks currently-bound-vars] (compute-match rexpr (:matcher rr))]
+                                                             (when success
+                                                               (assoc rr
+                                                                      :runtime-checks runtime-checks
+                                                                      :matching-vars currently-bound-vars
+                                                                      :simplify-call-counter (vswap! *jit-simplify-call-counter* inc)))))))
                                                      rewrites)))]
     (doseq [mr matching-rewrites]
       (vswap! *jit-simplify-rewrites-found* conj [*current-simplify-stack* mr]))
@@ -1308,7 +1329,7 @@
     ;(debug-repl "aa")
     (binding [*jit-generating-rewrite-for-rexpr* rexpr
               *jit-generating-in-context* context
-              *rewrites-allowed-to-run* #{:construction :standard}
+              ;*rewrites-allowed-to-run* #{:construction :standard}
               *jit-consider-expanding-placeholders* false ;; TODO: this should eventually be true
               *jit-call-simplify-on-placeholders* false
               *current-assignment-to-exposed-vars* local-name-to-context
@@ -1418,3 +1439,24 @@
 
         :else
         (???)))
+
+
+(def-rewrite
+  :match (simple-function-call (:unchecked function) (:any result) (:ground-var-list arguments))
+  :run-at :jit-compiler
+  (do
+    ;; TODO: this should generate something in the output code which will just
+    ;; call the function directly.  It will want to do something like evaluate
+    ;; the value of all of the arguments I suppose that jit-evaluate-cljform
+    ;; should allow for a function or some value directly (like a placeholder)
+    ;; in which case, it would have to translate it into what the expression would look like when it
+
+    (???)
+    (add-to-generation!
+     (jit-evaluate-cljform `(set-value! ~result (~function ~@(map #(list 'get-value %) arguments)))))
+    (make-multiplicity 1)))
+
+#_(def-rewrite
+  :match (conjunct (:rexpr-list children))
+  :run-at :jit-compiler
+  (make-conjunct (vec (map simplify children))))

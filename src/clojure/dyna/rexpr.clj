@@ -722,7 +722,8 @@
         0 (do
             false-mul) ; we can special case the common values to avoid creating these objects many times
         1 true-mul
-        (prev x)))))
+        (prev x))))
+  (expose-globally make-multiplicity))
 
 (defn fixpoint-functional-dependencies-map [m]
   (loop [m m]
@@ -1259,22 +1260,6 @@
         ]
     ret))
 
-
-#_(defn make-iterator [variable iterator]
-  ;; these are going to need to be hashable, otherwise this would mean that we can't use the set to identify which expressions are iterable
-  ;; there are some values which
-  #{[variable iterator]})
-
-
-#_(defn is-variable-set? [variable]
-  (or (instance? constant-value-rexpr variable)
-      (context/need-context
-       (ctx-is-bound? (context/get-context) variable))))
-#_(intern 'dyna.rexpr-constructors 'is-variable-set? is-variable-set?)
-
-#_(defn is-constant? [variable]
-  (instance? constant-value-rexpr variable))
-
 (defn get-variable-value [variable]
   (if (instance? constant-value-rexpr variable)
     (.value ^constant-value-rexpr variable)
@@ -1362,22 +1347,22 @@
         (recur jr)))))
 
 (defn simplify-fully [rexpr]
-  (loop [cri rexpr]
-    (let [nri (simplify-fully-with-jit cri)
-          nri2 (binding [*memoization-make-guesses-handler* (fn [memo-table variable variable-values]
-                                                              ;; it is possible that there are multiple *different* kinds of guesses which could be made
-                                                              ;; this function could be replaced with something that is smarter and chooses between multiple different options for what to guess about
-                                                              true)]
-                       (simplify-fast nri))]
-      (if (= nri nri2)
-        nri
-        (recur nri2)))))
+  (try
+    (loop [cri rexpr]
+      (let [nri (simplify-fully-with-jit cri)
+            nri2 (binding [*memoization-make-guesses-handler* (fn [memo-table variable variable-values]
+                                                                ;; it is possible that there are multiple *different* kinds of guesses which could be made
+                                                                ;; this function could be replaced with something that is smarter and chooses between multiple different options for what to guess about
+                                                                true)]
+                   (simplify-fast nri))]
+        (if (= nri nri2)
+          nri
+          (recur nri2))))
+    (catch UnificationFailure _ (make-multiplicity 0))))
 
 (defn simplify-top [rexpr]
   (let [ctx (context/make-empty-context rexpr)]
-    (context/bind-context ctx
-                          (try (simplify-fully rexpr)
-                               (catch UnificationFailure e (make-multiplicity 0))))))
+    (context/bind-context ctx (simplify-fully rexpr))))
 
 (defn simplify-rexpr-query [query-id rexpr]
   ;; TODO: we might want to make this construct some table for the expression.

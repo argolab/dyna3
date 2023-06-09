@@ -1,6 +1,6 @@
 (ns dyna.rexpr-constructors)
 
-(defmacro declare-rexprs [& x]
+(defmacro ^{:private true} declare-rexprs [& x]
   `(declare ~@(for [z x] (symbol (str "make-" z)))
             ~@(for [z x] (symbol (str "make-no-simp-" z)))
             ~@(for [z x] (symbol (str "is-" z "?")))

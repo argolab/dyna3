@@ -85,9 +85,53 @@
         (is (some #{(make-constant 3)} (get-arguments res2))) ;; the constant 3 should appear somewhere in the parameters which are returned as it already did one addition
         )
       (let [res3 (context/bind-context-raw ctx3 (simplify-fully rr3))]
-        (is (is-multiplicity? res3))
-        (debug-repl "res3"))
+        (is (is-multiplicity? res3))))))
+
+(deftest basic-jit5
+  (let [rexpr (make-conjunct [(make-lessthan (make-variable 'a) (make-variable 'b) (make-constant true))
+                              (make-lessthan (make-variable 'b) (make-variable 'c) (make-constant true))])
+        [synth-rexpr jit-type] (synthize-rexpr rexpr)
+        rr (make-conjunct [(make-unify (make-variable 'a) (make-constant 1))
+                           (make-unify (make-variable 'b) (make-constant 2))
+                           synth-rexpr])
+        rr2 (make-conjunct [(make-unify (make-variable 'a) (make-constant 10))
+                            (make-unify (make-variable 'c) (make-constant 1))
+                            synth-rexpr])
+        ctx (context/make-empty-context rr)
+        ctx2 (context/make-empty-context rr2)]
+    (binding [*generate-new-jit-rewrites* true]
+      (let [res (context/bind-context-raw ctx (simplify-fully rr))]
+        (is (is-lessthan? res)))
+      (let [res2 (context/bind-context-raw ctx2 (simplify-fully rr2))]
+        ;; this needs to do inference constraints to identify a new constraint between a and cand then that constraint should fail as a result
+        (debug-repl "res2")
+        (is (is-empty-rexpr? res2)))
       )))
+
+#_(deftest basic-jit6
+  ;; test constructing an R-expr with holes.  This will mean that it should
+  ;; still call simplify on the holed expression we are also going to want to
+  ;; allow for the hole expression to get embedded into the current R-expr.  How
+  ;; it would allow for it to find something
+  (let [rexpr (make-conjunct
+               (make-add (make-variable 'a) (make-variable 'b) (make-variable 'c))
+               )] )
+
+  )
+
+;; TODO:
+;;  - holes of other R-exprs
+;;  - iterators
+;;    - aggregators/disjunction?
+;;  - inference
+;;
+;;  - converting R-exprs into the synth form
+;;     - matching against already existing synth forms
+;;     - heuristics for converting user defined functors into synth forms
+;;     -
+
+;; It should be able to do inference rewrites internal to the JITted R-expr.
+;; The inference would only apply in the case that it has to look outside of the expressions
 
 (comment
 

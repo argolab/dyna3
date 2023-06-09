@@ -667,15 +667,20 @@ expressionAdditive returns [DynaTerm rterm]
             {$rterm = DynaTerm.create($op.getText(), $rterm, $b.rterm);})*
     ;
 
+expressionNot returns [DynaTerm rterm]
+    : a=expressionAdditive {$rterm=$a.rterm;}
+    | '!' a=expressionAdditive {$rterm = DynaTerm.create("!", $a.rterm);}
+    ;
+
 expressionRelationCompare returns [DynaTerm rterm]
 locals[ArrayList<DynaTerm> expressions, ArrayList<String> ops]
-    : a=expressionAdditive {$rterm = $a.rterm;}
-    | a=expressionAdditive {
+    : a=expressionNot {$rterm = $a.rterm;}
+    | a=expressionNot {
           $expressions = new ArrayList<>();
           $ops = new ArrayList<>();
           $expressions.add($a.rterm);
       }
-      (op=('>'|'<'|'<='|'>=') b=expressionAdditive
+      (op=('>'|'<'|'<='|'>=') b=expressionNot
           { $ops.add($op.getText());
             $expressions.add($b.rterm);
           })+
