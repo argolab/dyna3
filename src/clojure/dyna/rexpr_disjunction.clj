@@ -333,7 +333,7 @@
 
 
 
-(def-deep-equals disjunct-op [a b]
+#_(def-deep-equals disjunct-op [a b]
   (when (instance? disjunct-rexpr b)
     ;; in the case of the origional disjunct, this is going to have that
     ;; unification between variables is represented as unify expressions instead
@@ -345,7 +345,7 @@
     (???)
     ))
 
-(def-deep-equals disjunct-op [a b]
+#_(def-deep-equals disjunct-op [a b]
   (when (instance? disjunct-op-rexpr b)
     ;; the tries could be in different orderes, in which case, we are going to have to reorder one of the tries
     ;; from there we are going to have to zip the tries, and compare if there is some kind of representation which is the same between them

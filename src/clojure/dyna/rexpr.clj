@@ -69,11 +69,11 @@
          'top-level-rexpr (fn [] *current-top-level-rexpr*)
          'simplify-stack (fn [] *current-simplify-stack*)))
 
-(def deep-equals-compare-fn (atom {}))
-(defmacro def-deep-equals [rexpr args & body]
+#_(def deep-equals-compare-fn (atom {}))
+#_(defmacro def-deep-equals [rexpr args & body]
   `(swap! deep-equals-compare-fn update ~(symbol (str rexpr "-rexpr")) conj (fn ~args ~@body)))
 
-(defn deep-equals [a b]
+#_(defn deep-equals [a b]
   (if (= a b)
     true
     (let [af (get @deep-equals-compare-fn (type a))
@@ -81,7 +81,61 @@
       (or (some #(% a b) af)
           (some #(% b a) bf)))))
 
-(swap! debug-useful-variables assoc 'deep-equals (fn [] deep-equals))
+#_(swap! debug-useful-variables assoc 'deep-equals (fn [] deep-equals))
+
+;; (def deep-equals-compare-fn (atom {}))
+;; (defrecord deep-equals-alias-variable [^RexprValueVariable vara ^RexprValueVariable varb]
+;;   RuntimeException
+;;   (fillInStackTrace [this] nil))
+
+#_(defn deep-equals
+  ([a b]
+   (deep-equals a b {})
+   ([a b aliased]
+    (if (= a b)
+      [true nil]
+      (let [af (get @deep-equals-compare-fn (type a))
+            bf (get @deep-equals-compare-fn (type b))
+            ae (exposed-variables a)
+            be (exposed-variables b)
+            alias-all (merge aliased
+                             (into {} (first (for [k ae
+                                                   :when (not (contained? aliased k))]
+                                               [[k nil]]))))]
+        (if-not (= (count ae) (count be))
+          [false nil]
+          (try
+            (let [[ar mr] (first (for [f ar
+                                       :let [[ar mr] (f a b)]
+                                       :when ar]
+                                   [ar mr]))]
+              (if ar [ar mr]
+                  ))
+            (or
+                (try
+                  (let [alias2 (into {} (for [[k v] alias-all] [v k]))]
+                    (some #(% b a alias2) bf))
+                  (catch deep-equals-alias-variable to-alias (throw (deep-equals-alias-variable. (:varb to-alias) (:vara to-alias))))))
+            (catch deep-equals-alias-variable to-alias
+              (if (contains? aliased (:vara to-alias))
+                (throw to-alias) ;; throw this up as something else is already handling this alias
+                (loop [new-alias (assoc alias-all (:vara to-alias) (:varb to-alias))
+                       already-tried #{(:varb to-alias)}]
+                  (try
+                    (deep-equals a b new-alias)
+                    (catch deep-equals-alias-variable to-alias
+                      (if (already-tried (:varb to-alias))
+                        false ;; we are not going to retry this
+
+                        )
+                      )
+                    )
+
+                  )
+                (let [new-alias ]
+
+                  )))))
+        )))))
 
 (defn construct-rexpr [name & args]
   (apply (get @rexpr-constructors name) args))
@@ -448,7 +502,7 @@
        (defmethod print-method ~(symbol rname) ~'[this ^java.io.Writer w]
          (assert (not (nil? ~'w)))
          (aprint (as-list ~'this) ~'w))
-       ~(when (some #(= % :rexpr) (map car vargroup))
+       #_~(when (some #(= % :rexpr) (map car vargroup))
           `(def-deep-equals ~(symbol name) ~'[a b]
              (and (instance? ~(symbol rname) ~'b)
                   ;; check the non-rexprs first as those should be faster
@@ -701,7 +755,7 @@
   (is-non-empty-rexpr? [this] (some is-non-empty-rexpr? args))
   (rexpr-jit-info [this] {:jittable false}))
 
-(defn deep-equals-list-compare [a b]
+#_(defn deep-equals-list-compare [a b]
   (if (and (empty? a) (empty? b))
     true
     (let [af (first a)
@@ -711,7 +765,7 @@
                    (deep-equals-list-compare ar (remove #(identical? x %) b))))
             b))))
 
-(def-deep-equals conjunct [a b]
+#_(def-deep-equals conjunct [a b]
   (when (instance? conjunct-rexpr b)
     (let [as (:args a)
           bs (:args b)]
@@ -721,7 +775,7 @@
         (deep-equals-list-compare as bs)))))
 
 
-(def-deep-equals disjunct [a b]
+#_(def-deep-equals disjunct [a b]
   (when (instance? disjunct-rexpr b)
     (let [as (:args a)
           bs (:args b)]
@@ -754,7 +808,7 @@
   (variable-functional-dependencies [this] {#{a} #{b}
                                             #{b} #{a}}))
 
-(def-deep-equals unify [a b]
+#_(def-deep-equals unify [a b]
   (when (instance? unify-rexpr b)
     ;; we only have to check the args in the different order, as we have already done a check against the stanard equals expression
     (and (= (:a a) (:b b))

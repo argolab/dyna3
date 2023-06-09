@@ -68,15 +68,25 @@
         rr2 (make-conjunct [(make-unify (make-variable 'a) (make-constant 1))
                             (make-unify (make-variable 'b) (make-constant 2))
                             synth-rexpr])
+        rr3 (make-conjunct [(make-unify (make-variable 'a) (make-constant 1))
+                            (make-unify (make-variable 'b) (make-constant 2))
+                            (make-unify (make-variable 'f) (make-constant 10))
+                            (make-unify (make-variable 'g) (make-constant 12))
+                            synth-rexpr])
         ctx (context/make-empty-context rr)
-        ctx2 (context/make-empty-context rr2)]
+        ctx2 (context/make-empty-context rr2)
+        ctx3 (context/make-empty-context rr3)]
     (binding [*generate-new-jit-rewrites* true]
       (let [res (context/bind-context-raw ctx (simplify-fully rr))]
         (is (is-add? res))
         (is (= (make-constant 6) (:v0 res))))
       (let [res2 (context/bind-context-raw ctx2 (simplify-fully rr2))]
         (is (not= res2 rr2))
-        (debug-repl "aborted rewrite part way"))
+        (is (some #{(make-constant 3)} (get-arguments res2))) ;; the constant 3 should appear somewhere in the parameters which are returned as it already did one addition
+        )
+      (let [res3 (context/bind-context-raw ctx3 (simplify-fully rr3))]
+        (is (is-multiplicity? res3))
+        (debug-repl "res3"))
       )))
 
 (comment

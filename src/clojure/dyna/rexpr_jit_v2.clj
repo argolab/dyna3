@@ -24,6 +24,7 @@
 
 (def rexpr-convert-to-jit-functions (atom {}))
 
+(declare is-bound-jit?)
 
 (defrecord jit-local-variable-rexpr [local-var-symbol]
   ;; These variables are not exposed externally.  These variables are projected
@@ -34,7 +35,7 @@
   (get-value [this] (???))
   (get-value-in-context [this ctx] (???))
   (set-value! [this value] (???))
-  (is-bound? [this] (???))
+  (is-bound? [this] (is-bound-jit? this))
   (is-bound-in-context? [this ctx] (???))
   (all-variables [this] #{this})
   (get-representation-in-context [this ctx]
@@ -194,9 +195,18 @@
 (defn- primitive-rexpr-with-placeholders [rexpr new-arg-names]
   (let [rf (fn rf [typ v args]
              (cond (and (= typ :rexpr) (rexpr? v))
-                   (cond (is-proj? v) (let [n (jit-local-variable-rexpr. (gensym 'projvar))
-                                            a (assoc args (:var v) n)]
-                                        (make-no-simp-proj n (rf :rexpr (:body v) a)))
+                   (cond (is-proj? v)
+                         (let [vv (:var v)]
+                           (assert (not (instance? jit-exposed-variable-rexpr vv)))
+                           (if (or (instance? jit-local-variable-rexpr vv)
+                                   (instance? jit-hidden-variable-rexpr vv))
+                             (make-no-simp-proj vv (rf :rexpr (:body v) args))
+                             (let [n (jit-local-variable-rexpr. (gensym 'projvar))
+                                   a (assoc args (:var v) n)
+                                   bb (rf :rexpr (:body v) a)]
+                               (dyna-assert (contains? (exposed-variables bb) n))
+                               (make-no-simp-proj n bb))))
+
                          :else (rewrite-all-args v #(rf %1 %2 args)))
 
                    (= typ :rexpr-list) (into [] (map #(rf :rexpr % args) v))
@@ -404,7 +414,7 @@
 
 (def ^{:private true :dynamic true} *jit-generate-functions* nil)
 
-(declare is-bound-jit?)
+(def ^{:private true :dynamic true} *jit-incremented-status-counter* nil)
 
 (defn- generate-cljcode [generate-functions]
   (if (empty? generate-functions)
@@ -461,27 +471,46 @@
                      exposed (exposed-variables rexpr)
                      remapped-locals (into {} (for [v exposed
                                                     :when (or (instance? jit-local-variable-rexpr v)
-                                                              (instance? jit-hidden-variable-rexpr v))]
-                                                [v (jit-exposed-variable-rexpr (gensym 'bound-local))]))]
-                 (debug-repl "new synth")
-                 `(do
-                    (debug-repl "TODO: gen return of R-expr")
-                    (???))))]
+                                                              (instance? jit-hidden-variable-rexpr v)
+                                                              (instance? jit-exposed-variable-rexpr v))]
+                                                [v (make-variable (gensym 'vhold))]))
+                     new-r (remap-variables rexpr remapped-locals)
+                     [_ new-synth] (synthize-rexpr new-r)
+                     rlocal-map (into {} (for [[k v] remapped-locals] [v k]))
+                     rvarmap (into {} (for [[k v] (:variable-name-mapping new-synth)] [v k]))]
+                 `(~(symbol "dyna.rexpr-constructors" (str "make-" (:generated-name new-synth)))
+                   ~@(for [v (:variable-order new-synth)
+                           :let [lv (rvarmap v)
+                                 arg (get rlocal-map lv lv)]]
+                       (cond (instance? jit-exposed-variable-rexpr arg)
+                             (if (contains? local-vars-bound arg)
+                               `(make-constant ~(strict-get (local-vars-bound arg) :var-name))
+                               `(. ~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))})
+                                   ~(:exposed-name arg)))
+                             (and (instance? jit-local-variable-rexpr arg) (is-bound-jit? arg))
+                             `(make-constant ~(strict-get (local-vars-bound arg) :var-name))
+                             :else (do (debug-repl "arg type")
+                                       (???)))))))]
       (if (and simplify-result (not (is-multiplicity? rexpr)))
         `(~'simplify ~re)
         re))))
 
 (defn- add-return-rexpr-checkpoint! [rexpr]
-  (let [materalize-code (generate-cljcode-to-materalize-rexpr rexpr :simplify-result true)]
+  (let [materalize-code (generate-cljcode-to-materalize-rexpr rexpr :simplify-result true)
+        status-counter (and system/status-counters (not @*jit-incremented-status-counter*))]
+    (when status-counter (vreset! *jit-incremented-status-counter* true))
     (add-to-generation! (fn [inner]
                           `(try
-                             (do ~(inner))
+                             ~(if status-counter
+                                `(do (StatusCounters/jit_rewrite_performed) ;; track that we have performed at least 1 rewrite using the JITted code
+                                     ~(inner))
+                                (inner))
                              (catch DynaJITRuntimeCheckFailed ~'_
                                ~materalize-code))))))
 
 (defn- generate-cljcode-fn [final-rexpr]
-  `(fn ~'[rexpr simplify]
-     #_(let [~'context (context/get-context)])
+  `(fn [~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))}) ~'simplify]
+     ~(when system/status-counters `(StatusCounters/match_attempt))
      (try
        (do ~((generate-cljcode (persistent! *jit-generate-functions*))
              (fn []
@@ -814,9 +843,11 @@
             :cljcode-expr false}
 
            :else
-           {:type :value
-            :cljcode-expr `(is-bound? ~(:cljcode-expr varj))
-            :current-value (is-bound? (:current-value varj))}))))
+           (do
+             (dyna-assert (:current-value varj))
+             {:type :value
+              :cljcode-expr `(is-bound? ~(:cljcode-expr varj))
+              :current-value (is-bound? (:current-value varj))})))))
 
 (set-jit-method
  #'is-constant?
@@ -1283,7 +1314,8 @@
               *current-assignment-to-exposed-vars* local-name-to-context
               *current-simplify-stack* ()
               *local-variable-names-for-variable-values* (volatile! nil)
-              *jit-generate-functions* (transient [])]
+              *jit-generate-functions* (transient [])
+              *jit-incremented-status-counter* (volatile! false)]
       (debug-binding
        ;; restart these values, as we are running a nested version of simplify for ourselves
        [*current-simplify-running* nil]
@@ -1375,7 +1407,8 @@
           (when-not (= R r)
             (if (is-bound-jit? V)
               r
-              (make-no-simp-proj V r))))
+              (do (dyna-assert (contains? (exposed-variables r) V))
+                (make-proj V r)))))
 
         (instance? jit-hidden-variable-rexpr V)
         (let [r (simplify R)]
