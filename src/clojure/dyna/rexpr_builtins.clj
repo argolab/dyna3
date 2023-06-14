@@ -309,13 +309,13 @@
 (defn is-true? [x] (= (make-constant true) x))
 
 (def-rewrite
-  :match {:rexpr (lessthan (:any A) (:any B) (is-true? _))
+  :match {:rexpr (lessthan (:free A) (:any B) (is-true? _))
           :context (lessthan (:any C) A (is-true? _))}
   :run-at :inference
   :infers (make-lessthan C B (make-constant true)))
 
 (def-rewrite
-  :match {:rexpr (lessthan (:any A) (:any B) (is-true? _))
+  :match {:rexpr (lessthan (:any A) (:free B) (is-true? _))
           :context (lessthan B (:any C) (is-true? _))}
   :run-at :inference
   :infers (make-lessthan A C (make-constant true)))
@@ -328,13 +328,13 @@
 
 
 (def-rewrite
-  :match {:rexpr (lessthan-eq (:any A) (:any B) (is-true? _))
+  :match {:rexpr (lessthan-eq (:free A) (:any B) (is-true? _))
           :context (lessthan-eq (:any C) A (is-true? _))}
   :run-at :inference
   :infers (make-lessthan-eq C B (make-constant true)))
 
 (def-rewrite
-  :match {:rexpr (lessthan-eq (:any A) (:any B) (is-true? _))
+  :match {:rexpr (lessthan-eq (:any A) (:free B) (is-true? _))
           :context (lessthan-eq B (:any C) (is-true? _))}
   :run-at :inference
   :infers (make-lessthan-eq A C (make-constant true)))
@@ -350,25 +350,25 @@
   (make-lessthan B A (make-constant true)))
 
 (def-rewrite
-  :match {:rexpr (lessthan (:any A) (:any B) (is-true? _))
+  :match {:rexpr (lessthan (:any A) (:free B) (is-true? _))
           :context (lessthan-eq B (:any C) (is-true? _))}
   :run-at :inference
   :infers (make-lessthan-eq A C (make-constant true)))
 
 (def-rewrite
-  :match {:rexpr (lessthan (:any A) (:any B) (is-true? _))
+  :match {:rexpr (lessthan (:free A) (:any B) (is-true? _))
           :context (lessthan-eq (:any C) A (is-true? _))}
   :run-at :inference
   :infers (make-lessthan-eq C B (make-constant true)))
 
 (def-rewrite
-  :match {:rexpr (lessthan-eq (:any A) (:any B) (is-true? _))
+  :match {:rexpr (lessthan-eq (:any A) (:free B) (is-true? _))
           :context (lessthan B (:any C) (is-true? _))}
   :run-at :inference
   :infers (make-lessthan-eq A C (make-constant true)))
 
 (def-rewrite
-  :match {:rexpr (lessthan-eq (:any A) (:any B) (is-true? _))
+  :match {:rexpr (lessthan-eq (:free A) (:any B) (is-true? _))
           :context (lessthan (:any C) A (is-true? _))}
   :run-at :inference
   :infers (make-lessthan-eq C B (make-constant true)))
@@ -393,26 +393,26 @@
   (make-unify C (make-constant true)))
 
 (def-rewrite
-  :match {:rexpr (equals (:any A) (:any B) (is-true? _))
+  :match {:rexpr (equals (:free A) (:any B) (is-true? _))
           :context (equals A (:any C) (is-true? _))}
   :run-at :inference
   :infers (make-equals B C (make-constant true)))
 
 (def-rewrite
-  :match {:rexpr (equals (:any A) (:any B) (is-true? _))
+  :match {:rexpr (equals (:free A) (:any B) (is-true? _))
           :context (equals (:any C) A (is-true? _))}
   :run-at :inference
   :infers (make-equals B C (make-constant true)))
 
 
 (def-rewrite
-  :match {:rexpr (equals (:any A) (:any B) (is-true? _))
+  :match {:rexpr (equals (:any A) (:free B) (is-true? _))
           :context (equals B (:any C) (is-true? _))}
   :run-at :inference
   :infers (make-equals B C (make-constant true)))
 
 (def-rewrite
-  :match {:rexpr (equals (:any A) (:any B) (is-true? _))
+  :match {:rexpr (equals (:any A) (:free B) (is-true? _))
           :context (equals (:any C) B (is-true? _))}
   :run-at :inference
   :infers (make-equals B C (make-constant true)))
@@ -862,17 +862,17 @@
   `(do
      (def-rewrite
        :match {:rexpr (~type1 ~'(:free Var) ~'(:any Result))
-               :context (~type2 ~'(:free Var) (is-true? ~'_))}
+               :context (~type2 ~'Var (is-true? ~'_))}
        :run-at :inference
        :assigns-variable ~'Result
        false ;; the value getting assigned to the result
-       ;(make-unify ~'Result (make-constant false))
        )
      (def-rewrite
        :match {:rexpr (~type2 ~'(:free Var) ~'(:any Result))
-               :context (~type1 ~'(:free Var) (is-true? ~'_))}
+               :context (~type1 ~'Var (is-true? ~'_))}
        :run-at :inference
-       (make-unify ~'Result (make-constant false)))))
+       :assigns-variable ~'Result
+       false)))
 
 (incompatible-types is-int is-string)
 (incompatible-types is-int is-float)

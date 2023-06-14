@@ -115,6 +115,7 @@
   :match {:rexpr (disjunct (:rexpr-list children))
           :check system/*use-optimized-rexprs*}
   :run-at :construction
+  :run-in-jit false
   (let [dj-vars (vec (exposed-variables rexpr))]
     (when-not (empty? dj-vars)
       (let [existing-tries (filter is-disjunct-op? children)
@@ -150,6 +151,7 @@
 (def-rewrite
   :match (disjunct-op (:any-list dj-vars) (:unchecked rexprs))
   :run-at [:standard :inference]
+  :run-in-jit false
   (let [outer-context (context/get-context)
         ret-children (volatile! (make-PrefixTrie (count dj-vars) 0 nil))
         num-children (volatile! 0)
@@ -379,6 +381,7 @@
   :match (disjunct-op (:any-list var-list) rexprs)
   :run-at :construction
   :is-debug-check-rewrite true
+  :run-in-jit false
   (let [var-set (into #{} var-list)]
     (when-not (every? (fn [[var-bindings x]] (if (and (rexpr? x)
                                                       ;; the variables which are exposed should be a subset of what is not ground

@@ -8,7 +8,7 @@
   (:require [dyna.context :as context])
   (:require [dyna.prefix-trie :as trie])
   (:require [dyna.iterators :refer [make-skip-variables-iterator run-iterator]])
-  (:require [clojure.set :refer [difference union]])
+  (:require [clojure.set :refer [difference union intersection]])
   (:import [dyna.rexpr proj-rexpr disjunct-rexpr aggregator-rexpr])
   (:import [dyna.rexpr_disjunction disjunct-op-rexpr])
   (:import [dyna.prefix_trie PrefixTrie])
@@ -50,7 +50,7 @@
                           (cons [#{} this]
                                 (let [vs (conj (ensure-set projected) incoming)]
                                   (for [[proj-out rexpr] (all-conjunctive-rexprs body)]
-                                    [(union proj-out vs) rexpr])))))
+                                    [(union proj-out (intersection vs (exposed-variables rexpr))) rexpr])))))
 
 ;; this might be something that the memoization is going to want to override,
 ;; which would allow for it to get the result of aggregation directly
@@ -113,7 +113,7 @@
   :run-at :construction
   (let [exposed (exposed-variables rexpr)
         pvs (into #{incoming} projected-vars)
-        pr (first (filter #(and (is-proj? %) (not (pvs (:var %))) (not (exposed %))) Rs))]
+        pr (first (filter #(and (is-proj? %) (not (pvs (:var %))) (not (exposed (:var %)))) Rs))]
     (if pr
       (make-aggregator-op-inner incoming
                                 (conj projected-vars (:var pr))

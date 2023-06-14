@@ -7,7 +7,7 @@
   (:require [dyna.rexpr-constructors :refer [is-disjunct-op? get-user-term is-aggregator-op-outer? is-aggregator-op-inner?]])
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
-  (:import [dyna.rexpr proj-rexpr])
+  (:import [dyna.rexpr proj-rexpr simple-function-call-rexpr conjunct-rexpr])
   (:import [dyna RexprValue RexprValueVariable Rexpr DynaJITRuntimeCheckFailed StatusCounters UnificationFailure]))
 
 ;; this is going to want to cache the R-expr when there are no arguments which are "variables"
@@ -85,6 +85,20 @@
 (def-base-rexpr jit-placeholder [:unchecked placeholder-id
                                  :var-list placeholder-vars
                                  :unchecked placeholder-iterables]) ;; which things are iterable will probably need more information about the iterators, or maybe just don't support having iterators be outside of the JIT expression.  Though I suppose that this is likely to happen in the case that there is a disjunct/memoized expression.  Those are things we we do not want to handle.  So there might be a lot of stuff which is not going to get handled directly....sigh
+
+
+;; a disjunct inside of the jit would have to have some identifier to track
+;; which of the branches are still active?  The disjunct id will uniquely
+;; identify this disjunct as it gets rewritten,
+(def-base-rexpr jit-disjunct [:unchecked disjunct-id
+                              :rexpr-list children])
+
+(def-rewrite
+  :match (jit-disjunct disjunct-id (:rexpr-list children))
+  :run-at :standard
+  (do
+    (debug-repl "should not happen, attempting to simplify jit-disjunct")
+    (???)))
 
 (defn convert-rexpr-to-placeholder [rexpr]
   (let [iters (find-iterators rexpr)]
@@ -382,11 +396,12 @@
   ;; if a variable value's is read, then it should get saved to a local variable somewhere
   )
 
-;; (def ^{:private true :dynamic true} *rewrites-allowed-to-run* #{:construction :standard}
-;;   ;; which rewrites are we allowed to attempt to run at this point the inference
-;;   ;; rewrites might not be run all of the time depending on if we are building a
-;;   ;; "standard" rewrite or an "inference" rewrite
-;;   )
+(def ^{:private true :dynamic true} *rewrites-allowed-to-run* #{:construction :standard}
+  ;; which rewrites are we allowed to attempt to run at this point the inference
+  ;; rewrites might not be run all of the time depending on if we are building a
+  ;; "standard" rewrite or an "inference" rewrite
+  )
+
 (def ^{:private true :dynamic true} *rewrites-allowed-to-use-inference-context* false
   ;; we can perform inferences inside of the JITted context, however when
   ;; dealing with the outer context this will only look at variable bindings
@@ -1052,7 +1067,8 @@
          ;runtime-checks (transient [])
          ]
      (if (= rname (first rexpr-matcher))
-       (let [match-result (vec (for [[match-expr arg [arg-sig _]] (zipseq (rest rexpr-matcher) args rsignature)]
+       (let [vvv (when (contains? matcher :context) (debug-repl "ctx"))
+             match-result (vec (for [[match-expr arg [arg-sig _]] (zipseq (rest rexpr-matcher) args rsignature)]
                                  (let [t (case arg-sig
                                            :var :rexpr-value
                                            :rexpr :rexpr
@@ -1161,6 +1177,7 @@
                true)
              (do
                (println "TODO: rewrite matched which has additional checks that need to be performed first")
+               (debug-repl "additional checks")
                false))
            (do
              false)))
@@ -1172,6 +1189,91 @@
          currently-bound (transient {})
          currently-matches (compute-match rexpr matcher1 to-check currently-bound)]
      [currently-matches (persistent! to-check) (persistent! currently-bound)])))
+
+
+(defn- compute-match-v3
+  ([rexpr matcher1 runtime-checks currently-bound]
+   (let [matcher (if (map? matcher1) matcher1 {:rexpr matcher1})
+         rexpr-matcher (:rexpr matcher)
+         rname (rexpr-name)
+         rsignature (get @rexpr-containers-signature rname)
+         match-sub-expression (fn [match-expr arg arg-sig]
+                                (let [jt (case arg-sig
+                                           :var :rexpr-value
+                                           :rexpr :rexpr
+                                           :mult :value
+                                           :value :rexpr-value
+                                           :str :value
+                                           :unchecked :unknown
+                                           :opaque-constant :value
+                                           :boolean :value
+                                           :file-name :value
+                                           :hidden-var :rexpr-value
+                                           :rexpr-list (???)
+                                           :var-list (???)
+                                           :var-map (???)
+                                           (do (debug-repl)
+                                               (???)))
+                                      curval (cond (instance? jit-exposed-variable-rexpr arg)
+                                                   {:type t
+                                                    :current-value (*current-assignment-to-exposed-vars* (:exposed-name arg))
+                                                     ;; access the field directly from the type.  The top level R-expr will be assigned to the variable rexpr
+                                                     ;;
+                                                     :cljcode-expr `(. ~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))})
+                                                                       ~(:exposed-name arg))    ;(:exposed-name arg)
+                                                    :matched-variable arg}
+
+                                                   (instance? jit-local-variable-rexpr arg)
+                                                   (if (contains? @*local-variable-names-for-variable-values* arg)
+                                                     (let [x (@*local-variable-names-for-variable-values* arg)]
+                                                       {:type t
+                                                        :matched-variable arg
+                                                        :current-value (strict-get x :current-value)
+                                                        :cljcode-expr `(bad-gen)})
+                                                     {:type t
+                                                      :matched-variable arg})
+
+                                                   (is-constant? arg)
+                                                   {:type :rexpr-value
+                                                    :constant-value arg
+                                                    :current-value arg
+                                                    :cljcode-expr `(make-constant ~(get-value arg))}
+
+                                                   (rexpr? arg)
+                                                   {:type :rexpr
+                                                    :cljcode-expr `(bad-gen)
+                                                    :rexpr-type arg}
+
+                                                   :else
+                                                   (let []
+                                                     (debug-repl "TODO")
+                                                     (???)))
+                                      success (cond (= '_ match-expr) true
+                                                    (symbol? match-expr) (let []
+                                                                           (debug-repl "TODO")
+                                                                           (???))
+
+
+                                                    )
+                                      ]
+
+                                  )
+                                (???))]
+     (if (= rname (first rexpr-matcher))
+       (let [match-results (vec (for [[match-expr arg [arg-sig _]] (zipseq (rest rexpr-matcher) args rsignature)]
+                                  (match-sub-expression match-expr arg arg-sig)))]
+         (if (every? true? match-result)
+           (do
+             (???)
+             )
+           false))
+       false))
+   )
+  ([rexpr matcher1]
+   (let [runtime-checks (transient [])
+         currently-bound (transient {})
+         successful-match (compute-match-v3 rexpr matcher1 runtime-checks currently-bound)]
+     [successful-match (persistent! runtime-checks) (persistent! currently-bound)])))
 
 (defn- simplify-perform-generic-rewrite [rexpr rewrite]
   (let [kw-args (:kw-args rewrite)]
@@ -1238,7 +1340,10 @@
   (vswap! *jit-simplify-call-counter* inc)
   (let [rewrites (get @rexpr-rewrites-source (type rexpr) [])
         matching-rewrites (into [] (remove nil? (map (fn [rr]
-                                                       (let [run-at (:run-at rr [:standard])]
+                                                       (let [run-at (:run-at (:kw-args rr) [:standard])]
+                                                         ;; (println (type rexpr) run-at)
+                                                         ;; (when (some #{:inference} (if-not (seqable? run-at) [run-at] run-at))
+                                                         ;;   (debug-repl "inf"))
                                                          (binding [*rewrite-ns* (:namespace rr)]
                                                            (let [[success runtime-checks currently-bound-vars] (compute-match rexpr (:matcher rr))]
                                                              (when success
@@ -1296,9 +1401,13 @@
           (debug-repl "no possible rewrites")
           r) ;; then we are "done" and we just return this R-expr unrewritten
         (do
-
           (when (> 1 (count possible-rewrites))
             (debug-repl "pick between rewrites found")
+            ;; this is when we should pick between the kind of rewrites that we
+            ;; are allowed to run.  If we are running simplify for construction
+            ;; only, then we would only pick those rewrites
+            ;;
+            ;; in the case that a rewrite should have that it will correspond with
             (???))
           (assert (not (empty? possible-rewrites)))
           (let [picked-cc (:simplify-call-counter (cadar possible-rewrites))
@@ -1329,7 +1438,7 @@
     ;(debug-repl "aa")
     (binding [*jit-generating-rewrite-for-rexpr* rexpr
               *jit-generating-in-context* context
-              ;*rewrites-allowed-to-run* #{:construction :standard}
+              *rewrites-allowed-to-run* #{:standard}
               *jit-consider-expanding-placeholders* false ;; TODO: this should eventually be true
               *jit-call-simplify-on-placeholders* false
               *current-assignment-to-exposed-vars* local-name-to-context
@@ -1460,3 +1569,14 @@
   :match (conjunct (:rexpr-list children))
   :run-at :jit-compiler
   (make-conjunct (vec (map simplify children))))
+
+;; there needs to be something which tracks the current conjuncts.  I suppose
+;; this means that anytime that it goes down into some expression where the
+;; conjunct might change, then it
+
+
+
+#_(def-rewrite
+    :match (jit-disjunct (:rexpr-list children))
+    :run-at :jit-compiler
+    )

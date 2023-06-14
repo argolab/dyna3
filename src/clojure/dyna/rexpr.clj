@@ -852,7 +852,9 @@
   (all-conjunctive-rexprs [this]
                           (cons [#{} this]
                                 (for [[proj-out rexpr] (all-conjunctive-rexprs body)]
-                                  [(conj proj-out var) rexpr]))))
+                                  (if (contains? (exposed-variables rexpr) var)
+                                    [(conj proj-out var) rexpr]
+                                    [proj-out rexpr])))))
 
 (def-base-rexpr aggregator [:str operator
                             :var result
@@ -866,7 +868,9 @@
                           (cons [#{} this]
                                 (when body-is-conjunctive
                                   (for [[proj-out rexpr] (all-conjunctive-rexprs body)]
-                                    [(conj proj-out incoming) rexpr]))))
+                                    (if (contains? (exposed-variables rexpr) incoming)
+                                      [(conj proj-out incoming) rexpr]
+                                      [proj-out rexpr])))))
   (rexpr-jit-info [this] {:jittable false}))
 
 (def-base-rexpr if [:rexpr cond
@@ -1216,6 +1220,7 @@
             jit-compiler-rewrite (:jit-compiler-rewrite kw-args false)]
         (when (and (not (and (:is-debug-check-rewrite kw-args) (not system/check-rexpr-arguments)))
                    (not (and (:is-debug-rewrite kw-args) (not system/debug-statements))))
+          (dyna-assert (or (not (map? matcher)) (not (contains? matcher :context)) (= :inference runs-at))) ;; context can only be used when in inference
           (let [ret
                 `(let []
                    (def-rewrite-direct ~functor-name ~runs-at ~rewriter-function)
@@ -1967,7 +1972,7 @@
   :assigns-variable result
   (apply function (map get-value arguments)))
 
-(def-rewrite
+#_(def-rewrite
   :match (simple-function-call (:unchecked function) (:any result) (:ground-var-list arguments))
   :run-at :jit-compiler
   :assigns-variable result

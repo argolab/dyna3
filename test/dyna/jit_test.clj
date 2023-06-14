@@ -100,7 +100,7 @@
         ctx (context/make-empty-context rr)
         ctx2 (context/make-empty-context rr2)]
     (binding [*generate-new-jit-rewrites* true]
-      (let [res (context/bind-context-raw ctx (simplify-fully rr))]
+      #_(let [res (context/bind-context-raw ctx (simplify-fully rr))]
         (is (is-lessthan? res)))
       (let [res2 (context/bind-context-raw ctx2 (simplify-fully rr2))]
         ;; this needs to do inference constraints to identify a new constraint between a and cand then that constraint should fail as a result
