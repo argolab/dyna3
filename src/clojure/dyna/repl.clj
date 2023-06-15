@@ -5,9 +5,13 @@
 
   (:require [dyna.ast-to-rexpr :refer [eval-string print-parser-errors parse-string]])
   (:require [dyna.system :as system])
-  (:require [dyna.rexpr-constructors :refer [make-multiplicity]])
+  (:require [dyna.rexpr :refer [find-iterators simplify]])
+  (:require [dyna.base-protocols :refer [is-empty-rexpr? exposed-variables ctx-get-all-bindings]])
+  (:require [dyna.context :as context])
+  (:require [dyna.rexpr-constructors :refer [make-multiplicity is-unify? is-conjunct? is-multiplicity?]])
+  (:require [dyna.iterators :refer [run-iterator]])
   (:require [dyna.utils :refer [debug-repl]])
-  (:require [clojure.string :refer [trim]])
+  (:require [clojure.string :refer [trim join replace]])
   (:import [dyna DynaUserAssert DynaUserError])
   (:import [org.antlr.v4.runtime InputMismatchException]))
 
@@ -35,15 +39,94 @@ fib(N) += fib(N-1) for N > 1.
 fib(N) += fib(N-2) for N > 1.
 $memo(fib[N:$ground]) = \"unk\".
 print fib(100).
-")
+"))
 
-  )
+(def ^{:private true}
+  print-symbols
+  {:empty "\u2205  (NO RESULTS)"
+   :tuple-left "\u3008"
+   :tuple-right "\u3009"
+   :at-mult "@"
+   :bag-left "\u27c5"
+   :bag-right "\u27c6"})
+
+(def ^{:private true :dynamic true} *terminal*)
+
+(defn- print-break [msg]
+  (let [m (count msg)
+        w (min (.getWidth *terminal*) 80)]
+    (if (= m 0)
+      (println (apply str (repeat w "~")))
+      (println (str (apply str (repeat (quot (- w m 2) 2) "~")) " " msg " " (repeat (quot (- w m 2) 2) "~"))))))
+
+(defn- print-query-result [print-id result]
+  (let [rexpr (:rexpr result)]
+    (if (is-empty-rexpr? rexpr)
+      (println print-id " " (:empty print-symbols))
+      (let [ctx (:context result)
+            iters (find-iterators rexpr)
+            ;; these variables should be sorted in a nice order
+            variables (vec (exposed-variables rexpr))
+            iters (find-iterators rexpr)
+            to-print (volatile! [])
+            var-print (fn [vars [var val]]
+                        (if (= (:varname var) "$query_result_var")
+                          (if (<= (count print-id) 20)
+                            (let [pi (loop [pi print-id
+                                            v (seq vars)]
+                                       (if (empty? v)
+                                         pi
+                                         (let [[[vf vv] & vr] v]
+                                           (recur (replace pi (str (:varname vf)) (str vv))
+                                                  vr))))]
+                              (str pi "=" val))
+                            (str "RESULT=" val))
+                          (if (not= \$ (first (:varname var)))
+                            (str (:varname var) "=" val))))
+            ]
+        (context/bind-context-raw
+         ctx
+         (run-iterator
+          :iterators iters
+          :rexpr-in rexpr
+          :rexpr-result rexpr-out
+          (vswap! to-print conj [(ctx-get-all-bindings (context/get-context)) (simplify rexpr-out)])))
+        (assert (> (count @to-print) 0))
+        (print (trim print-id) " ?\n")
+        (if (and (= 1 (count @to-print)) (= (make-multiplicity 1)(second (first @to-print))) )
+          (let [vbinds (remove nil? (map #(var-print (first (first @to-print)) %) (first (first @to-print))))]
+            (case (count vbinds)
+              0 (print "  " (:tuple-left print-symbols) " " (:tuple-right print-symbols) "     (ONE RESULT WITH NO VARIABLES ASSIGNED)\n")
+              1 (print "  " (:tuple-left print-symbols) (first vbinds) (:tuple-right print-symbols) "\n")
+              (do
+                (print "  " (:tuple-left print-symbols) (first vbinds) " ")
+                (doseq [v (rest vbinds)]
+                  (print "\n     " v " "))
+                (print (:tuple-right print-symbols) "\n"))))
+          (let [all-1 (every? #(= (make-multiplicity 1) (second %)) @to-print)
+                print-r (fn [[vars rexpr]]
+                          (let [var-str (str (:tuple-left print-symbols) " " (join ", " (map #(var-print vars %) vars)) " " (:tuple-right print-symbols))]
+                            (if all-1
+                              (print var-str)
+                              (do
+                                (print var-str)
+                                (print " @ ")
+                                ;; TODO: this has to indent the R-expr and make it look decent
+                                (print rexpr)))))]
+            (print "  " (:bag-left print-symbols))
+            (print-r (first @to-print))
+            (doseq [v (rest @to-print)]
+              (print "\n    ")
+              (print-r v))
+            (print (:bag-right print-symbols) "\n")))
+                                        ;(debug-repl "print r")
+        (flush)))))
 
 ;; https://github.com/jline/jline3/blob/master/console/src/test/java/org/jline/example/Console.java
 ;; https://github.com/jline/jline3/blob/master/demo/src/main/java/org/jline/demo/Repl.java
 (defn repl []
   (let [terminal (-> (TerminalBuilder/builder)
-                     ;(.name "dyna")
+                     (.name "dyna")
                      (.build))
         parser (let [p (proxy [DefaultParser] []
                          (parse [line cursor context]
@@ -76,58 +159,78 @@ print fib(100).
                         (.variable LineReader/HISTORY_FILE (System/getProperty "dyna.history_file"
                                                                                (str (System/getProperty "user.home") "/.dyna3_history")))
                         (.build))]
-    (println "To exit press ctrl-D.  Type \"help\" for help")
-    (try
-      (binding [system/query-output (fn [[query-text query-line-number] result]
-                                      ;; ignore the line number as this is running interc
-                                      (println "========== Query ==========")
-                                      (println query-text)
-                                      (println)
-                                      (println "Variable assignments:" (:context-value-map result))
-                                      (when (not= (make-multiplicity 1) (:rexpr result))
-                                        (println "Rexpr:" (:rexpr result)))
-                                      (println "==========================="))]
-        (loop []
-          (let [input (loop [did-ctrlc false]
-                        (let [v (try (.readLine line-reader "dyna> ")
-                                     (catch UserInterruptException err
-                                       (if-not did-ctrlc
-                                         nil
-                                         (throw err))))]
-                          (if (nil? v)
-                            (recur true)
-                            v)))]
-            ;(println "read input" input)
-            (when-not (contains? #{"exit" "quit"} (trim input))
-              (if (is-command? input)
-                (case (trim input)
-                  "run-agenda" (system/run-agenda)
-                  ;"run_agenda" (system/run-agenda)
-                  "clojure-debug-repl" (debug-repl)
-                  "clear-agenda" (do
-                                   (.clear_agenda system/work-agenda)
-                                   (println "Agenda cleared\nWARNING: this can cause the system to return incorrect results as some updates will not have been processed"))
-                  "help" (repl-help))
+    (binding [*terminal* terminal]
+      (println "To exit press ctrl-D.  Type \"help\" for help")
+      (try
+        (let [buffer-query-results (volatile! true)
+              query-buffer (volatile! [])
+              flush-query-buffer (fn []
+                                   (doseq [[query-text query-line-number result] @query-buffer]
+                                     (print-query-result query-text result))
+                                   (vreset! query-buffer []))
+              query-output-fn (fn [[query-text query-line-number] result]
+                                (vswap! query-buffer conj [query-text query-line-number result])
+                                (if @buffer-query-results
+                                  (vreset! buffer-query-results false)
+                                  (flush-query-buffer)))]
+          (binding [system/query-output query-output-fn
+                    #_(fn [[query-text query-line-number] result]
+                        ;; ignore the line number as this is running interc
+                        (println "========== Query ==========")
+                        (println query-text)
+                        (println)
+                        (println "Variable assignments:" (:context-value-map result))
+                        (when (not= (make-multiplicity 1) (:rexpr result))
+                          (println "Rexpr:" (:rexpr result)))
+                        (println "==========================="))]
+            (loop []
+              (let [input (loop [did-ctrlc false]
+                            (let [v (try (.readLine line-reader "dyna> ")
+                                         (catch UserInterruptException err
+                                           (if-not did-ctrlc
+                                             nil
+                                             (throw err))))]
+                              (if (nil? v)
+                                (recur true)
+                                v)))]
+                                        ;(println "read input" input)
+                (when-not (contains? #{"exit" "quit"} (trim input))
+                  (if (is-command? input)
+                    (case (trim input)
+                      "run-agenda" (system/run-agenda)
+                                        ;"run_agenda" (system/run-agenda)
+                      "clojure-debug-repl" (debug-repl)
+                      "clear-agenda" (do
+                                       (.clear_agenda system/work-agenda)
+                                       (println "Agenda cleared\nWARNING: this can cause the system to return incorrect results as some updates will not have been processed"))
+                      "help" (repl-help))
 
-                (try
-                  (let [cthread (Thread/currentThread)]
-                    (sun.misc.Signal/handle (sun.misc.Signal. "INT")
-                                            (proxy [sun.misc.SignalHandler] []
-                                              (handle [sig]
-                                                (.interrupt cthread))))
-                    (let [rexpr-result (eval-string input :fragment-allowed false)]
-                      (if (= (make-multiplicity 1) rexpr-result)
-                        (println "ok")
-                        (println rexpr-result))))
-                  (catch DynaUserAssert e
-                    (println (.getMessage e)))
-                  (catch DynaUserError e
-                    (println (.getMessage e)))
-                  (catch InterruptedException e
-                    (println "Interrupted"))))
-              (recur)))))
-      (catch UserInterruptException err nil)
-      (catch EndOfFileException err nil))))
+                    (try
+                      (let [cthread (Thread/currentThread)]
+                        (sun.misc.Signal/handle (sun.misc.Signal. "INT")
+                                                (proxy [sun.misc.SignalHandler] []
+                                                  (handle [sig]
+                                                    (.interrupt cthread))))
+                        (vreset! buffer-query-results true)
+                        (vreset! query-buffer [])
+                        (let [rexpr-result (eval-string input :fragment-allowed false)]
+                          (if (= (make-multiplicity 1) rexpr-result)
+                            (if (and (empty? @query-buffer) @buffer-query-results)
+                              (println "ok")
+                              (do
+                                (doseq [[query-text query-line-number result] @query-buffer]
+                                  (print-query-result query-text result))
+                                (vreset! query-buffer [])))
+                            (println rexpr-result))))
+                      (catch DynaUserAssert e
+                        (println (.getMessage e)))
+                      (catch DynaUserError e
+                        (println (.getMessage e)))
+                      (catch InterruptedException e
+                        (println "Interrupted"))))
+                  (recur))))))
+        (catch UserInterruptException err nil)
+        (catch EndOfFileException err nil)))))
 
 
 #_(defn repl []

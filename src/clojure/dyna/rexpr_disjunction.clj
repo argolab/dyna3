@@ -21,6 +21,15 @@
 
 ;(def ^{:dynamic true :private true} *make-optimized-disjuncts* true)
 
+;; TODO: wonder if there should be some kind index which is cached, it could
+;; allow for more efficient queries in some cases, but the cached index would
+;; have to be keep up to date.  I suppose that a cached index could go in the
+;; memo table instead where it would just keep the values in a different order.
+;;
+;; The different orders would have to be keep up to date as it updates with
+;; different values.  Though I suppose that it could keep the different orders
+;; as some kind of an upper bound instead of a tight bound for the value?  In
+;; which case it could allow for iterators to run faster in some cases
 
 (def-base-rexpr disjunct-op [:var-list disjunction-variables
                              :prefix-trie rexprs]

@@ -1386,7 +1386,8 @@
     ;; there needs to be a better way to get the bindigns to variables rather than doing this "hack" to get the map
     (system/query-output query-id {:context ctx
                                    :context-value-map (get (ctx-get-inner-values ctx) 4)
-                                   :rexpr res})))
+                                   :rexpr res
+                                   :rexpr-original rexpr})))
 
 
 (defn find-iterators [rexpr]

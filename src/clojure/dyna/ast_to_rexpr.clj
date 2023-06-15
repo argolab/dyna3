@@ -23,6 +23,14 @@
 
 (def ^:dynamic print-parser-errors true)
 
+(def ^:dynamic *user-print-function*
+  (fn [rel-path line-number text-rep ctx result-rexpr result-variable]
+    (println "=================================================")
+    (println "Print from line" (str "`" rel-path ":" line-number "`") "Query:" text-rep)
+    (if (= (make-multiplicity 1) result-rexpr)
+      (println (ctx-get-value ctx result-variable))
+      (println "Rexpr:" (ctx-exit-context ctx result-rexpr)))
+    (println "=================================================")))
 
 
 ;; if we provide some way for a string to be converted into an AST, and then
@@ -859,7 +867,7 @@ This is most likely not what you want."))))
 
             ["$print" 3] (let [[expression text-rep line-number] (.arguments ast)
                                all-variable-names (find-term-variables expression)
-                               result-variable (make-variable 'Result)
+                               result-variable (make-variable "$print_result_var")
                                variable-map (merge
                                              {"$functor_name" (make-constant (str "PRINT:" line-number))
                                               "$functor_arity" (make-constant 0)
@@ -876,12 +884,7 @@ This is most likely not what you want."))))
                                rel-path (if (instance? URL source-file)
                                           (str (.relativize current-dir-path (Paths/get (.toURI source-file))))
                                           (str source-file))]
-                           (println "=================================================")
-                           (println "Print from line" (str "`" rel-path ":" line-number "`") "Query:" text-rep )
-                           (if (= (make-multiplicity 1) result)
-                             (println (ctx-get-value ctx result-variable))
-                             (println "Rexpr:" (ctx-exit-context ctx result)))
-                           (println "=================================================")
+                           (*user-print-function* rel-path line-number text-rep ctx result result-variable)
                            (make-unify out-variable (make-constant true)))
 
             ["$_debug_repl" 3] (let [[expression text-rep line-number] (.arguments ast)
