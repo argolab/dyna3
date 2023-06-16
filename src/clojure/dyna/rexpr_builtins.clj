@@ -8,6 +8,7 @@
   (:require [clojure.set :refer [union]])
   (:require [dyna.user-defined-terms :refer [def-user-term]])
   (:require [dyna.context :as context])
+  (:require [dyna.rexpr-pretty-printer :refer [rexpr-printer]])
   (:import [dyna.rexpr unify-structure-rexpr])
   (:import [dyna DynaTerm DIterable DIterator DIteratorInstance UnificationFailure DynaMap]))
 
@@ -115,6 +116,12 @@
         )
      ))
 
+(defmacro binary-op-printer [symb rexpr]
+  `(defmethod rexpr-printer ~(symbol (str rexpr "-rexpr")) ~'[r]
+     (if (= (make-constant true) (:v2 ~'r))
+       (str (rexpr-printer (:v0 ~'r)) ~(str symb) (rexpr-printer (:v1 ~'r)))
+       (str (rexpr-printer (:v2 ~'r)) "=" (rexpr-printer (:v0 ~'r)) ~(str symb) (rexpr-printer (:v1 ~'r))))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (if (= "true" (System/getProperty "dyna.allow_bigint_type" "true"))
@@ -145,6 +152,7 @@
 
 (def-user-term "+" 2 (make-add v0 v1 v2))
 (def-user-term "-" 2 (make-add v2 v1 v0))
+(binary-op-printer "+" add)
 
 
 (defn- is-equal? [val] (fn [x] (= x (make-constant val))))
@@ -193,7 +201,7 @@
 
 (def-user-term "*" 2 (make-times v0 v1 v2))
 (def-user-term "/" 2 (make-times v2 v1 v0))
-
+(binary-op-printer "*" times)
 
 (def-rewrite
   :match (times ((is-equal? 1) _) (:any B) (:any C))
@@ -283,6 +291,7 @@
 
 (def-user-term ["pow" "**"] 2 (make-pow v0 v1 v2))
 (def-user-term "sqrt" 1 (make-pow v0 (make-constant 0.5) v1))
+(binary-op-printer "**" pow)
 
 (def-builtin-rexpr exp 2
   (:allground (= v1 (java.lang.Math/exp v0)))
@@ -298,6 +307,7 @@
 
 (def-user-term ["lessthan" "<"] 2 (make-lessthan v0 v1 v2))
 (def-user-term ["greaterthan" ">"] 2 (make-lessthan v1 v0 v2))
+(binary-op-printer "<" lessthan)
 
 (def-builtin-rexpr lessthan-eq 3
   (:allground (= v2 (<= v0 v1)))
@@ -305,6 +315,7 @@
 
 (def-user-term ["lessthaneq" "<="] 2 (make-lessthan-eq v0 v1 v2))
 (def-user-term ["greaterthaneq" ">="] 2 (make-lessthan-eq v1 v0 v2))
+(binary-op-printer "<=" lessthan-eq)
 
 (defn is-true? [x] (= (make-constant true) x))
 
@@ -419,6 +430,7 @@
 
 
 (def-user-term ["equals" "=="] 2 (make-equals v0 v1 v2))
+(binary-op-printer "==" equals)
 
 (def-builtin-rexpr not-equals 3
   (:allground (= v2 (not= v0 v1)))
@@ -436,16 +448,19 @@
   (make-unify C (make-constant false)))
 
 (def-user-term ["notequals" "!="] 2 (make-not-equals v0 v1 v2))
+(binary-op-printer "!=" not-equals)
 
 (def-builtin-rexpr land 3
   (:allground (= (boolean v2) (boolean (and v0 v1))))
   (v2 (boolean (and v0 v1))))
 (def-user-term ["land" "&&"] 2 (make-land v0 v1 v2))
+(binary-op-printer "&&" land)
 
 (def-builtin-rexpr lor 3
   (:allground (= (boolean v2) (boolean (or v0 v1))))
   (v2 (boolean (or v0 v1))))
 (def-user-term ["lor" "||"] 2 (make-lor v0 v1 v2))  ;; the pipe might be something which is or between methods so that we can use this to define types
+(binary-op-printer "||" lor)
 
 
 (def-builtin-rexpr not 2

@@ -6,8 +6,9 @@
   (:require [dyna.system :as system])
   (:require [dyna.iterators :as iterators])
   (:require [dyna.assumptions :refer [depend-on-assumption]])
+  (:require [dyna.rexpr-pretty-printer :refer [rexpr-printer optional-line-break indent-increase indent-decrease *print-variable-name*]])
   (:require [clojure.set :refer [union difference subset?]])
-  (:require [clojure.string :refer [trim]])
+  (:require [clojure.string :refer [trim join]])
   (:require [aprint.core :refer [aprint]])
   (:import [dyna UnificationFailure DynaTerm StatusCounters Rexpr RexprValue RexprValueVariable RContext]))
 
@@ -569,6 +570,9 @@
   Object
   (toString [this] (str "(variable " varname ")")))
 
+(defmethod rexpr-printer variable-rexpr [v]
+  (*print-variable-name* v))
+
 (defn make-variable [varname]
   (variable-rexpr. varname))
 ;(intern 'dyna.rexpr-constructors 'make-variable make-variable)
@@ -598,6 +602,11 @@
   (get-representation-in-context [this ctx] this)
   Object
   (toString [this] (str "(constant " value ")")))
+
+(defmethod rexpr-printer constant-value-rexpr [r]
+  (if (string? (:value r))
+    (str "\"" (:value r) "\"")
+    (str (:value r))))
 
 
 (defn make-constant [val]
@@ -725,6 +734,9 @@
         (prev x))))
   (expose-globally make-multiplicity))
 
+(defmethod rexpr-printer multiplicity-rexpr [m]
+  (str (:mult m)))
+
 (defn fixpoint-functional-dependencies-map [m]
   (loop [m m]
     (let [n (volatile! m)]
@@ -751,10 +763,15 @@
                                         (vswap! r update k union v))
                                       (fixpoint-functional-dependencies-map @r))))
 
+(defmethod rexpr-printer conjunct-rexpr [r]
+  (join (str "*" (optional-line-break)) (map rexpr-printer (:args r))))
 
 (def-base-rexpr disjunct [:rexpr-list args]
   (is-non-empty-rexpr? [this] (some is-non-empty-rexpr? args))
   (rexpr-jit-info [this] {:jittable false}))
+
+(defmethod rexpr-printer disjunct-rexpr [r]
+  (join (str "+" (optional-line-break)) (map rexpr-printer (:args r))))
 
 #_(defn deep-equals-list-compare [a b]
   (if (and (empty? a) (empty? b))
@@ -809,6 +826,9 @@
   (variable-functional-dependencies [this] {#{a} #{b}
                                             #{b} #{a}}))
 
+(defmethod rexpr-printer unify-rexpr [r]
+  (str "(" (rexpr-printer (:a r)) "=" (rexpr-printer (:b r))))
+
 #_(def-deep-equals unify [a b]
   (when (instance? unify-rexpr b)
     ;; we only have to check the args in the different order, as we have already done a check against the stanard equals expression
@@ -829,6 +849,11 @@
   (variable-functional-dependencies [this] (let [a (into #{} (filter is-variable? (cons dynabase arguments)))]
                                              {a #{out}
                                               #{out} a})))
+
+(defmethod rexpr-printer unify-structure-rexpr [r]
+  (if (dnil? (:dynabase r))
+    (str "(" (rexpr-printer (:out r)) "=" (:name r) "[" (join ", " (map rexpr-printer (:arguments r))) "])")
+    (str "(" (rexpr-printer (:dynabase r)) "." (rexpr-printer (:out r)) "=" (:name r) "[" (join ", " (map rexpr-printer (:arguments r))) "])")))
 
 ;; read the dynabase from a particular constructed structure.  This will require that structure become ground
 ;; the file reference is also required to make a call to a top level expression
@@ -856,6 +881,9 @@
                                     [(conj proj-out var) rexpr]
                                     [proj-out rexpr])))))
 
+(defmethod rexpr-printer proj-rexpr [r]
+  (str "proj(" (indent-increase) (rexpr-printer (:var r)) "," (optional-line-break) (rexpr-printer (:body r)) (indent-decrease) ")"))
+
 (def-base-rexpr aggregator [:str operator
                             :var result
                             :hidden-var incoming
@@ -873,12 +901,20 @@
                                       [proj-out rexpr])))))
   (rexpr-jit-info [this] {:jittable false}))
 
+(defmethod rexpr-printer aggregator-rexpr [r]
+  (str "(" (rexpr-printer (:result r)) "=`" (:operator r) "`(" (indent-increase) (rexpr-printer (:incoming r)) "," (optional-line-break) (rexpr-printer (:body r)) (indent-decrease) "))"))
+
 (def-base-rexpr if [:rexpr cond
                     :rexpr true-branch
                     :rexpr false-branch]
   (is-constraint? [this] (and (is-constant? true-branch) (is-constant? false-branch)))
   (rexpr-jit-info [this] {:jittable false}))
 
+(defmethod rexpr-printer if-rexpr [r]
+  (str "if(" (indent-increase)
+       (rexpr-printer (:cond r)) "," (optional-line-break)
+       (rexpr-printer (:true-branch r)) "," (optional-line-break)
+       (rexpr-printer (:false-branch r)) (indent-decrease) ")"))
 
 ;; (defn set-variable [var value]
 ;;   ;; would be nice if there was a bit more efficient approach to this method?
@@ -916,24 +952,24 @@
                     (debug-repl "user call is constraint")
                     (???))))
 
+(defmethod rexpr-printer user-call-rexpr [r]
+  (let [nargs (:arity (:name r))
+        all-normal (and (= (+ 1 nargs) (count (:args-map r)))
+                        (every? #(contains? (:args-map r) %) (map #(make-variable (str "$" %)) (range (+ 1 nargs)))))]
+    (if all-normal
+      (str (rexpr-printer (strict-get (:args-map r) (make-variable (str "$" nargs)))) "="
+           (:name (:name r))
+           "("
+           (join "," (for [i (range nargs)]
+                       (rexpr-printer (strict-get (:args-map r) (make-variable (str "$" i))))))
+           ")")
+      (do
+        ;; trying to print a method which as a non-standard variable mapping signature
+        (???))
+      ))
+  (???))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;; ;; an optimized version of aggregation which does projection and the aggregation in the same operator
-;; ;; the aggregator outer should only have a list of aggregator-op-inner as its arguments
-;; (def-base-rexpr aggregator-op-outer [:str operator
-;;                                      :var result
-;;                                      :rexpr bodies])
-
-;; (def-base-rexpr aggregator-op-inner [:var incoming
-;;                                      :var-list projected
-;;                                      :rexpr body])
-
-
-;; would be nice if we knew which of the variables were required for an
-;; expression to be externally satasified I suppose that could just be all of
-;; the variables which are not projected out of an expression so it could go
-;; through and attempt to identify which of the expressions are more efficiently
-;; represented by some expression.  This will correspond with
 
 
 (defn make-proj-many [vars R]

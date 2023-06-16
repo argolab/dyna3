@@ -8,7 +8,9 @@
   (:require [dyna.context :as context])
   (:require [dyna.prefix-trie :as trie])
   (:require [dyna.iterators :refer [make-skip-variables-iterator run-iterator]])
+  (:require [dyna.rexpr-pretty-printer :refer [rexpr-printer optional-line-break indent-increase indent-decrease]])
   (:require [clojure.set :refer [difference union intersection]])
+  (:require [clojure.string :refer [join]])
   (:import [dyna.rexpr proj-rexpr disjunct-rexpr aggregator-rexpr])
   (:import [dyna.rexpr_disjunction disjunct-op-rexpr])
   (:import [dyna.prefix_trie PrefixTrie])
@@ -51,6 +53,27 @@
                                 (let [vs (conj (ensure-set projected) incoming)]
                                   (for [[proj-out rexpr] (all-conjunctive-rexprs body)]
                                     [(union proj-out (intersection vs (exposed-variables rexpr))) rexpr])))))
+
+(def ^{:dynamic true :private true} *aggregator-print-input-depth* 0)
+(defmethod rexpr-printer aggregator-op-outer-rexpr [r]
+  (binding [*aggregator-print-input-depth* (+ 1 *aggregator-print-input-depth*)]
+    (str "(" (rexpr-printer (:result r)) "=`" (:name (:operator r)) "`("
+         (indent-increase) "AGGIN_" *aggregator-print-input-depth* ", " (optional-line-break)
+         (rexpr-printer (:bodies r)) (indent-decrease) "))")))
+(defmethod rexpr-printer aggregator-op-inner-rexpr [r]
+  (let [bod (str (indent-increase)
+                 (join (map #(str "proj(" (rexpr-printer %) ",") (:projected r)))
+                 (optional-line-break)
+                 (rexpr-printer (:body r))
+                 (optional-line-break)
+                 (join (repeat (count (:projected r)) ")"))
+                 (indent-decrease))]
+    (if (is-variable? (:incoming r))
+      (str "proj(" (indent-increase) (rexpr-printer (:incoming r)) ", (AGGIN_" *aggregator-print-input-depth* "=" (rexpr-printer (:incoming r)) ")*" (optional-line-break)
+           bod
+           (indent-decrease)
+           ")")
+      (str "(AGGIN_" *aggregator-print-input-depth* "=" (rexpr-printer (:incoming r)) ")*" bod))))
 
 ;; this might be something that the memoization is going to want to override,
 ;; which would allow for it to get the result of aggregation directly

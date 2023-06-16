@@ -7,6 +7,7 @@
   (:require [dyna.rexpr-constructors :refer [is-disjunct-op? get-user-term is-aggregator-op-outer? is-aggregator-op-inner?]])
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
+  (:require [dyna.rexpr-pretty-printer :refer [rexpr-printer]])
   (:import [dyna.rexpr proj-rexpr simple-function-call-rexpr conjunct-rexpr])
   (:import [dyna RexprValue RexprValueVariable Rexpr DynaJITRuntimeCheckFailed StatusCounters UnificationFailure]))
 
@@ -257,22 +258,24 @@
                                      [v k]))
         new-arg-order (vec (vals new-arg-names))
 
-        rexpr-def-expr `(def-base-rexpr ~new-rexpr-name [~@(flatten (for [a new-arg-order
-                                                                          :let [v (get new-arg-names-rev a)]]
-                                                                      (cond (rexpr? v) [:rexpr a]
-                                                                            (is-variable? v) [:var a]
-                                                                            (:hidden-var v) [:hidden-var a]
-                                                                            :else (do (debug-repl "???")
-                                                                                      (???)))
-                                                                      ))]
-                          ;; should there be some override for the get method
-                          ;; such that we can get the fields on the origional
-                          ;; expression?  But in the case that there
-                          (~'rexpr-jit-info ~'[this]
-                           (get @dyna.rexpr-jit-v2/rexprs-types-constructed (quote ~new-rexpr-name)))
+        rexpr-def-expr `(do (def-base-rexpr ~new-rexpr-name [~@(flatten (for [a new-arg-order
+                                                                              :let [v (get new-arg-names-rev a)]]
+                                                                          (cond (rexpr? v) [:rexpr a]
+                                                                                (is-variable? v) [:var a]
+                                                                                (:hidden-var v) [:hidden-var a]
+                                                                                :else (do (debug-repl "???")
+                                                                                          (???)))
+                                                                          ))]
+                              ;; should there be some override for the get method
+                              ;; such that we can get the fields on the origional
+                              ;; expression?  But in the case that there
+                              (~'rexpr-jit-info ~'[this]
+                               (get @dyna.rexpr-jit-v2/rexprs-types-constructed (quote ~new-rexpr-name)))
 
-                          (~'primitive-rexpr ~'[this]
-                           ~(primitive-rexpr-cljcode new-arg-names prim-rexpr)))
+                              (~'primitive-rexpr ~'[this]
+                               ~(primitive-rexpr-cljcode new-arg-names prim-rexpr)))
+                            (defmethod rexpr-printer ~(symbol (str new-rexpr-name) "-rexpr") ~'[r]
+                              (rexpr-printer (primitive-rexpr r))))
 
         conversion-function-expr `(fn [~root-rexpr]
                                    (let ~var-gen-code ;; this is going to get access to all of the
