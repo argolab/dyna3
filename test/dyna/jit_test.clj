@@ -100,13 +100,9 @@
         ctx (context/make-empty-context rr)
         ctx2 (context/make-empty-context rr2)]
     (binding [*generate-new-jit-rewrites* true]
-      #_(let [res (context/bind-context-raw ctx (simplify-fully rr))]
-        (is (is-lessthan? res)))
       (let [res2 (context/bind-context-raw ctx2 (simplify-fully rr2))]
         ;; this needs to do inference constraints to identify a new constraint between a and cand then that constraint should fail as a result
-        (debug-repl "res2")
-        (is (is-empty-rexpr? res2)))
-      )))
+        (is (is-empty-rexpr? res2))))))
 
 #_(deftest basic-jit6
   ;; test constructing an R-expr with holes.  This will mean that it should
@@ -119,11 +115,15 @@
 
   )
 
+;; Done:
+;; - inference against other parts of the R-expr
+
+
 ;; TODO:
 ;;  - holes of other R-exprs
 ;;  - iterators
 ;;    - aggregators/disjunction?
-;;  - inference
+;;  - inference (against outside context)
 ;;
 ;;  - converting R-exprs into the synth form
 ;;     - matching against already existing synth forms

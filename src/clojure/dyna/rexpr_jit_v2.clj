@@ -237,10 +237,7 @@
                            (debug-repl "qwerwqer")
                            (???))))]
     (rf :rexpr rexpr (into {} (for [[k v] new-arg-names]
-                                [k (jit-exposed-variable-rexpr. v)]))))
-  #_(let [g (into {} (for [[k v] new-arg-names]
-                     [k (jit-exposed-variable-rexpr. v)]))]
-    (remap-variables-func rexpr #(g % %))))
+                                [k (jit-exposed-variable-rexpr. v)])))))
 
 (defn- synthize-rexpr-cljcode [rexpr]
   ;; this should just generate the required clojure code to convert the rexpr
@@ -432,6 +429,11 @@
   )
 
 
+(def ^{:private true :dynamic true} *rexpr-checked-already* nil
+  ;; R-exprs which have already been checked and found to be true.  We do not want to infer an R-expr which then gets check and then just cycle
+  ;; in the rewrites that we generate, so anytime that an R-expr is rewritten as mult-1, we will track it as "already checked"
+  )
+
 #_(def ^{:private true :dynamic true} *precondition-checks-performed* nil
   ;; this will be a (transient []) of conditions which need to get checked before we can apply the rewrite
   ;; these will get generated before
@@ -577,6 +579,7 @@
      (throw (DynaJITRuntimeCheckFailed.))))
 
 (defn- add-precondition-to-check! [condition]
+  (assert (not (map? condition)))
   `(jit-precondition-to-check ~condition))
 
 
@@ -1215,7 +1218,8 @@
                                 nil ;; failed to match the existing value
                                 ))
                             (do
-                              (vswap! runtime-checks conj (add-precondition-to-check! match-success))
+                              (when-not (contains? match-success :constant-value)
+                                (vswap! runtime-checks conj (add-precondition-to-check! (:cljcode-expr match-success))))
                               (when-not (= '_ (cdar matcher))
                                 (vswap! currently-bound-variables assoc (cdar matcher) curval))
                               (list true)))
@@ -1243,7 +1247,8 @@
                             (list true))
                           nil))
 
-                      (and (#{'fn 'fn*} (caar matcher)) ;; an inline function is used for the matcher
+                      (and (or (#{'fn 'fn*} (caar matcher))  ;; an inline function is used for the matcher
+                               (seqable? (car matcher)))
                            (symbol? (cdar matcher))
                            (= 2 (count matcher)))
                       (let [f (cached-eval (car matcher))
@@ -1337,6 +1342,7 @@
               (if (get-current-value expression)
                 (do (add-to-generation! `(when-not ~(:cljcode-expr expression)
                                            (throw (UnificationFailure. "JIT check rewrite"))))
+                    (conj! *rexpr-checked-already* rexpr)
                     (make-multiplicity 1))
                 (do (add-to-generation! `(when ~(:cljcode-expr expression)
                                            (throw (DynaJITRuntimeCheckFailed.))))
@@ -1355,6 +1361,7 @@
                   value-expression (:rewrite-body rewrite)
                   expression `(set-value! ~assigning-var ~value-expression)]
               (add-to-generation! (jit-evaluate-cljform expression))
+              (conj! *rexpr-checked-already* rexpr)
               (make-multiplicity 1) ;; the result of assigning a variable will just be a mult1 expression
               ))
 
@@ -1373,7 +1380,7 @@
               (let [already-contained (for [[proj-out rx] *local-conjunctive-rexprs-for-infernece*
                                           :when (= rx ri)]
                                       rx)]
-                (if (empty? already-contained)
+                (if (and (empty? already-contained) (not (contains? *rexpr-checked-already* ri)))
                   (make-conjunct [rexpr ri]) ;; create a new conjunct to add this to the expression
                   rexpr ;; not going to add as it is already in the context
                   ))))
@@ -1446,36 +1453,35 @@
            rexpr
            ret))))))
 
-(defn- simplify-jit-internal-rexpr-loop [rexpr]
-  (loop [r (if (rexpr? rexpr)
-             rexpr
-             (do (assert (= :rexpr (:type rexpr)))
-                 (:rexpr-type rexpr)))]
-    (let [top-conjuncts (all-conjunctive-rexprs r)
-          possible-rewrites (binding [*jit-simplify-call-counter* (volatile! 0)
-                                      *jit-simplify-rewrites-found* (volatile! #{})
-                                      *jit-simplify-rewrites-picked-to-run* (constantly false)
-                                      *jit-generate-functions* nil ;; make sure that we do not generate any code from selecting between rewrites
-                                      *local-conjunctive-rexprs-for-infernece* top-conjuncts]
-                              (let [nr (simplify-jit-internal-rexpr r)]
-                                (dyna-assert (= r nr)) ;; we did not pick anything to run, so the result should be the same
-                                @*jit-simplify-rewrites-found*))]
-      (if (empty? possible-rewrites)
-        (do
-          (debug-repl "no possible rewrites")
-          r) ;; then we are "done" and we just return this R-expr unrewritten
-        (do
-          (when (> (count possible-rewrites) 1)
-            (debug-repl "TODO: pick between rewrites found")
-            ;; this is when we should pick between the kind of rewrites that we
-            ;; are allowed to run.  If we are running simplify for construction
-            ;; only, then we would only pick those rewrites
-            ;;
-            ;; in the case that a rewrite should have that it will correspond with
-            ;(???)
-            )
-          (assert (not (empty? possible-rewrites)))
-          (let [picked-cc (second (first possible-rewrites)) ;; just pick the first possible rewrite atm
+
+
+(defn- simplify-jit-internal-rexpr-once [r]
+  (let [top-conjuncts (all-conjunctive-rexprs r)
+        possible-rewrites (binding [*jit-simplify-call-counter* (volatile! 0)
+                                    *jit-simplify-rewrites-found* (volatile! #{})
+                                    *jit-simplify-rewrites-picked-to-run* (constantly false)
+                                    *jit-generate-functions* nil ;; make sure that we do not generate any code from selecting between rewrites
+                                    *local-conjunctive-rexprs-for-infernece* top-conjuncts]
+                            (let [nr (simplify-jit-internal-rexpr r)]
+                              (dyna-assert (= r nr)) ;; we did not pick anything to run, so the result should be the same
+                              @*jit-simplify-rewrites-found*))]
+    (if (empty? possible-rewrites)
+      (do
+        (debug-repl "no possible rewrites")
+        r) ;; then we are "done" and we just return this R-expr unrewritten
+      (loop [picked-rr-order (sort-by (fn [[simplify-stack rr]]
+                                        (+ (* 1000 (count simplify-stack)) ;; prefer things at the top of the stack
+                                           (if (contains? (:kw-args rr) :check) -200000 0) ;; checks should go earlier
+                                           (if (contains? (:kw-args rr) :assigns-variable) -100000 0) ;; then assignments of variables
+                                           (if (= :inference (:run-at (:kw-args rr))) 5000 0) ;; inference should run late-ish
+                                           (* 10 (count (:runtime-checks rr))) ;; fewer preconditions should make it a bit more general
+                                           (:simplify-call-counter rr)))
+                                      possible-rewrites)]
+        (when (> (count picked-rr-order) 1)
+          (debug-repl "multiple possible"))
+        (if (empty? picked-rr-order)
+          r
+          (let [picked-cc (second (first picked-rr-order))
                 nr (binding [*jit-simplify-rewrites-picked-to-run* (fn [rr-md]
                                                                      (and (= (:simplify-call-counter rr-md) (:simplify-call-counter picked-cc))
                                                                           (= (:matching-vars rr-md) (:matching-vars picked-cc))
@@ -1483,11 +1489,24 @@
                              *jit-simplify-call-counter* (volatile! 0)
                              *jit-simplify-rewrites-found* (volatile! #{})
                              *local-conjunctive-rexprs-for-infernece* top-conjuncts]
-                  (let [nr (simplify-jit-internal-rexpr r)]
-                    (add-return-rexpr-checkpoint! nr)
-                    (debug-repl "result of doing rewrite")
-                    nr))]
-            (recur nr)))))))
+                     (let [nr (simplify-jit-internal-rexpr r)]
+                       (add-return-rexpr-checkpoint! nr)
+                       (debug-repl "result of doing rewrite")
+                       nr
+                       ))]
+            (if (not= nr r)
+              nr
+              (recur (rest picked-rr-order)))))))))
+
+(defn- simplify-jit-internal-rexpr-loop [rexpr]
+  (loop [r (if (rexpr? rexpr)
+             rexpr
+             (do (assert (= :rexpr (:type rexpr)))
+                 (:rexpr-type rexpr)))]
+    (let [nr (simplify-jit-internal-rexpr-once r)]
+      (if (not= r nr)
+        (recur nr)
+        nr))))
 
 
 
@@ -1513,7 +1532,8 @@
               *current-simplify-stack* ()
               *local-variable-names-for-variable-values* (volatile! nil)
               *jit-generate-functions* (transient [])
-              *jit-incremented-status-counter* (volatile! false)]
+              *jit-incremented-status-counter* (volatile! false)
+              *rexpr-checked-already* (transient #{})]
       (debug-binding
        ;; restart these values, as we are running a nested version of simplify for ourselves
        [*current-simplify-running* nil]
@@ -1528,7 +1548,8 @@
                                       (def-rewrite-direct ~(:generated-name jinfo) [:standard] ~gen-fn))))]
 
              (debug-repl "pr1")
-             (let [rr (fn-evaled rexpr simplify-method)]
+             (let [rr (try (fn-evaled rexpr simplify-method)
+                           (catch UnificationFailure _ (make-multiplicity 0)))]
                (debug-repl "pr2")
                (assert (not= rexpr rr)) ;; otherwise there was no rewriting done, and the generated rewrite failed for some reason
                rr))
