@@ -28,3 +28,7 @@ length max= I for _=word(I).
 
 phrase(I,K,T) max= phrase(I,J,T1) * phrase(J,K,T2) * rule(T,T1,T2) for I < J, J < K.
 phrase(I,I+1,T) max= rule(T, word(I)).
+
+print "program loaded, going to make query".
+
+phrase(A,B,C) ?

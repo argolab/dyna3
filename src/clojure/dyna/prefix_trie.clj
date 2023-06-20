@@ -331,7 +331,7 @@
 
   (trie-reorder-keys [this new-order]
     ;; the arity between the keys could include adding in new keys.  In which case this is going to have to identify new values for this
-    (assert (>= (count new-order) arity))
+    (dyna-assert (>= (count new-order) arity))
     (if (= new-order (vec (range arity)))
       this  ;; there is no change so just return this without making any changes
       (let [new-contains-wildcard (reduce bit-or 0 (map (fn [i] (if (or (nil? (nth new-order i))

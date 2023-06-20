@@ -102,14 +102,14 @@
      :eval (partial eval-with-locals all-bindings current-namespace))))
 
 (if (= (System/getProperty "dyna.debug_repl" "true") "false")
-  (defn- debug-repl-fn [prompt local-bindings ^Throwable traceback print-bindings]))
-
-
-(defmacro debug-repl
-  "Starts a REPL with the local bindings available."
-  ([] `(debug-repl "dr"))
-  ([prompt] `(debug-repl ~prompt true))
-  ([prompt print-bindings] `(~debug-repl-fn ~prompt (debugger-get-local-bindings) (Throwable. "Entering Debugger") ~print-bindings ~*ns*)))
+  (do (defn- debug-repl-fn [prompt local-bindings ^Throwable traceback print-bindings current-namespace])
+      (defmacro debug-repl ([]) ([prompt]) ([prompt print-bindings])))
+  (do
+    (defmacro debug-repl
+      "Starts a REPL with the local bindings available."
+      ([] `(debug-repl "dr"))
+      ([prompt] `(debug-repl ~prompt true))
+      ([prompt print-bindings] `(~debug-repl-fn ~prompt (debugger-get-local-bindings) (Throwable. "Entering Debugger") ~print-bindings ~*ns*)))))
 
 (defmacro debug-delay-ntimes [ntimes & body]
   (let [sym (gensym 'debug-delay)

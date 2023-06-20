@@ -147,6 +147,11 @@
                                       t (:rexprs nt)
                                       vorder-idx (zipmap vorder (range))
                                       new-order (vec (map vorder-idx dj-vars)) ;; if the var is not present, it will be nil
+                                      t2 (if (not= (count new-order) (count vorder))
+                                           (do
+                                             (debug-repl "subselect trie")
+                                             (???))
+                                           t)
                                       t-reordered (trie-reorder-keys t new-order)]
                                   (recur (trie-merge trie t-reordered)
                                          (first rt)

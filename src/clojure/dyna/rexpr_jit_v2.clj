@@ -85,8 +85,9 @@
 
 ;; the iterables should be something like which variables and their orders can be
 (def-base-rexpr jit-placeholder [:unchecked placeholder-id
-                                 :var-list placeholder-vars
-                                 :unchecked placeholder-iterables]) ;; which things are iterable will probably need more information about the iterators, or maybe just don't support having iterators be outside of the JIT expression.  Though I suppose that this is likely to happen in the case that there is a disjunct/memoized expression.  Those are things we we do not want to handle.  So there might be a lot of stuff which is not going to get handled directly....sigh
+                                 :var-map placeholder-vars
+                                 ;:unchecked placeholder-iterables
+                                 ]) ;; which things are iterable will probably need more information about the iterators, or maybe just don't support having iterators be outside of the JIT expression.  Though I suppose that this is likely to happen in the case that there is a disjunct/memoized expression.  Those are things we we do not want to handle.  So there might be a lot of stuff which is not going to get handled directly....sigh
 
 
 ;; a disjunct inside of the jit would have to have some identifier to track
@@ -102,7 +103,7 @@
     (debug-repl "should not happen, attempting to simplify jit-disjunct")
     (???)))
 
-(defn convert-rexpr-to-placeholder [rexpr]
+#_(defn convert-rexpr-to-placeholder [rexpr]
   (let [iters (find-iterators rexpr)]
     (make-jit-placeholder (gensym 'rexpr-placeholder)
                           (vec (exposed-variables rexpr))
@@ -110,14 +111,6 @@
                           iters; (???) ;; need to build some representation of which variables could be iterated here.  there might be something
                           ;; about how efficient the different iterators are going to work.  In which case
                           )))
-
-(def-rewrite
-  :match (jit-placeholder _ _ _)
-  :run-at :standard
-  (do
-    (debug-repl "should not happen, attempting to simplify jit-placeholder")
-    (???)))
-
 
 (defn- convert-to-primitive-rexpr [rexpr]
   (cond
@@ -352,7 +345,7 @@
                    ;; case of an aggregator, we might want to pass through the
                    ;; aggregation to handle its children?  Though those will be
                    ;; their own independent compilation units
-                   (make-jit-placeholder id exposed (find-iterators rexpr)))
+                   (make-jit-placeholder id (into {} (for [e exposed] [e e]))))
                  (rewrite-rexpr-children-no-simp rexpr rr))))
         nr (rp rexpr)
         synthed (synthize-rexpr nr)]
@@ -1653,6 +1646,18 @@
     (add-to-generation!
      (jit-evaluate-cljform `(set-value! ~result (~function ~@(map #(list 'get-value %) arguments)))))
     (make-multiplicity 1)))
+
+
+(def-rewrite
+  :match (jit-placeholder _ _ _)
+  :run-at :standard
+  (do
+    (debug-repl "should not happen, attempting to simplify jit-placeholder")
+    (???)))
+
+(def-rewrite
+  :match (jit-placeholder placeholder-id placeholder-vars pla))
+
 
 #_(def-rewrite
   :match (conjunct (:rexpr-list children))
