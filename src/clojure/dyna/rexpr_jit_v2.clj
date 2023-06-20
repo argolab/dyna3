@@ -8,6 +8,7 @@
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
   (:require [dyna.rexpr-pretty-printer :refer [rexpr-printer]])
+  (:require [clojure.walk :refer [macroexpand-all]])
   (:import [dyna.rexpr proj-rexpr simple-function-call-rexpr conjunct-rexpr])
   (:import [dyna RexprValue RexprValueVariable Rexpr DynaJITRuntimeCheckFailed StatusCounters UnificationFailure]))
 
@@ -274,8 +275,8 @@
 
                               (~'primitive-rexpr ~'[this]
                                ~(primitive-rexpr-cljcode new-arg-names prim-rexpr)))
-                            (defmethod rexpr-printer ~(symbol (str new-rexpr-name) "-rexpr") ~'[r]
-                              (rexpr-printer (primitive-rexpr r))))
+                            (defmethod rexpr-printer ~(symbol (str new-rexpr-name "-rexpr")) ~'[r]
+                              (rexpr-printer (primitive-rexpr ~'r))))
 
         conversion-function-expr `(fn [~root-rexpr]
                                    (let ~var-gen-code ;; this is going to get access to all of the
@@ -411,6 +412,10 @@
   ;; unless this value is true.  The reason is that those inferences are still allowed to run when "fast"
   )
 
+
+(def ^{:private true :dynamic true} *local-conjunctive-rexprs-for-infernece* nil
+  ;; local R-exprs which are conjunctive which can also be used for inference
+  )
 (def ^{:private true :dynamic true} *jit-consider-expanding-placeholders* false
   ;; If we want embed the placeholder in the resulting JITted type.
   )
@@ -427,7 +432,7 @@
   )
 
 
-(def ^{:private true :dynamic true} *precondition-checks-performed* nil
+#_(def ^{:private true :dynamic true} *precondition-checks-performed* nil
   ;; this will be a (transient []) of conditions which need to get checked before we can apply the rewrite
   ;; these will get generated before
   )
@@ -547,16 +552,16 @@
                )))
        (catch DynaJITRuntimeCheckFailed ~'_ nil))))
 
-(def ^{:private true :dynamic true} *jit-cached-expression-results* nil)
+#_(def ^{:private true :dynamic true} *jit-cached-expression-results* nil)
 
-(defn- add-to-expression-cache!
+#_(defn- add-to-expression-cache!
   ([expression result]
    (when-not (nil? *jit-cached-expression-results*)
      (assoc! *jit-cached-expression-results* expression result)))
   ([value]
    (add-to-expression-cache! (:cljcode-expr value) value)))
 
-(defn- add-precondition-to-check! [condition]
+#_(defn- add-precondition-to-check! [condition]
   (if (and (not (nil? *precondition-checks-performed*)) (contains? *precondition-checks-performed* condition))
     nil
     (do
@@ -564,6 +569,17 @@
         (conj! *precondition-checks-performed* condition))
       `(when-not ~condition
          (throw (DynaJITRuntimeCheckFailed.))))))
+
+(defmacro ^{:private true} jit-precondition-to-check [condition]
+  ;; this should cache the preconditions during generation of the program instead of when it is inserted into the program
+  ;; this will ensure that the chain of generation will
+  `(when-not ~condition
+     (throw (DynaJITRuntimeCheckFailed.))))
+
+(defn- add-precondition-to-check! [condition]
+  `(jit-precondition-to-check ~condition))
+
+
 
 (defn- add-precondition-on-same-value! [value]
   (case (:type value)
@@ -696,9 +712,11 @@
                                                       result (when can-eval
                                                                (apply (var-get var) (map get-current-value avals)))]
                                                   (if can-eval
-                                                    (assoc ret (if (every? #(contains? % :constant-value) avals)
-                                                                 :constant-value :current-value)
-                                                           result))))}
+                                                    (assoc ret
+                                                           (if (every? #(contains? % :constant-value) avals)
+                                                             :constant-value :current-value)
+                                                           result)
+                                                    ret)))}
 
                                      :else
                                      (do (debug-repl "symbol ??")
@@ -747,7 +765,7 @@
         {:cljcode-expr expr :type :value :constant-value expr}
 
 
-        (seqable? expr)
+        (seqable? expr) ;; vector has already been checked, so this is going to only be list-like things
         (let [f (jit-evaluate-cljform (first expr))
               r ((:invoke f) expr)]
           (dyna-assert (#{:rexpr :rexpr-value :value :function :void} (:type r)))
@@ -995,6 +1013,18 @@
       })))
 
 (set-jit-method
+ #'make-constant
+ (fn [[_ val]]
+   (debug-repl "todo jit make constant")
+   (???)))
+
+(set-jit-method
+ #'make-variable
+ (fn [[_ varname]]
+   (debug-repl "todo jit make variable")
+   (???)))
+
+(set-jit-method
  [#'context/make-empty-context
   #'context/make-nested-context-disjunct
   #'context/make-nested-context-proj
@@ -1060,7 +1090,7 @@
 
 
 
-(defn- compute-match
+#_(defn- compute-match
   ([rexpr matcher1 to-check-expressions currently-bound-variables]
    (let [matcher (if (map? matcher1) matcher1 {:rexpr matcher1})
          rexpr-matcher (:rexpr matcher)
@@ -1194,74 +1224,167 @@
      [currently-matches (persistent! to-check) (persistent! currently-bound)])))
 
 
-(defn- compute-match-v3
+#_(defn- compute-match-v3
+  ;; because of the context, there could be multiple matches, which means that
+  ;; we are going to have to return a sequence of matches instead of a single match
+
+
   ([rexpr matcher1 runtime-checks currently-bound]
-   (let [matcher (if (map? matcher1) matcher1 {:rexpr matcher1})
+   (let [matcher (if (map? matcher1) matcher1 {:rexpr matcher1})]
+     (letfn [(match-sub-expression [match-expr arg arg-sig]
+               (let [t (case arg-sig
+                         :var :rexpr-value
+                         :rexpr :rexpr
+                         :mult :value
+                         :value :rexpr-value
+                         :str :value
+                         :unchecked :unknown
+                         :opaque-constant :value
+                         :boolean :value
+                         :file-name :value
+                         :hidden-var :rexpr-value
+                         :rexpr-list (???)
+                         :var-list (???)
+                         :var-map (???)
+                         (do (debug-repl)
+                             (???)))
+                     curval (cond (instance? jit-exposed-variable-rexpr arg)
+                                  {:type t
+                                   :current-value (*current-assignment-to-exposed-vars* (:exposed-name arg))
+                                   ;; access the field directly from the type.  The top level R-expr will be assigned to the variable rexpr
+                                   ;;
+                                   :cljcode-expr `(. ~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))})
+                                                     ~(:exposed-name arg))    ;(:exposed-name arg)
+                                   :matched-variable arg}
+
+                                  (instance? jit-local-variable-rexpr arg)
+                                  (if (contains? @*local-variable-names-for-variable-values* arg)
+                                    (let [x (@*local-variable-names-for-variable-values* arg)]
+                                      {:type t
+                                       :matched-variable arg
+                                       :current-value (strict-get x :current-value)
+                                       :cljcode-expr `(bad-gen)})
+                                    {:type t
+                                     :matched-variable arg})
+
+                                  (is-constant? arg)
+                                  {:type :rexpr-value
+                                   :constant-value arg
+                                   :current-value arg
+                                   :cljcode-expr `(make-constant ~(get-value arg))}
+
+                                  (rexpr? arg)
+                                  {:type :rexpr
+                                   :cljcode-expr `(bad-gen)
+                                   :rexpr-type arg}
+
+                                  :else
+                                  (let []
+                                    (debug-repl "TODO")
+                                    (???)))
+                     success (cond (= '_ match-expr) true
+                                   (symbol? match-expr) (let []
+                                                          (debug-repl "TODO")
+                                                          (???))
+
+                                   (and (= 2 (count match-expr))
+                                        (not (contains? @rexpr-containers-signature (car match-expr)))
+                                        (symbol? (cdar match-expr)))
+                                   (let [match-requires (car match-expr)
+                                               match-requires-meta (get @rexpr-matchers-meta match-requires)
+                                               match-success (if (contains? matchers-override match-requires)
+                                                               (let [r ((matchers-override match-requires) arg)]
+                                                                 {:type :value
+                                                                  :constant-value r
+                                                                  :cljcode-expr r})
+                                                               (binding [*locally-bound-variables* {(first (:matcher-args match-requires-meta))
+                                                                                                    curval}]
+                                                                 (jit-evaluate-cljform (:matcher-body match-requires-meta))))]
+                                           ;; this is a match wtih a check
+                                           #_(when-not (map? match-success)
+                                             (debug-repl "match check"))
+
+                                           (if (get-current-value match-success)
+                                             (do (conj! to-check-expressions (add-precondition-on-same-value! match-success))
+                                                 (assoc! currently-bound-variables (cdar match-expr) curval)
+                                                 true)
+                                             false))
+
+                                   (contains? @rexpr-containers-signature (car match-expr))
+                                   (let [rx (:rexpr-type curval)]
+                                     (assert (= :rexpr (:type curval)))
+                                     (match-rexpr match-expr rx))
+
+                                   )
+                     ]
+
+                 ))
+             (match-rexpr [rexpr-matcher rexpr]
+               (let [rname (rexpr-name rexpr)
+                     args (get-argumetns rexpr)
+                     rsignature (get @rexpr-containers-signature rname)]
+                 (if (not= rname (first rexpr-matcher))
+                   false
+                   (every? true? (for [[match-expr arg [arg-sig _]] (zipseq (rest rexpr-matcher) args rsignature)]
+                                   (match-sub-expression match-expr arg arg-sig))))))
+
+             (match-context [matching]
+               ;; this will have to look through all of the expressions in the context and will attempt to find which of them
+               (let [prev-runtime-checks @runtime-checks
+                     prev-currently-bound @currently-bound-variables]
+                 ;; we are going to have to reset the values back in the case
+                 )
+               (debug-repl "match context")
+               false)
+
+             (match-check [check]
+               ;; this is going to be a transient map instead of a normal hash map, that might become an issue....
+               ;; can't call persistent on it multiple times either....
+               (binding [*locally-bound-variables* currently-bound-variables]
+                 (let [r (jit-evaluate-cljform check)]
+                   (debug-repl "match check")))
+
+               false)
+
+             (match-top [expr arg]
+               (assert (rexpr? arg))
+               (assert (contains? match  :rexpr))
+               (if-not (match-rexpr (:rexpr match) arg)
+                 false
+                 (if (contains? match :context)
+                   (if-not (match-context (:context expr))
+                     false
+                     (if (contains? match :check)))
+                   (if (contains? match :check)
+                     (match-check (:check match ))
+                     true))))]
+       (match-top matcher rexpr)))
+
+   #_(let [matcher (if (map? matcher1) matcher1 {:rexpr matcher1})
          rexpr-matcher (:rexpr matcher)
          rname (rexpr-name)
          rsignature (get @rexpr-containers-signature rname)
-         match-sub-expression (fn [match-expr arg arg-sig]
-                                (let [jt (case arg-sig
-                                           :var :rexpr-value
-                                           :rexpr :rexpr
-                                           :mult :value
-                                           :value :rexpr-value
-                                           :str :value
-                                           :unchecked :unknown
-                                           :opaque-constant :value
-                                           :boolean :value
-                                           :file-name :value
-                                           :hidden-var :rexpr-value
-                                           :rexpr-list (???)
-                                           :var-list (???)
-                                           :var-map (???)
-                                           (do (debug-repl)
-                                               (???)))
-                                      curval (cond (instance? jit-exposed-variable-rexpr arg)
-                                                   {:type t
-                                                    :current-value (*current-assignment-to-exposed-vars* (:exposed-name arg))
-                                                     ;; access the field directly from the type.  The top level R-expr will be assigned to the variable rexpr
-                                                     ;;
-                                                     :cljcode-expr `(. ~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))})
-                                                                       ~(:exposed-name arg))    ;(:exposed-name arg)
-                                                    :matched-variable arg}
+         match-sub-expression (fn match-sub-expression
+                                [match-expr arg arg-sig]
 
-                                                   (instance? jit-local-variable-rexpr arg)
-                                                   (if (contains? @*local-variable-names-for-variable-values* arg)
-                                                     (let [x (@*local-variable-names-for-variable-values* arg)]
-                                                       {:type t
-                                                        :matched-variable arg
-                                                        :current-value (strict-get x :current-value)
-                                                        :cljcode-expr `(bad-gen)})
-                                                     {:type t
-                                                      :matched-variable arg})
+                                (???))
+         match-rexpr (fn match-rexpr
+                       [rexpr-matcher rexpr]
+                       )
 
-                                                   (is-constant? arg)
-                                                   {:type :rexpr-value
-                                                    :constant-value arg
-                                                    :current-value arg
-                                                    :cljcode-expr `(make-constant ~(get-value arg))}
+         match-context (fn match-context
+                         [])
 
-                                                   (rexpr? arg)
-                                                   {:type :rexpr
-                                                    :cljcode-expr `(bad-gen)
-                                                    :rexpr-type arg}
+         match-check (fn match-check
+                       [check]
+                       )
 
-                                                   :else
-                                                   (let []
-                                                     (debug-repl "TODO")
-                                                     (???)))
-                                      success (cond (= '_ match-expr) true
-                                                    (symbol? match-expr) (let []
-                                                                           (debug-repl "TODO")
-                                                                           (???))
-
-
-                                                    )
-                                      ]
-
-                                  )
-                                (???))]
+         match-expr (fn match-expr
+                      [match-expr arg]
+                      (assert (rexpr? arg))
+                      (assert (contains? match-expr :rexpr))
+                      )
+         ]
      (if (= rname (first rexpr-matcher))
        (let [match-results (vec (for [[match-expr arg [arg-sig _]] (zipseq (rest rexpr-matcher) args rsignature)]
                                   (match-sub-expression match-expr arg arg-sig)))]
@@ -1273,10 +1396,226 @@
        false))
    )
   ([rexpr matcher1]
-   (let [runtime-checks (transient [])
-         currently-bound (transient {})
+   (let [runtime-checks (volatile! [])
+         currently-bound (volatile! {})
          successful-match (compute-match-v3 rexpr matcher1 runtime-checks currently-bound)]
-     [successful-match (persistent! runtime-checks) (persistent! currently-bound)])))
+     [successful-match @runtime-checks @currently-bound])))
+
+(def ^{:private true} cached-eval (memoize (fn [f]
+                                             (binding [*ns* *rewrite-ns*]
+                                               (eval f)))))
+
+(defn- compute-match
+  [rexpr matcher1]
+  (let [matcher (if (map? matcher1) matcher1 {:rexpr matcher1})
+        runtime-checks (volatile! [])
+        currently-bound-variables (volatile! {})
+        already-matched-rexprs (volatile! #{})]
+    (letfn [(match-sub-expression [matcher arg arg-sig]
+              (let [t (case arg-sig
+                        :var :rexpr-value
+                        :rexpr :rexpr
+                        :mult :value
+                        :value :rexpr-value
+                        :str :value
+                        :unchecked :unknown
+                        :opaque-constant :value
+                        :boolean :value
+                        :file-name :value
+                        :hidden-var :rexpr-value
+                        :rexpr-list (???)
+                        :var-list (???)
+                        :var-map (???)
+                        (do (debug-repl)
+                            (???)))
+                    curval (cond (instance? jit-exposed-variable-rexpr arg)
+                                 {:type t
+                                  :current-value (*current-assignment-to-exposed-vars* (:exposed-name arg))
+                                  ;; access the field directly from the type.  The top level R-expr will be assigned to the variable rexpr
+                                  ;;
+                                  :cljcode-expr `(. ~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))})
+                                                    ~(:exposed-name arg))    ;(:exposed-name arg)
+                                  :matched-variable arg}
+
+                                 (instance? jit-local-variable-rexpr arg)
+                                 (if (contains? @*local-variable-names-for-variable-values* arg)
+                                   (let [x (@*local-variable-names-for-variable-values* arg)]
+                                     {:type t
+                                      :matched-variable arg
+                                      :current-value (strict-get x :current-value)
+                                      :cljcode-expr `(bad-gen)})
+                                   {:type t
+                                    :matched-variable arg})
+
+                                 (is-constant? arg)
+                                 {:type :rexpr-value
+                                  :constant-value arg
+                                  :current-value arg
+                                  :cljcode-expr `(make-constant ~(get-value arg))}
+
+                                 (rexpr? arg)
+                                 {:type :rexpr
+                                  :cljcode-expr `(bad-gen)
+                                  :rexpr-type arg}
+
+                                 :else
+                                 (let []
+                                   (debug-repl "TODO")
+                                   (???)))
+                    ]
+                (cond (= '_ matcher) (list true) ;; successful match
+                      (symbol? matcher) (if (contains? @currently-bound-variables matcher)
+                                          (let [scv (get-current-value curval)
+                                                mv (get @currently-bound-variables matcher)
+                                                mcv (get-current-value mv)]
+                                            (if (= scv mcv)
+                                              (do (when-not (or (= (:cljcode-expr mv) (:cljcode-expr curval))
+                                                                (and (contains? mv :constant-value) (contains? curval :constant-value)))
+                                                    (vswap! runtime-checks conj (add-precondition-to-check! `(= (:cljcode-expr mv) (:cljcode-expr curval)))))
+                                                  (list true))
+                                              nil ;; does not match
+                                              ))
+                                          (do
+                                            (when-not (= '_ matcher)
+                                              (vswap! currently-bound-variables assoc matcher curval))
+                                            (list true)))
+
+                      (and (= 2 (count matcher))
+                           (not (contains? @rexpr-containers-signature (car matcher)))
+                           (symbol? (cdar matcher))
+                           (contains? @rexpr-matchers-meta (car matcher)))
+                      (let [match-requires (car matcher)
+                            match-requires-meta (get @rexpr-matchers-meta match-requires)
+                            match-success (if (contains? matchers-override match-requires)
+                                            (let [r ((matchers-override match-requires) arg)]
+                                              {:type :value
+                                               :constant-value r
+                                               :cljcode-expr r})
+                                            (binding [*locally-bound-variables* {(first (:matcher-args match-requires-meta))
+                                                                                 curval}]
+                                              (jit-evaluate-cljform (:matcher-body match-requires-meta))))]
+                        (if (get-current-value match-success)
+                          (if (contains? @currently-bound-variables (cdar matcher))
+                            (let [mv (get @currently-bound-variables (cdar matcher))
+                                  mcv (get-current-value mv)
+                                  scv (get-current-value curval)]
+                              (if (= mcv scv)
+                                (do
+                                  (when-not (or (= (:cljcode-expr mv) (:cljcode-expr curval))
+                                                (and (contains? mv :constant-value) (contains? curval :constant-value)))
+                                    (vswap! runtime-checks conj (add-precondition-to-check! `(= (:cljcode-expr mv) (:cljcode-expr curval)))))
+                                  (vswap! runtime-checks conj (add-precondition-on-same-value! match-success))
+                                  ;; this is already bound, so we do not need to set the currently bound values
+                                  (list true))
+                                nil ;; failed to match the existing value
+                                ))
+                            (do
+                              (vswap! runtime-checks conj (add-precondition-to-check! match-success))
+                              (when-not (= '_ (cdar matcher))
+                                (vswap! currently-bound-variables assoc (cdar matcher) curval))
+                              (list true)))
+                          nil ;; match of condition failed
+                          ))
+
+                      (contains? @rexpr-containers-signature (car matcher))
+                      (let [rx (:rexpr-type curval)]
+                        (assert (= :rexpr (:type curval)))
+                        (match-rexpr matcher rx))
+
+                      (and (symbol? (car matcher))
+                           (symbol? (cdar matcher))
+                           (= 2 (count matcher))
+                           (ns-resolve *rewrite-ns* (car matcher)))
+                      (let [f (ns-resolve *rewrite-ns* (car matcher))
+                            cv (get-current-value curval)
+                            success (f cv)]
+                        (if success
+                          (do
+                            (when-not (contains? curval :constant-value)
+                              (vswap! runtime-checks conj (add-precondition-to-check! `(~f ~(:cljcode-expr curval)))))
+                            (when-not (= '_ (cdar matcher))
+                              (vswap! currently-bound-variables assoc (cdar matcher) curval))
+                            (list true))
+                          nil))
+
+                      (and (#{'fn 'fn*} (caar matcher)) ;; an inline function is used for the matcher
+                           (symbol? (cdar matcher))
+                           (= 2 (count matcher)))
+                      (let [f (cached-eval (car matcher))
+                            cv (get-current-value curval)
+                            success (f cv)]
+                        (if success
+                          (do
+                            (when-not (contains? curval :constant-value)
+                              (vswap! runtime-checks conj (add-precondition-to-check! `(~f (:cljcode-expr curval)))))
+                            (when-not (= '_ (cdar matcher))
+                              (vswap! currently-bound-variables assoc (cdar matcher) curval))
+                            (list true))
+                          nil ;; match fail
+                          ))
+
+                      :else
+                      (do (debug-repl "unknown match condition")
+                          (???)))
+                ))
+            (match-rexpr [matcher rexpr]
+              (assert (rexpr? rexpr))
+              (let [rname (rexpr-name rexpr)
+                    args (get-arguments rexpr)
+                    rsignature (get @rexpr-containers-signature rname)]
+                (if (= rname (first matcher))
+                  ((fn rec [match-expr-seq arg-seq rsignature-seq]
+                     (if (and (empty? match-expr-seq) (empty? arg-seq) (empty? rsignature-seq))
+                       (list true)
+                       (let [match-expr (first match-expr-seq)
+                             arg (first arg-seq)
+                             [arg-sig _] (first rsignature-seq)]
+                         (for [_ (match-sub-expression match-expr arg arg-sig)
+                               _ (rec (rest match-expr-seq) (rest arg-seq) (rest rsignature-seq))]
+                           true))))
+                   (rest matcher) args rsignature))))
+            (match-context [matcher]
+              (if (vector? matcher) ;; if we have to match multiple things at the same time from the context
+                ((fn r [s]
+                   (if (empty? s)
+                     (list true)
+                     (for [_ (match-context (first s))
+                           _ (r (rest s))]
+                       true)))
+                 matcher)
+                (let [cur-checks @runtime-checks
+                      cur-bound @currently-bound-variables
+                      cur-already-matched @already-matched-rexprs]
+                  (assert (not *rewrites-allowed-to-use-inference-context*)) ;; TODO: this is going to have to check the current inference context
+                  (for [cr *local-conjunctive-rexprs-for-infernece*
+                        :let [[proj-out rx] cr
+                              __ (do
+                                   (vreset! runtime-checks cur-checks)
+                                   (vreset! currently-bound-variables cur-bound)
+                                   (vreset! already-matched-rexprs cur-already-matched))]
+                        :when (and (empty? proj-out) (not (contains? @already-matched-rexprs rx)))
+                        _ (match-rexpr matcher rx)
+                        :let [__ (vswap! already-matched-rexprs conj rx)]]
+                    true))))
+            (match-check [matcher]
+              (let [success (binding [*locally-bound-variables* @currently-bound-variables]
+                              (jit-evaluate-cljform matcher))]
+                (when (get-current-value success)
+                  (when-not (:constant-value success)
+                    (vswap! runtime-checks conj (add-precondition-to-check! (:cljcode-expr success)))
+                    (list true)))))
+            (match-top [matcher rexpr]
+              (for [_ (match-rexpr (:rexpr matcher) rexpr)
+                    :let [__ (vreset! already-matched-rexprs #{rexpr})]
+                    _ (if (contains? matcher :context)
+                        (match-context (:context matcher))
+                        (list true))
+                    _ (if (contains? matcher :check)
+                        (match-check (:check matcher))
+                        (list true))]
+                true))]
+      (doall (for [_ (match-top matcher rexpr)]
+               [@runtime-checks @currently-bound-variables])))))
 
 (defn- simplify-perform-generic-rewrite [rexpr rewrite]
   (let [kw-args (:kw-args rewrite)]
@@ -1345,15 +1684,28 @@
         matching-rewrites (into [] (remove nil? (map (fn [rr]
                                                        (let [run-at (:run-at (:kw-args rr) [:standard])]
                                                          ;; (println (type rexpr) run-at)
-                                                         ;; (when (some #{:inference} (if-not (seqable? run-at) [run-at] run-at))
-                                                         ;;   (debug-repl "inf"))
+                                                         #_(when (some #{:inference} (if-not (seqable? run-at) [run-at] run-at))
+                                                           (debug-repl "inf"))
                                                          (binding [*rewrite-ns* (:namespace rr)]
-                                                           (let [[success runtime-checks currently-bound-vars] (compute-match rexpr (:matcher rr))]
-                                                             (when success
-                                                               (assoc rr
+                                                           (let [results (compute-match rexpr (:matcher rr))]
+                                                             (when-not (empty? results)
+                                                               (when (some #{:inference} (if-not (seqable? run-at) [run-at] run-at))
+                                                                 (debug-repl "inf"))
+                                                               (when (not= (count results) 1)
+                                                                 (debug-repl "handle multiple success match")
+                                                                 (???))
+                                                               (let [[[runtime-checks currently-bound-variables]] results]
+                                                                 (assoc rr
+                                                                        :runtime-checks runtime-checks
+                                                                        :matching-vars currently-bound-variables
+                                                                        :simplify-call-counter (vswap! *jit-simplify-call-counter* inc)))
+                                                               #_(assoc rr
                                                                       :runtime-checks runtime-checks
                                                                       :matching-vars currently-bound-vars
-                                                                      :simplify-call-counter (vswap! *jit-simplify-call-counter* inc)))))))
+                                                                      :simplify-call-counter (vswap! *jit-simplify-call-counter* inc))))
+                                                           #_(let [[success runtime-checks currently-bound-vars] (compute-match rexpr (:matcher rr))]
+                                                             (when success
+                                                               )))))
                                                      rewrites)))]
     (doseq [mr matching-rewrites]
       (vswap! *jit-simplify-rewrites-found* conj [*current-simplify-stack* mr]))
@@ -1391,11 +1743,12 @@
              rexpr
              (do (assert (= :rexpr (:type rexpr)))
                  (:rexpr-type rexpr)))]
-    (let [possible-rewrites (binding [*jit-simplify-call-counter* (volatile! 0)
+    (let [top-conjuncts (all-conjunctive-rexprs r)
+          possible-rewrites (binding [*jit-simplify-call-counter* (volatile! 0)
                                       *jit-simplify-rewrites-found* (volatile! #{})
                                       *jit-simplify-rewrites-picked-to-run* (constantly false)
                                       *jit-generate-functions* nil ;; make sure that we do not generate any code from selecting between rewrites
-                                      ]
+                                      *local-conjunctive-rexprs-for-infernece* top-conjuncts]
                               (let [nr (simplify-jit-internal-rexpr r)]
                                 (dyna-assert (= r nr)) ;; we did not pick anything to run, so the result should be the same
                                 @*jit-simplify-rewrites-found*))]

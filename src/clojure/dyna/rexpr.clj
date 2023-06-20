@@ -1094,13 +1094,11 @@
     (dyna-assert (apply distinct? (map second match-args)))
     (assert (subset? (keys matcher) #{:rexpr :context :check})
             "matcher map contains unexepxected key")
-    `(when ;(~(symbol (str "is-" rexpr-type-matched "?")) ~source-variable)
-       (instance? ~(symbol (strict-get @rexpr-containers-class-name (symbol rexpr-type-matched))) ~source-variable)
+    `(when (instance? ~(symbol (strict-get @rexpr-containers-class-name (symbol rexpr-type-matched))) ~source-variable)
 
-       (let ;[~(vec (map cdar match-args)) (get-arguments ~source-variable)]  ;; would be nice if get values was more "efficient" than destructing?
-           [;; this version is going to do field access directly on the class to
-            ;; get the fields it is going to match against (should be easy for
-            ;; the JVM compiler to handle this)
+       (let [;; this version is going to do field access directly on the class to
+             ;; get the fields it is going to match against (should be easy for
+             ;; the JVM compiler to handle this)
             ~@(apply concat (zipseq (map cdar match-args)
                                     (let [rexpr-sig (get @rexpr-containers-signature (symbol rexpr-type-matched))
                                           rcname (strict-get @rexpr-containers-class-name (symbol rexpr-type-matched))]
