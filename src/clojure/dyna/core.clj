@@ -24,7 +24,7 @@
                                        import-file-url
                                        eval-string
                                        eval-ast]])
-  (:require [dyna.repl :refer [repl]])
+  (:require [dyna.repl :refer [repl pretty-print-query-result]])
   (:import [dyna DynaTerm StatusCounters]))
 
 
@@ -98,7 +98,11 @@
                                   ("$compiler_expression" ("make_system_term" ("/" "$command_line_args" 0))))))
             (when system/status-counters
               (StatusCounters/program_start))
-            (import-file-url (.toURL run-filef))
+            (binding [system/query-output (fn [[query-text line-number] result]
+                                            (if (Boolean/parseBoolean (System/getProperty "dyna.print_raw_query_results" "false"))
+                                              (println query-text " " run-filef ":" line-number "\n" result)
+                                              (pretty-print-query-result query-text result)))]
+              (import-file-url (.toURL run-filef)))
             ;; TODO: this needs to handle the csv export functions
             (when system/status-counters
               (StatusCounters/print_counters))
