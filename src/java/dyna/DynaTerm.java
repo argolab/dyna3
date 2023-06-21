@@ -50,7 +50,8 @@ public final class DynaTerm implements ILookup {
 
     public String toString() {
         StringBuilder b = new StringBuilder();
-        if(".".equals(name) && arguments != null && arity() == 2) {
+        final int count = arity();
+        if(".".equals(name) && arguments != null && count == 2) {
             Object[] arr = list_to_array();
             if(arr != null) {
                 b.append("[");
@@ -66,7 +67,6 @@ public final class DynaTerm implements ILookup {
             b.append(from_file.toString());
             b.append("/");
         }
-        final int count = arity();
         if(name.charAt(0) == '$' && count == 0) {
             // $nil (and $null) is a term which would cause it to print as $nil[], but we also have it defined as a term which just returns its value
             return name;
@@ -99,8 +99,8 @@ public final class DynaTerm implements ILookup {
                 // .get does not work with a list
                 h = h * 31 + ((java.lang.Number)clojure_hash.invoke(clojure_nth.invoke(arguments, i))).intValue();
             }
-            // if(dynabase != null_term)
-            //     h ^= dynabase.hashCode();
+            if(dynabase != null_term)
+                h ^= dynabase.hashCode();
             hashcode_cache = hash_scramble(h);
         }
         return hashcode_cache;
@@ -112,7 +112,7 @@ public final class DynaTerm implements ILookup {
         DynaTerm t = (DynaTerm)other;
         if(t.hashCode() != hashCode() ||
            !name.equals(t.name)) return false;
-        int count = arity();
+        final int count = arity();
         if(count != t.arity()) return false;
         for(int i = 0; i < count; i++) {
             if(clojure_eq.invoke(clojure_nth.invoke(arguments, i),
@@ -122,7 +122,8 @@ public final class DynaTerm implements ILookup {
         // should the dynabase be included in the check for equality.  I suppose
         //that these objects will not unify with eachother.  But the different from_file will still unify together
 
-        //if(this.dynabase != t.dynabase && !this.dynabase.equals(t.dynabase))  return false;
+        if(this.dynabase != t.dynabase && !this.dynabase.equals(t.dynabase))
+            return false;
         return true;
     }
 

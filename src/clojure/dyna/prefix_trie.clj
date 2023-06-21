@@ -6,25 +6,6 @@
   )
 
 
-;; the data structure could be represented as differented nested objects rather
-;; than having a single trie which represents everything?  The question would
-;; then be updating the nested structure.  it seems that vectors have some way
-;; in which they can replace some of the elements with a masked array.
-
-
-;; this file is not used yet
-
-
-;; (gen-interface
-;;  :name dyna.IPrefixTrie
-;;  :extends [clojure.lang.ILookup]
-;;  :methods [[get [Object] Object]
-;;            [set [Object Object] "Ldyna.IPrefixTrie;"]
-;;            ])
-
-
-;; example structure of the trie
-#_({:a {:b [val1 val2]}})
 
 (defn trie-hash-map [& args]
   (ClojureHashMap/createFromSeq args))
@@ -50,25 +31,8 @@
 
 (defn- merge-map-arity [arity & args]
   (if (= arity 0)
-    (ClojureUnorderedVector/concat args)  ;(apply concat args)
+    (ClojureUnorderedVector/concat args)
     (apply merge-with (partial merge-map-arity (- arity 1)) args)))
-
-#_(defn- equal-tries [arity map1 map2]
-  (if (identical? map1 map2)
-    true
-    (if (or (empty? map1) (empty? map2))
-      (and (empty? map1) (empty? map2))
-      (if (= arity 0)
-        (= (frequencies map1) (frequencies map2)) ;; then this needs to check that the same number of elements appear, but the order doesn't matter
-        ;; then this needs to compare that the inner elements are equal to eachother
-        (and (= (count map1) (count map2))
-             (every? #(equal-tries (- arity 1) (get map1 %) (get map2 %)) (keys map1)))))))
-
-;; the elements in the leaf of the trie should not matter about the order, so this is
-#_(defn- hash-tries [arity node]
-  (if (= arity 0)
-    (reduce bit-xor (map hash node))
-    (reduce unchecked-add-int 0 (map #(bit-xor (hash (first %)) (hash-tries (- arity 1) (second %))) node))))
 
 (defsimpleinterface IPrefixTrie
   (trie-get-values-collection [key])  ;; return the values associated with a given key together
@@ -101,6 +65,11 @@
   (trie-progressive-iterator [key])
 
   (trie-reorder-keys [new-order])
+
+  (trie-reorder-keys-subselect [new-order known-values])
+
+  ;; any key which is non-nil will be selected to that particular value
+  (trie-select-subkeys [key])
   )
 
 ;; (intern 'dyna.rexpr 'check-argument-prefix-trie (fn [x] (instance? IPrefixTrie x)))
@@ -331,7 +300,7 @@
 
   (trie-reorder-keys [this new-order]
     ;; the arity between the keys could include adding in new keys.  In which case this is going to have to identify new values for this
-    (dyna-assert (>= (count new-order) arity))
+    (assert (>= (count new-order) arity))
     (if (= new-order (vec (range arity)))
       this  ;; there is no change so just return this without making any changes
       (let [new-contains-wildcard (reduce bit-or 0 (map (fn [i] (if (or (nil? (nth new-order i))
@@ -344,6 +313,31 @@
           (let [new-key (vec (map (fn [i] (if (nil? i) nil (nth key i))) new-order))]
             (vswap! new-root trie-assoc-in new-key col)))
         (make-PrefixTrie (count new-order) new-contains-wildcard @new-root))))
+
+  (trie-reorder-keys-subselect [this new-order known-values]
+    (if (every? nil? known-values)
+      (trie-reorder-keys this new-order)
+      (let [new-root (volatile! ClojureHashMap/EMPTY)
+            new-contains-wildcard (reduce bit-or 0 (map (fn [[new-i old-i]]
+                                                          (if (not= 0 (bit-and (bit-shift-left 1 old-i) contains-wildcard))
+                                                            (bit-shift-left 1 new-i)
+                                                            0))
+                                                        (zipseq (range) new-order)))]
+        (assert (= arity (+ (count (remove nil? known-values)) (count (remove nil? new-order)))))
+        (doseq [[key col] (trie-get-values-collection this known-values)]
+          (let [new-key (vec (map (fn [i] (if (nil? i) nil (nth key i))) new-order))]
+            (vswap! new-root trie-assoc-in new-key col)))
+        (make-PrefixTrie (count new-order) new-contains-wildcard @new-root))))
+
+  #_(trie-select-subkeys [this key]
+    (assert (= (count key) arity))
+    (let (= new-order ))
+    (let [new-arity (count (filter nil? key))]
+      (if (= new-arity arity)
+        this ;; then nothing is projected out
+        (let [r (fn rec [] )]))
+      )
+    )
 
   Object
   (toString [this]

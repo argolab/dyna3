@@ -3,7 +3,7 @@
   (:require [dyna.base-protocols :refer :all])
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.user-defined-terms :refer [def-user-term]])
-  (:import [dyna DynaTerm]))
+  (:import [dyna DynaTerm UnificationFailure]))
 
 ;; could use something like https://github.com/Engelberg/instaparse which would
 ;; allow for generating a parser on the fly from a string which defines the
@@ -22,11 +22,11 @@
 
 (def-rewrite
   :match (instaparse-construct-parser (:ground grammar) (:any out))
-  ;:assigns-variable out
+  :assigns-variable out
   (let [g (get-value grammar)]
     (if-not (string? g)
-      (make-multiplicity 0)
-      (make-unify out (make-constant {:instaparse-parser (insta/parser g)})))))
+      (throw (UnificationFailure. "grammar not represented as a string"))
+      {:instaparse-parser (insta/parser g)})))
 
 (defn convert-to-dyna [ast]
   (if (vector? ast)
@@ -35,11 +35,12 @@
 
 (def-rewrite
   :match (instaparse-run-parser (:ground parser) (:ground input) (:any out))
+  :assigns-variable out
   (let [parser (:instaparse-parser (get-value parser))
         in (get-value input)]
     (if (or (nil? parser) (not (string? in)))
-      (make-multiplicity 0)
-      (make-unify out (make-constant (convert-to-dyna (parser in)))))))
+      (throw (UnificationFailure. "bad parser or not string input"))
+      (convert-to-dyna (parser in)))))
 
 (def-user-term "$$__instaparse_construct_parser" 1 (make-instaparse-construct-parser v0 v1))
 (def-user-term "$$__instaparse_run_parser" 2 (make-instaparse-run-parser v0 v1 v2))

@@ -23,8 +23,6 @@ class ParserUtils {
     public static boolean aggregator_defined(String name) {
         Object result = clojure_check_aggregator_defined.invoke(name);
         return (Boolean)result;
-        //return "max=".equals(name) || "min=".equals(name) || "prob+=".equals(name);
-        // return true;
     }
 
     public static String gensym_variable_name() {

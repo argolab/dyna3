@@ -1649,14 +1649,18 @@
 
 
 (def-rewrite
-  :match (jit-placeholder _ _ _)
+  :match (jit-placeholder _ _)
   :run-at :standard
   (do
     (debug-repl "should not happen, attempting to simplify jit-placeholder")
     (???)))
 
 (def-rewrite
-  :match (jit-placeholder placeholder-id placeholder-vars pla))
+  :match (jit-placeholder placeholder-id placeholder-vars)
+  :run-at :jit-compiler
+  (do
+    (debug-repl "jit placeholder internal")
+    (???)))
 
 
 #_(def-rewrite

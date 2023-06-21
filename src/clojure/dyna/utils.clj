@@ -273,10 +273,10 @@
 (defmacro debug-binding [b & body]
   (if debug-statements;(= "true" (System/getProperty "dyna.debug" "true"))
     `(binding ~b ~@body)
-    `(try ~@body (finally nil)) ;; for some reason this try-finally is required
-                                ;; otherwise it will deadlock during the tests
-                                ;; sometimes.  I assume this is somehow
-                                ;; preventing some kind of miss compilation somehow....????
+    `(try (do ~@body) (finally nil)) ;; for some reason this try-finally is required
+                                     ;; otherwise it will deadlock during the tests
+                                     ;; sometimes.  I assume this is somehow
+                                     ;; preventing some kind of miss compilation somehow....????
     ))
 
 (def ^{:private true} warnings-shown-so-far (atom {}))
