@@ -65,6 +65,9 @@ print fib(100).
 
 (def ^:dynamic *terminal-print-width* 80)
 
+(def ^:dynamic *repl-evaluate-string* (fn [s]
+                                        (eval-string s :fragment-allowed false)))
+
 (defn pretty-print-query-result [print-id result]
   (let [rexpr (:rexpr result)]
     (if (is-empty-rexpr? rexpr)
@@ -171,7 +174,7 @@ print fib(100).
 
 ;; https://github.com/jline/jline3/blob/master/console/src/test/java/org/jline/example/Console.java
 ;; https://github.com/jline/jline3/blob/master/demo/src/main/java/org/jline/demo/Repl.java
-(defn repl []
+(defn- repl-core []
   (let [terminal (-> (TerminalBuilder/builder)
                      (.name "dyna")
                      (.build))
@@ -207,7 +210,6 @@ print fib(100).
                                                                                (str (System/getProperty "user.home") "/.dyna3_history")))
                         (.build))]
     (binding [*terminal* terminal]
-      (println "To exit press ctrl-D.  Type \"help\" for help")
       (try
         (let [buffer-query-results (volatile! true)
               query-buffer (volatile! [])
@@ -241,7 +243,9 @@ print fib(100).
                                 (recur true)
                                 v)))]
                                         ;(println "read input" input)
-                (when-not (contains? #{"exit" "quit"} (trim input))
+                (when (#{"exit" "quit"} (trim input))
+                  (System/exit 0))
+                (when-not (contains? #{"exit" "quit" "continue"} (trim input))
                   (if (is-command? input)
                     (case (trim input)
                       "run-agenda" (system/run-agenda)
@@ -261,7 +265,7 @@ print fib(100).
                                                     (.interrupt cthread))))
                         (vreset! buffer-query-results true)
                         (vreset! query-buffer [])
-                        (let [rexpr-result (eval-string input :fragment-allowed false)]
+                        (let [rexpr-result (*repl-evaluate-string* input)]
                           (if (= (make-multiplicity 1) rexpr-result)
                             (if (and (empty? @query-buffer) @buffer-query-results)
                               (println "ok")
@@ -280,11 +284,12 @@ print fib(100).
         (catch UserInterruptException err nil)
         (catch EndOfFileException err nil)))))
 
+(defn repl []
+  (println "To exit press ctrl-D.  Type \"help\" for help")
+  (repl-core))
 
-#_(defn repl []
-  (let [repl-thread (Thread. repl-run)]
-    #_(sun.misc.Signal/handle (sun.misc.Signal. "INT")
-                            (proxy [sun.misc.SignalHandler] []
-                              (handle [sig]
-                                (println "in sig int handler"))))
-    (.start repl-thread)))
+(defn repl-in-file [file-name]
+  (binding [*repl-evaluate-string* (fn [s] (eval-string :fragment-allowed false :file-name file-name))]
+    (println "To continue running type \"continue\" or press ctrl-D")
+    (println "To kill the program type \"exit\" or \"quit\"")
+    (repl-core)))

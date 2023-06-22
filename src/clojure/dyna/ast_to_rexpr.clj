@@ -100,7 +100,8 @@
   (rexpr-jit-info [this] {:jittable false}))
 
 
-(declare import-file-url)
+(declare import-file-url
+         eval-string)
 
 
 
@@ -111,55 +112,16 @@
 ;; the reason we do this here instead of letting the standard simplification
 ;; handle this is that the parser will generate many intermediate values that
 ;; are "useless"
-(defn optimize-rexpr [rexpr] (optimize-aliased-variables rexpr))
-#_(defn optimize-rexpr
-  ([rexpr] (let [[unified-vars new-rexpr] (optimize-rexpr rexpr #{})]
-             new-rexpr))
-  ([rexpr proj-out-vars]
-   (let [var-unifies (transient {})
-         mr (cond
-              (is-proj? rexpr) (let [ufv (:var rexpr)
-                                     prexpr (:body rexpr)
-                                     [nested-unifies nested-rexpr] (optimize-rexpr prexpr
-                                                                                   (conj proj-out-vars ufv))
-                                     self-var (disj (get nested-unifies ufv) ufv)
-                                     ret-rexpr (if (not (empty? self-var))
-                                                 ;; then there is some variable that we can use to replace this statement
-                                                 ;; if it is a constant, then we can do the replacement such that it will avoid
-                                                 (let [const (some is-constant? self-var)
-                                                       replace-with (if const
-                                                                      (first (filter is-constant? self-var))
-                                                                      (first self-var))]
-                                                   (remap-variables nested-rexpr {ufv replace-with}))
+(defn- optimize-rexpr [rexpr] (optimize-aliased-variables rexpr))
 
-                                                 (if (= nested-rexpr prexpr)
-                                                   rexpr
-                                                   (make-proj ufv nested-rexpr)))]
-                                 ;; we need to take the nested-unifies and add
-                                 ;; in the info here, but filter out any
-                                 ;; information which references our variable
-                                 (doseq [[k v] nested-unifies]
-                                   (when (not= k ufv)
-                                     (assoc! var-unifies k (union (get var-unifies k) (disj v ufv)))))
-                                 ret-rexpr)
-              (is-unify? rexpr) (let [[a b] (get-arguments rexpr)]
-                                  (assoc! var-unifies a (conj (get var-unifies a #{}) b))
-                                  (assoc! var-unifies b (conj (get var-unifies b #{}) a))
-                                  rexpr) ;; there is no change to the expression here
-              (is-disjunct? rexpr) rexpr ;; we do not evaluate disjunctions for variables which might get unified together
-              :else ;; otherwise we should check all of the children of the expression to see if there is some structure
-              (rewrite-rexpr-children-no-simp rexpr
-                                      (fn [r]
-                                        (let [[unifies nr] (optimize-rexpr r proj-out-vars)]
-                                          (doseq [[k v] unifies]
-                                            (assoc! var-unifies k (union v (get var-unifies k))))
-                                          nr))))]
-     [(persistent! var-unifies) mr])))
+(defn- dyna-debugger [file-name]
+  (require 'dyna.repl)
+  ((find-var 'dyna.repl/repl-in-file) file-name))
 
 
-(def true-constant-dterm (DynaTerm. "$constant" [true]))
+(def ^{:private true} true-constant-dterm (DynaTerm. "$constant" [true]))
 
-(defn make-comma-conjunct
+(defn- make-comma-conjunct
   ([] true-constant-dterm)
   ([a] (if (nil? a)
          true-constant-dterm
@@ -374,7 +336,6 @@ This is most likely not what you want."))))
                                                                              rf)
                                                                          (catch FileNotFoundException e2
                                                                            (throw e))))))]
-                                        ;(import-file-url file)
                                                         (let [imported-names (if (= (.arity arg1) 2)
                                                                                (.list_to_vec ^DynaTerm (get arg1 0))
                                                                                ;; then this should lookup the exported terms
@@ -468,32 +429,6 @@ This is most likely not what you want."))))
                                                                           (???) ;; TODO
                                                                           )
 
-                                           ;; "memoize_unk" (match-term arg1 ("memoize_unk" ("/" name arity))
-                                           ;;                           (let [call-name {:name name
-                                           ;;                                            :arity arity
-                                           ;;                                            :source-file source-file}]
-                                           ;;                             (set-user-term-as-memoized call-name :unk)))
-                                           ;; "memoize_null" (match-term arg1 ("memoize_null" ("/" name arity))
-                                           ;;                            (let [call-name {:name name
-                                           ;;                                             :arity arity
-                                           ;;                                             :source-file source-file}]
-                                           ;;                              (set-user-term-as-memoized call-name :null)))
-
-                                           ;; "memoize_none" (match-term arg1 ("memoize_none" ("/" name arity))
-                                           ;;                            (let [call-name {:name name
-                                           ;;                                             :arity arity
-                                           ;;                                             :source-file source-file}]
-                                           ;;                              (set-user-term-as-memoized call-name :none)))
-
-                                           ;; "memoize" (match-term arg1 ("memoize" term)
-                                           ;;                       (let [name (.name ^DynaTerm term)
-                                           ;;                             arg-signature (.arguments ^DynaTerm term)
-                                           ;;                             call-name {:name name
-                                           ;;                                        :arity (.arity ^DynaTerm term)
-                                           ;;                                        :source-file source-file}]
-                                           ;;                         (???)
-                                           ;;                         ))
-
                                            "print_memo_table" (match-term arg1 ("print_memo_table" ("/" name arity))
                                                                           (let [call-name {:name name
                                                                                            :arity arity
@@ -519,7 +454,7 @@ This is most likely not what you want."))))
                                                                       (require '[dyna.core :refer :all])
                                                                       (eval clj-code))))
 
-                                           "optimized_rexprs" (match-term arg1 ("optimized_rexprs" c)
+                                           "use_optimized_rexprs" (match-term arg1 ("optimized_rexprs" c)
                                                                           (alter-var-root system/*use-optimized-rexprs* (if c true false)))
 
                                            "set_recursion_limit" (match-term arg1 ("set_recursion_limit" l)
@@ -886,6 +821,10 @@ This is most likely not what you want."))))
                            (*user-print-function* rel-path line-number text-rep ctx result result-variable)
                            (make-unify out-variable (make-constant true)))
 
+            ["$debug" 0] (do
+                           (dyna-debugger source-file)
+                           (make-unify out-variable (make-constant true)))
+
             ["$_debug_repl" 3] (let [[expression text-rep line-number] (.arguments ast)
                                      all-variable-names (find-term-variables expression)
                                      result-variable (make-variable 'Result)
@@ -1192,15 +1131,16 @@ This is most likely not what you want."))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-(defn eval-ast [ast]
+(defn eval-ast [ast & {:keys [file-name] :or {file-name "REPL"}}]
   (make-eval-from-ast (make-constant true)
                       (make-constant ast)
                       {}
-                      "REPL"))
+                      file-name))
 
-(defn eval-string [^String s & {:keys [fragment-allowed] :or {fragment-allowed true}}]
+(defn eval-string [^String s & {:keys [fragment-allowed file-name] :or {fragment-allowed true file-name "REPL"}}]
   (eval-ast (parse-string s
-                          :fragment-allowed fragment-allowed)))
+                          :fragment-allowed fragment-allowed)
+            :file-name file-name))
 
 (defn import-parse [file-url ast]
   ;; this needs to construct the evaluate AST object, and then pass it to simplify to make sure that it gets entirely evaluated

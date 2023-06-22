@@ -35,4 +35,4 @@ print "program loaded, going to make query".
 
 phrase(A,B,C) ?
 
-% :- print_memo_table phrase/3.
+:- print_memo_table phrase/3.

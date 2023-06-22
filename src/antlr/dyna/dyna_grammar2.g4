@@ -277,12 +277,14 @@ term returns[DynaTerm rterm = null]
             String ttext = $t.ctx.start.getInputStream().getText(new Interval($t.ctx.start.getStartIndex(), $t.ctx.stop.getStopIndex()));
             $rterm = DynaTerm.create("\$print", $t.rterm, ttext, $t.ctx.getStart().getLine());
        }
-    | 'debug_repl'
+    | 'debug_repl_clojure'
       t=termBody["print="] EndTerm
       {
            String ttext = $t.ctx.start.getInputStream().getText(new Interval($t.ctx.start.getStartIndex(), $t.ctx.stop.getStopIndex()));
            $rterm = DynaTerm.create("\$_debug_repl", $t.rterm, ttext, $t.ctx.getStart().getLine());
       }
+    | 'debug' EndTerm
+      { $rterm = DynaTerm.create("\$debug"); }
 
 // there could be warnings if some library is used in a particular way.  This should somehow defer in the case that some dynabase has not been constructed, but this would want to have that the expression would later come into existence
     | 'warning' '(' we=expression ')' t=termBody["warning="] EndTerm
