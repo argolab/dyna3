@@ -1410,14 +1410,12 @@
   ;; this could callback async, so we don't want something to depend on this
   ;; having finished a computation before the function returns.
 
-  (system/maybe-run-agenda)
-
-  (let [ctx (context/make-empty-context rexpr)
-        res (context/bind-context ctx
-                                  (simplify-fully rexpr))]
-    ;; TODO: this might not want to have the context added back into the R-expr?
-    ;; in which case this is not going
-    ;; there needs to be a better way to get the bindigns to variables rather than doing this "hack" to get the map
+  (let [[ctx res]
+        (system/converge-agenda ;; this will keep rerunning this until the agenda does not have any more work to do
+         (let [ctx (context/make-empty-context rexpr)
+               res (context/bind-context ctx
+                                         (simplify-fully rexpr))]
+           [ctx res]))]
     (system/query-output query-id {:context ctx
                                    :context-value-map (get (ctx-get-inner-values ctx) 4)
                                    :rexpr res

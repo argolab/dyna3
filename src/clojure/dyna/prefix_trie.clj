@@ -323,7 +323,7 @@
                                                             (bit-shift-left 1 new-i)
                                                             0))
                                                         (zipseq (range) new-order)))]
-        (assert (= arity (+ (count (remove nil? known-values)) (count (remove nil? new-order)))))
+        (dyna-assert (= arity (+ (count (remove nil? known-values)) (count (remove nil? new-order)))))
         (doseq [[key col] (trie-get-values-collection this known-values)]
           (let [new-key (vec (map (fn [i] (if (nil? i) nil (nth key i))) new-order))]
             (vswap! new-root trie-assoc-in new-key col)))

@@ -153,7 +153,7 @@
                                       ;;        (???))
                                       ;;      t)
                                       existing-values (vec (map (fn [v]
-                                                                  (if (some #{v} new-order)
+                                                                  (if (some #{v} dj-vars)
                                                                     nil
                                                                     (get-value v)))
                                                                 vorder))

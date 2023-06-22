@@ -902,8 +902,7 @@ This is most likely not what you want."))))
                                all-variables (find-term-variables expression) ;; if there is an nested aggregator, those are not found, just the exposed variables
                                variable-map (into {} (map (fn [x] [x (make-variable x)]) all-variables))
                                rexpr (convert-from-ast expression result-var variable-map source-file)]
-                           (system/converge-agenda
-                            (simplify-rexpr-query [text-rep line-number] rexpr))
+                           (simplify-rexpr-query [text-rep line-number] rexpr)
                            (make-unify out-variable (make-constant true)))
 
             ["$external_value" 1] (let [[value-index] (.arguments ast)]

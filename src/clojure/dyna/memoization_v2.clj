@@ -74,7 +74,8 @@
   :match {:rexpr (memoization-filled-in-values-placeholder (:unchecked var-mapping))
           :check (not (nil? *memoization-forward-placeholder-bindings*))}
   ;; this might not be the most efficient way to go about this?  Suppose it should go into the context?
-  (make-conjunct (vec (for [[var val] (zipseq var-mapping *memoization-forward-placeholder-bindings*)]
+  (make-conjunct (vec (for [[var val] (zipseq var-mapping *memoization-forward-placeholder-bindings*)
+                            :when (not (nil? val))]
                         (make-unify var (make-constant val))))))
 
 
@@ -162,7 +163,7 @@
         (let [prio (memo-priority-function kk)]
           (system/push-agenda-work (AgendaReprocessWork. this kk prio))))))
   (memo-rewrite-access [this variables variable-values]
-    (let [control-arg (conj (vec (map #(if (nil? %) meta-free-dummy-free-value %) variable-values)) nil)
+    (let [control-arg (conj (vec variable-values) nil)
           control-setting (try (memo-controller control-arg)
                                (catch Exception err :defer))]
       (cond (= control-setting :fallthrough)
@@ -186,8 +187,7 @@
                                                                  [a (assoc-in b lookup-key true) c])))]
                       (when (or (identical? (second old-dat) has-computed) ;; this first check is just an optimization, we really care about if the we were the ones to add the new lookup key, which means it wasn't in old
                                 (not (is-key-contained? (second old-dat) lookup-key)))
-                        #_(when (or (nil? (first lookup-key)) (> (first lookup-key) 3))
-                          (debug-repl))
+                        (assert (not (some #{meta-free-dummy-free-value} lookup-key)))
                         (memo-push-recompute-key this lookup-key))
                       (do
                         (throw (UnificationFailure. "empty memo (making guess)")) ;; we could be more efficient about stopping the evaluation by throwing unification failure
@@ -218,7 +218,7 @@
                 (???)) ;; this should not happen, means that it returned something that was unexpected
             )))
   (memo-get-iterator [this variables variable-values]
-    (let [control-arg (conj (vec (map #(if (nil? %) meta-free-dummy-free-value %) variable-values)) nil)
+    (let [control-arg (conj (vec variable-values) nil)
           control-setting (try (memo-controller control-arg)
                                (catch Exception err :defer))]
       #_(when-not (= :defer control-setting)
@@ -321,14 +321,6 @@
                          (update accum-vals-wrapped key (fn [x] (conj (or x []) ret-rexpr))))
             new-values-freq (frequencies new-values)
             ]
-        ;(debug-repl "rr")
-        #_(when-not (nil? accumulated-agg-values)
-          (debug-repl "handled accum"))
-        ;(debug-repl "in refresh")
-        ;; we only care about the current-memoized-values changing.  The other
-        ;; fields of @data could change while we are performing a computation
-        ;;
-        ;; I suppose that we actually only care about the
         (let [need-to-redo (volatile! false)
               messages-to-send (volatile! nil)]
           (swap! data (fn [[valid has-computed mv]]
@@ -386,12 +378,7 @@
                                                                                                    (vec re)
                                                                                                    ))
                                                                   (next kvs)))))]
-                                      ;(debug-repl "todo")
-                                      [valid has-computed with-added]
-                                      ;(???)
-                                      )))
-                              ))
-                          )))
+                                      [valid has-computed with-added]))))))))
           (if @need-to-redo
             (recur)
             (doseq [msg @messages-to-send]
@@ -424,13 +411,6 @@
                                              res
                                              #_(do (debug-repl "disjunct found something")
                                                  (???))))))
-
-
-        ;; (or (is-disjunct-op? rexpr) (is-disjunct? rexpr)) (let []
-        ;;                                                     (debug-repl "replace disjunct")
-        ;;                                                     (???))
-        ;; A disjunct should not need to reprocess everything?  Only the
-        ;; branches which contain the value.  Though this is going to find that there are some values which need to
 
         :else
         ;; this version should use the index of the rexpr in the expression
@@ -474,18 +454,8 @@
                                                         (catch UnificationFailure e (make-multiplicity 0))))
                   ;; for now going to do a simpler version where it only handles a single value of the variables.  This will need to handle
                   ;; the case where it needs to get an iterator over the R-expr which is returned.  Such that it will get all of the bindings
-                  var-bindings (doall (map #(get-value-in-context % ctx) arg-vars))
-                  ]
-              ;(debug-repl "rr")  ;; TODO: this needs to run an iterator
-              ;(assert (is-multiplicity? result))
-              (vswap! values-to-recompute assoc-in var-bindings true)
-              #_(run-iterator
-               :rexpr-in result
-               :rexpr-result iter-result
-               :simplify simplify-fully
-               )
-              ;(debug-repl "inside handler")
-              )))
+                  var-bindings (doall (map #(get-value-in-context % ctx) arg-vars))]
+              (vswap! values-to-recompute assoc-in var-bindings true))))
 
 
         ;; Step 2: deduplicate the list of values which need to be recomputed.  If there is a wild card then it will back off the values to just the wildcard value
@@ -595,7 +565,8 @@
     (fn [signature] ;; the signature should be an array of argument bindings.  The last value will be the result of
       (let [ctx (context/make-empty-context memo-controller-rexpr)
             res (context/bind-context-raw ctx
-                                          (set-value! (make-variable 'Input) (DynaTerm. term-name (drop-last signature)))
+                                          (set-value! (make-variable 'Input) (DynaTerm. term-name (vec (map #(if (nil? %) meta-free-dummy-free-value %)
+                                                                                                            (drop-last signature)))))
                                           (simplify-fully-no-guess memo-controller-rexpr))]
         (if (= (make-multiplicity 1) res)
           (let [v (ctx-get-value ctx (make-variable 'Result))]
@@ -605,7 +576,7 @@
                 [:lookup (conj (vec (drop-last signature)) nil)]
                 (if (= "unk" v)
                   ;; if all of the variables are ground, then it can return :lookup, otherwise
-                  (if (every? #(not= meta-free-dummy-free-value %) (drop-last signature))
+                  (if (every? #(not (nil? %)) (drop-last signature))
                     [:lookup (conj (vec (drop-last signature)) nil)]
                     :defer)
                   (throw (DynaUserError. "$memo returned something other than none, null or unk"))))))
@@ -631,14 +602,14 @@
                      ~(cond
                         (= :unk (:memoization-mode info))
                         `(if (and ~@(for [i (range (count (first (:memoization-argument-modes info))))]
-                                      `(not= (get ~'args ~i) meta-free-dummy-free-value)))
+                                      `(not (nil? (get ~'args ~i)))))
                            [:lookup (conj (vec (drop-last ~'args)) nil)]
                            :defer)
 
                         (= (:null (:memoization-mode info)))
                         `(if (and ~@(for [[i mode] (zipseq (range) (first (:memoization-argument-modes info)))
                                           :when (= :ground mode)]
-                                      `(not= (get ~'args ~i) meta-free-dummy-free-value)))
+                                      `(not (nil?  (get ~'args ~i)))))
                            [:lookup [~@(for [[i mode] (zipseq (range) (first (:memoization-argument-modes info)))]
                                          (if (= :ground mode)
                                            `(get ~'args ~i)
