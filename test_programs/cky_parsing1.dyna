@@ -34,3 +34,5 @@ $memo(phrase[A:$free,B:$free,C:$free]) = "null".
 print "program loaded, going to make query".
 
 phrase(A,B,C) ?
+
+:- print_memo_table phrase/3.

@@ -22,17 +22,6 @@
         (is false)
         (throw e)))))
 
-;; (defmacro make-file-test [fname]
-;;   `(deftest ~(symbol fname)
-;;      (let [sstate# (make-new-dyna-system)]
-;;        (try
-;;          (run-under-system sstate#
-;;                            (import-file-url (.toURL (as-file (str "./test_programs/" ~fname ".dyna")))))
-;;          (is true)
-;;          (catch DynaUserAssert e#
-;;            (is false)
-;;            (throw e#))))))
-
 (deftest dummy) ;; for intellij
 
 (defmacro make-file-test [fname]
@@ -45,6 +34,7 @@
 (make-file-test "simple_matrix")
 (make-file-test "import_file")
 (make-file-test "parser_generator_test")
+(make-file-test "cky_parsing1")
 
 
 ;; for some reason, attempting to do file io in the macro causes the loading of other unrelated stuff to not work

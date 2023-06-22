@@ -7,7 +7,7 @@
   (:require [dyna.context :as context])
   (:require [dyna.user-defined-terms :refer [add-to-user-term update-user-term! def-user-term get-user-term]])
   ;(:require [dyna.memoization-v1 :refer [set-user-term-as-memoized print-memo-table]])
-  (:require [dyna.memoization-v2 :refer [handle-dollar-memo-rexpr handle-dollar-priority-rexpr]])
+  (:require [dyna.memoization-v2 :refer [handle-dollar-memo-rexpr handle-dollar-priority-rexpr print-memo-table]])
   (:require [dyna.optimize-rexpr :refer [optimize-aliased-variables]])
   (:require [clojure.set :refer [union intersection difference]])
   (:require [clojure.string :refer [join]])
@@ -494,12 +494,11 @@ This is most likely not what you want."))))
                                            ;;                         (???)
                                            ;;                         ))
 
-                                           ;; "print_memo_table" (match-term arg1 ("print_memo_table" ("/" name arity))
-                                           ;;                                (let [call-name {:name name
-                                           ;;                                                 :arity arity
-                                           ;;                                                 :source-file source-file}]
-                                           ;;                                  (print-memo-table call-name)))
-
+                                           "print_memo_table" (match-term arg1 ("print_memo_table" ("/" name arity))
+                                                                          (let [call-name {:name name
+                                                                                           :arity arity
+                                                                                           :source-file source-file}]
+                                                                            (print-memo-table call-name)))
 
 
                                            ;; "import_csv" (let [[term-name term-arity file-name] (.arguments ^DynaTerm (get arg1 0))]

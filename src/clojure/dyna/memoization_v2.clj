@@ -997,3 +997,8 @@
 
 (swap! debug-useful-variables assoc
        'work-agenda (fn [] system/work-agenda))
+
+(defn print-memo-table [call-name]
+  (let [term (get-user-term call-name)]
+    (println (:memoized-rexpr term))
+    (debug-repl)))
