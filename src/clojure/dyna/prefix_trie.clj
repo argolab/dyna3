@@ -167,10 +167,10 @@
                                 ]
                             (into ClojureHashMap/EMPTY
                                   (remove empty? (if (nil? cur-key)
-                                                   (for [[k v] node]
-                                                     (let [r (rec (cons k key-so-far) rest-key v)]
-                                                       (when-not (empty? r)
-                                                         [k r])))
+                                                   (for [[k v] node
+                                                         :let [r (rec (cons k key-so-far) rest-key v)]
+                                                         :when (not (empty? r))]
+                                                     [k r])
                                                    (for [k [nil cur-key]
                                                          :let [v (get node k)]
                                                          :when (not (nil? v))]

@@ -224,6 +224,18 @@
                         [k n2])))]
       [n (bit-or (bit-shift-left @contains-wildcard 1) (if (contains? n nil) 1 0))])))
 
+(defn- convert-to-trie-rexprs [cnt trie]
+  (if (= cnt 0)
+    [(ClojureUnorderedVector/create trie) 0]
+    (let [contains-wildcard (volatile! 0)
+          n (into ClojureHashMap/EMPTY
+                  (for [[k v] trie
+                        :let [[r wildcard] (convert-to-trie-rexprs (- cnt 1) v)]
+                        :when (not (empty? r))]
+                    (do (vswap! contains-wildcard bit-or wildcard)
+                        [k v])))]
+      [n (bit-or (bit-shift-left @contains-wildcard 1) (if (contains? n nil) 1 0))])))
+
 (def-rewrite
   :match (aggregator-op-outer (:unchecked operator) (:any result-variable) (:rexpr Rbody))
   :run-at [:standard :inference]
@@ -322,22 +334,22 @@
   (let [ctx (context/make-nested-context-aggregator-op-inner Rbody projected-vars incoming-variable)]
     (context/bind-context-raw
      ctx
-     (let [exposed (exposed-variables rexpr) ;; if all of the exposed are ground, then we should just go ahead and compute the value
+     (let [exposed (vec (exposed-variables rexpr)) ;; if all of the exposed are ground, then we should just go ahead and compute the value
            nR (try (simplify Rbody)
-                   (catch UnificationFailure e (make-multiplicity 0)))]
-       ;(debug-in-block "op top")
+                   (catch UnificationFailure e (make-multiplicity 0)))
+           parent-is-bound (vec (map is-bound? exposed))
+           eager-run-iterators *aggregator-op-should-eager-run-iterators*]
        (cond
          (is-empty-rexpr? nR) (make-multiplicity 0)
 
          (and (is-multiplicity? nR) (is-bound-in-context? incoming-variable ctx))
          (let [ret (*aggregator-op-contribute-value* (get-value-in-context incoming-variable ctx) (:mult nR))]
-           ;; this needs to just return the value from the expression
-                                        ;(debug-repl "result is found")
            ret)
 
 
-         (or (every? is-bound? exposed) *aggregator-op-should-eager-run-iterators*)
+         (or (every? is-bound? exposed) eager-run-iterators)
          (let [iterators (find-iterators nR)
+               accumulator (volatile! nil)
                result-rexprs (volatile! nil)]
            ;; will loop over assignments to all of the variables
            (run-iterator
@@ -358,8 +370,11 @@
                     (let [rc (*aggregator-op-contribute-value* val mult)]
                       (when-not (is-empty-rexpr? rc)
                         ;; then we have to save the result of this R-expr, as it could not get processed for some reason
-                        (vswap! result-rexprs conj rc)))))
+                        (if eager-run-iterators
+                          (vswap! accumulator update-in (map get-value exposed) conj rc)
+                          (vswap! result-rexprs conj rc))))))
                 (when-not (*aggregator-op-saturated*)
+                  ;(debug-repl "all bound but not done")
                   (let [new-incoming (if (is-bound? incoming-variable)
                                        (make-constant (get-value incoming-variable))
                                        incoming-variable)
@@ -369,14 +384,36 @@
                         new-projected (vec (filter #(not (is-bound? %)) projected-vars))
                         new-body (remap-variables inner-r remapping-map)
                         other-constraints (*aggregator-op-additional-constraints* new-incoming)
+                        ;; zzz (when (and *aggregator-op-should-eager-run-iterators* (not= parent-is-bound (map is-bound? exposed)))
+                        ;;       (debug-repl "agg egg run"))
                         rc (make-aggregator-op-inner new-incoming new-projected
                                                      (if (not= (make-multiplicity 1) other-constraints)
                                                        (make-conjunct [new-body other-constraints])
                                                        new-body))]
-                    (vswap! result-rexprs conj rc))))))
+                    (if eager-run-iterators
+                      (vswap! accumulator update-in (map get-value exposed) conj rc)
+                      (vswap! result-rexprs conj rc)))))))
 
+           (if eager-run-iterators
+             (if (empty? @accumulator)
+               (make-multiplicity 0)
+               (let [[root wildcard] (convert-to-trie-rexprs (count exposed) @accumulator)
+                     ret (make-disjunct-op exposed
+                                           (trie/make-PrefixTrie (count exposed) wildcard root))]
+                 ;(debug-repl "inner accum")
+                 ret))
+             (if (empty? @result-rexprs)
+               (make-multiplicity 0)
+               (make-disjunct (vec @result-rexprs))))
 
-           (if (empty? @result-rexprs)
+           #_(if (empty? @accumulator)
+                 (make-multiplicity 0)
+                 (do
+                   ;; this is going ot have to conver this into a disjunct-op where the accumulator corresponds with the order of th evalues
+                   (debug-repl "inner accum")
+                   (???)))
+
+           #_(if (empty? @result-rexprs)
              ;; then everything has been processed, so there is no need for this to remain
              (do
              ;  (debug-repl "agg inner 0")

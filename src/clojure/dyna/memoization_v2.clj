@@ -211,6 +211,8 @@
                                                               *aggregator-op-get-variable-value* (fn [variable]
                                                                                                    (get-value (get variables-map variable variable)))]
                                                       (simplify-fully-no-guess lrexpr)))]
+                      (when-not (is-empty-rexpr? res)
+                        (debug-repl "memo access res"))
                       res)))))
 
             :else
@@ -250,6 +252,7 @@
                           (assert (.contains (iter-variable-binding-order this) which-binding))
                           ;; this is using the same code as the optimized disjunct to create an iterator, as they are both just looping through
                           ;; the values of the prefix trie
+                          ;(debug-repl "create memo iterator")
                           (trie-diterator-instance (count variables) (.root ^PrefixTrie memoized-values) variables)))}))
                 (do
                   ;; then we have not computed this key yet.
@@ -275,14 +278,14 @@
                (let [accumulator (volatile! nil) ;; this is a "flat" map from tuples to values (not a trie)
                      rr (binding [*aggregator-op-contribute-value* (fn [value mult]
                                                                      (let [kvals (vec (map get-value argument-variables))]
-                                                                       (vswap! accumulator update kvals (fn [old]
-                                                                                                          (if (nil? old)
-                                                                                                            ((:many-items aggregator-op) value mult)
-                                                                                                            ((:combine-mult aggregator-op) old value mult)))))
-                                                                     (make-multiplicity 0)
-                                                                     #_(make-aggregator-op-inner (make-constant value)
-                                                                                               []
-                                                                                               (make-multiplicity mult)))
+                                                                       (when (some nil? kvals)
+                                                                         (debug-repl "accum nil"))
+                                                                       (vswap! accumulator update kvals
+                                                                               (fn [old]
+                                                                                 (if (nil? old)
+                                                                                   ((:many-items aggregator-op) value mult)
+                                                                                   ((:combine-mult aggregator-op) old value mult)))))
+                                                                     (make-multiplicity 0))
                                   *aggregator-op-additional-constraints*
                                   (if (:add-to-in-rexpr aggregator-op)
                                     (let [ati (:add-to-in-rexpr aggregator-op)]
@@ -291,6 +294,8 @@
                                           (make-multiplicity 1)
                                           (let [kvals (vec (map get-value argument-variables))
                                                 cur-val (get @accumulator kvals)]
+                                            #_(when (some nil? kvals)
+                                              (debug-repl "accum nil"))
                                             (if-not (nil? cur-val)
                                               (let [rr (ati cur-val incoming-variable)]
                                                 (simplify-inference rr))
@@ -302,10 +307,12 @@
                                                                 (fn []
                                                                   (let [kvals (vec (map get-value argument-variables))
                                                                         cur-val (get @accumulator kvals)]
+                                                                    #_(when (some nil? kvals)
+                                                                      (debug-repl "accum nil"))
                                                                     (when-not (nil? cur-val)
                                                                       (sf cur-val)))))
                                                               (fn [] false))
-                                  *aggregator-op-should-eager-run-iterators* true
+                                  *aggregator-op-should-eager-run-iterators* true  ;; maybe this should only run it eagerly if it can fully ground all of the variables
                                   ]
                           (context/bind-context cctx
                                                 (try (simplify-fully orig-rexpr)
@@ -335,50 +342,53 @@
 
                             (do (vreset! need-to-redo true)
                                 [valid has-computed mv])
-                            (let [existing-values (frequencies (trie-get-values-collection mv key))
-                                  ]
+                            (let [existing-values (frequencies (trie-get-values-collection mv key))]
                               (if (= existing-values new-values-freq)
                                 (do ;; then this is the same, so we do not have to do anything here
+                                  (vreset! messages-to-send nil)
                                   [valid has-computed mv])
-                                (do (vreset! messages-to-send nil)
-                                    (let [with-deleted
-                                          #_(reduce-kv (fn [[kk _]]))
+                                (do ;; there are new values to insert
+                                  ;(debug-repl "memo insert")
+                                  (when (some #(some nil? %) (map first (keys new-values-freq)))
+                                    (debug-repl "insert free"))
+                                  (vreset! messages-to-send nil)
+                                  (let [with-deleted
+                                        #_(reduce-kv (fn [[kk _]]))
                                           ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-                                          ;; TODO: change these to use reduce-kv instead of seq the map, as it seems that running seq on the map is causing
-                                          ;; it to have some kind of slow iterator in this
+                                        ;; TODO: change these to use reduce-kv instead of seq the map, as it seems that running seq on the map is causing
+                                        ;; it to have some kind of slow iterator in this
 
-                                          (loop [cmv mv
-                                                              kks (keys existing-values)]
-                                                         (if (empty? kks) cmv
-                                                             (let [[kk _] (first kks)]
-                                                               (if (contains? new-values kk)
-                                                                 (recur cmv (next kks))
-                                                                 (do
-                                                                   (vswap! messages-to-send conj kk)
-                                                                   (recur (trie-delete-matched cmv kk) (next kks)))))))
-                                          with-added (loop [cmv with-deleted
-                                                            kvs (seq new-values)]
-                                                       (if (empty? kvs)
-                                                         cmv
-                                                         (let [[kk re] (first kvs)]
-                                                           ;(debug-repl)
-                                                           #_(when-not (= mult 1)
-                                                               (debug-repl "mult?"))
-                                                           ;; TODO: this needs to check that
-                                                           (vswap! messages-to-send conj kk)
-                                                           (recur (trie-update-collection cmv kk (fn [c]
+                                        (loop [cmv mv
+                                               kks (keys existing-values)]
+                                          (if (empty? kks) cmv
+                                              (let [[kk _] (first kks)]
+                                                (if (contains? new-values kk)
+                                                  (recur cmv (next kks))
+                                                  (do
+                                                    (vswap! messages-to-send conj kk)
+                                                    (recur (trie-delete-matched cmv kk) (next kks)))))))
+                                        with-added (loop [cmv with-deleted
+                                                          kvs (seq new-values)]
+                                                     (if (empty? kvs)
+                                                       cmv
+                                                       (let [[kk re] (first kvs)]
+                                                         #_(when-not (= mult 1)
+                                                             (debug-repl "mult?"))
+                                                         ;; TODO: this needs to check that
+                                                         (vswap! messages-to-send conj kk)
+                                                         (recur (trie-update-collection cmv kk (fn [c]
 
-                                                                                                   ;; (when-not (nil? c)
-                                                                                                   ;;   ;; TODO: this "replace" c instead of adding it to the
-                                                                                                   ;;   ;; collection.  This means that it also does not have
-                                                                                                   ;;   ;; to
-                                                                                                   ;;   (debug-repl)
-                                                                                                   ;;   (???))
-                                                                                                   ;; (vec (concat (or c []) re))
-                                                                                                   (vec re)
-                                                                                                   ))
-                                                                  (next kvs)))))]
-                                      [valid has-computed with-added]))))))))
+                                                                                                 ;; (when-not (nil? c)
+                                                                                                 ;;   ;; TODO: this "replace" c instead of adding it to the
+                                                                                                 ;;   ;; collection.  This means that it also does not have
+                                                                                                 ;;   ;; to
+                                                                                                 ;;   (debug-repl)
+                                                                                                 ;;   (???))
+                                                                                                 ;; (vec (concat (or c []) re))
+                                                                                                 (vec re)
+                                                                                                 ))
+                                                                (next kvs)))))]
+                                    [valid has-computed with-added]))))))))
           (if @need-to-redo
             (recur)
             (doseq [msg @messages-to-send]
@@ -473,12 +483,10 @@
              ) () @values-to-recompute)
 
           (doseq [to-compute @to-compute-set]
-            ;; this is going to push to the agenda work
-            (let []
-              (memo-push-recompute-key container to-compute)
-              ))
+            ;; this is going to push to the agenda work which will recompute the relevant keys
+            (memo-push-recompute-key container to-compute))
 
-          (when false
+          #_(when false
 
             ;; Step 3: Do the actual computation for the new values
             (doseq [to-compute @to-compute-set]
@@ -762,8 +770,6 @@
                                                                                                                         agg-op
                                                                                                                         rr
                                                                                                                         (vec (drop-last variable-list)) ;; the argument variables
-                                        ;agg-result  ;; this is the local variable which is used
-                                                                                                                        #_(last variable-list) ;; result of aggregation goes here....though this might not be used by the aggregator
                                                                                                                         (make-assumption)
                                                                                                                         (atom [true nil (make-PrefixTrie (- (count variable-list) 1)
                                                                                                                                                          0 nil)])

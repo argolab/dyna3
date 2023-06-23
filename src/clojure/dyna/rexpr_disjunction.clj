@@ -77,22 +77,22 @@
 (defn- remap-variables-disjunct-op [this variable-renaming-map remap-fn]
   (if (empty? variable-renaming-map)
     this
-    (let [new-vars (vec (map #(get variable-renaming-map % %) (:disjunction-variables this)))]
-      (if (= new-vars (:disjunction-variables this))
+    (let [this-dv (:disjunction-variables this)
+          new-vars (vec (map #(get variable-renaming-map % %) this-dv))]
+      (if (= new-vars this-dv)
         this ;; return this unchanged, as the variable names are the same
         (let [new-vars-values (vec (map #(when (is-constant? %) (get-value %)) new-vars))]
           ;; this is going to have to remap the variables
-          (if (= new-vars (:disjunction-variables this))
+          (if (= new-vars this-dv)
             this  ;; then nothing has changed so don't create a new structure
             (let [new-trie (trie-map-values-subset (:rexprs this)
                                                    new-vars-values
                                                    (fn [key rr]
                                                      (let [ret (remap-fn rr variable-renaming-map)]
-                                                       (dyna-debug (when-not (subset?  (exposed-variables ret) (into #{} new-vars))
-                                                                     (debug-repl "exposed fail")))
+                                                       (dyna-debug (subset?  (exposed-variables ret) (into #{} new-vars)))
                                                        (when-not (is-empty-rexpr? ret)
                                                          ret))))]
-                                        ;(debug-repl "trie remap")
+              ;(debug-repl "trie remap")
               (make-disjunct-op new-vars new-trie))))))))
 
 
@@ -219,45 +219,46 @@
                    (catch UnificationFailure e
                      (do (debug-repl "bad") ;; in this case, we should stop processing, but this is not going to have set the value somewhere yet.  This is going to need to figure out what the issue is and skip it
                          (???)))))))
-        (context/bind-context-raw child-context
-                                  (let [new-child-rexpr (try (simplify child)
-                                                             (catch UnificationFailure e (make-multiplicity 0)))]
-                                    ;; if the new-child-rexpr is a disjunct, then we are just going to combine that into the thing that we are processing
-                                    (cond (is-disjunct? new-child-rexpr)
-                                          (let [args (:args new-child-rexpr)
-                                                ctx (context/get-context)]
-                                            (doseq [a args]
-                                              (save-result-in-trie a ctx)))
+        (context/bind-context-raw
+         child-context
+         (let [new-child-rexpr (try (simplify child)
+                                    (catch UnificationFailure e (make-multiplicity 0)))]
+           ;; if the new-child-rexpr is a disjunct, then we are just going to combine that into the thing that we are processing
+           (cond (is-disjunct? new-child-rexpr)
+                 (let [args (:args new-child-rexpr)
+                       ctx (context/get-context)]
+                   (doseq [a args]
+                     (save-result-in-trie a ctx)))
 
-                                          (is-disjunct-op? new-child-rexpr)
-                                          (let [child-var-order (:disjunction-variables new-child-rexpr)
-                                                child-prefix-trie (:rexprs new-child-rexpr)]
-                                            (doseq [[key djc-rexpr] (trie-get-values child-prefix-trie nil)]
-                                              (let [val-map (zipmap child-var-order key)
-                                                    new-keys (map #(get val-map %) dj-vars)
-                                                    added-new (volatile! false)]
-                                                (vswap! ret-children trie-update-collection new-keys
-                                                        (fn [col]
-                                                          (let [[made-new ret] (merge-rexpr-disjunct-list col djc-rexpr)]
-                                                            (vreset! added-new made-new)
-                                                            ret)))
-                                                (if @added-new (vswap! num-children inc)))))
+                 (is-disjunct-op? new-child-rexpr)
+                 (let [child-var-order (:disjunction-variables new-child-rexpr)
+                       child-prefix-trie (:rexprs new-child-rexpr)]
+                   (doseq [[key djc-rexpr] (trie-get-values child-prefix-trie nil)]
+                     (let [val-map (zipmap child-var-order key)
+                           new-keys (map #(get val-map %) dj-vars)
+                           added-new (volatile! false)]
+                       (vswap! ret-children trie-update-collection new-keys
+                               (fn [col]
+                                 (let [[made-new ret] (merge-rexpr-disjunct-list col djc-rexpr)]
+                                   (vreset! added-new made-new)
+                                   ret)))
+                       (if @added-new (vswap! num-children inc)))))
 
-                                          ;; if this is a more complex expression, then we will try to run iterators on the inner expression to allow it to become simpler and split into smaller expressions in the trie
-                                          (and *disjunct-run-inner-iterators* (not (is-multiplicity? new-child-rexpr)))
-                                          (let [iters (find-iterators new-child-rexpr)]
-                                            (run-iterator
-                                             :iterators iters
-                                             :bind-all true
-                                             :rexpr-in new-child-rexpr
-                                             :rexpr-result child-rexpr-itered
-                                             :simplify simplify
-                                             (let []
-                                               (save-result-in-trie child-rexpr-itered
-                                                                    (context/get-context) ;; we have to use get-context here as the iterator might have rebound the context
-                                                                       ))))
-                                          :else
-                                          (save-result-in-trie new-child-rexpr child-context))))))
+                 ;; if this is a more complex expression, then we will try to run iterators on the inner expression to allow it to become simpler and split into smaller expressions in the trie
+                 (and *disjunct-run-inner-iterators* (not (is-multiplicity? new-child-rexpr)))
+                 (let [iters (find-iterators new-child-rexpr)]
+                   (run-iterator
+                    :iterators iters
+                    :bind-all true
+                    :rexpr-in new-child-rexpr
+                    :rexpr-result child-rexpr-itered
+                    :simplify simplify
+                    (let []
+                      (save-result-in-trie child-rexpr-itered
+                                           (context/get-context) ;; we have to use get-context here as the iterator might have rebound the context
+                                           ))))
+                 :else
+                 (save-result-in-trie new-child-rexpr child-context))))))
     ;; set the values of variables which are the same across all branches
     (doseq [i (range (count dj-vars))]
       (let [dv (nth child-var-values i)]
@@ -271,7 +272,8 @@
           child)
         ;; then there are multiple children, so we have to return the entire trie
         (let [ret (make-disjunct-op dj-vars @ret-children)]
-          ;(debug-delay-ntimes 450 (debug-repl "disjunct res"))
+          #_(when (-> ret :rexprs .contains-wildcard (not= 0))
+              (debug-repl "wild card disjunct"))
           ret)))))
 
 
@@ -435,3 +437,17 @@
                       (.contains (.toString sw) "memoization.clj:171")  ;; when the rexpr is getting returned by a memoized expression
                       )
           (debug-repl "contains unify"))))))
+
+
+(def-rewrite
+  :match (disjunct-op (:any-list var-list) ^PrefixTrie rexprs)
+  :run-at :construction
+  :is-check-rewrite true
+  (let []
+    (doseq [[key rval] (trie-get-values rexprs nil)]
+      (let [need-vars (into #{} (for [[var vv] (zipseq var-list key)
+                                      :when (and (nil? vv) (not (is-constant? var)))]
+                                  var))]
+        (when-not (subset? need-vars (exposed-variables rval))
+          (debug-repl "new trie"))))
+    nil))

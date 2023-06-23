@@ -139,3 +139,6 @@
          (if (.is_done ^DynaAgenda work-agenda)
            r#
            (recur))))))
+
+(defn is-agenda-converged? []
+  (.is_done ^DynaAgenda work-agenda))
