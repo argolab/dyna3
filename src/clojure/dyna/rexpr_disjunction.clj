@@ -439,7 +439,7 @@
           (debug-repl "contains unify"))))))
 
 
-(def-rewrite
+#_(def-rewrite
   :match (disjunct-op (:any-list var-list) ^PrefixTrie rexprs)
   :run-at :construction
   :is-check-rewrite true

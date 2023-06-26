@@ -9,7 +9,7 @@
   (:require [dyna.prefix-trie :as trie])
   (:require [dyna.iterators :refer [make-skip-variables-iterator run-iterator]])
   (:require [dyna.rexpr-pretty-printer :refer [rexpr-printer optional-line-break indent-increase indent-decrease]])
-  (:require [clojure.set :refer [difference union intersection]])
+  (:require [clojure.set :refer [difference union intersection subset?]])
   (:require [clojure.string :refer [join]])
   (:import [dyna.rexpr proj-rexpr disjunct-rexpr aggregator-rexpr])
   (:import [dyna.rexpr_disjunction disjunct-op-rexpr])
@@ -335,9 +335,9 @@
     (context/bind-context-raw
      ctx
      (let [exposed (vec (exposed-variables rexpr)) ;; if all of the exposed are ground, then we should just go ahead and compute the value
+           parent-is-bound (vec (map is-bound? exposed))
            nR (try (simplify Rbody)
                    (catch UnificationFailure e (make-multiplicity 0)))
-           parent-is-bound (vec (map is-bound? exposed))
            eager-run-iterators *aggregator-op-should-eager-run-iterators*]
        (cond
          (is-empty-rexpr? nR) (make-multiplicity 0)
@@ -400,7 +400,9 @@
                (let [[root wildcard] (convert-to-trie-rexprs (count exposed) @accumulator)
                      ret (make-disjunct-op exposed
                                            (trie/make-PrefixTrie (count exposed) wildcard root))]
-                 ;(debug-repl "inner accum")
+                                        ;(debug-repl "inner accum")
+                 (when (not= (exposed-variables ret) (exposed-variables rexpr))
+                   (debug-repl "diff exposed"))
                  ret))
              (if (empty? @result-rexprs)
                (make-multiplicity 0)
@@ -431,8 +433,10 @@
                new-projected (vec (filter #(not (is-bound-in-context? % ctx)) projected-vars))
                new-body (remap-variables nR remapping-map)
                ret (make-aggregator-op-inner new-incoming new-projected new-body)]
-           ;(debug-in-block "aoi ret3")
-                                        ;(debug-repl "aoi ret3")
+           #_(when (not= (map is-bound? exposed) parent-is-bound)
+               (debug-repl "bound in body"))
+           (when-not (subset? (remove is-bound? (exposed-variables rexpr)) (exposed-variables ret))
+             (debug-repl "diff exposed"))
            ret))))))
 
 ;; these are only conjunctive, so if the body is zero, then the expression will also be zero

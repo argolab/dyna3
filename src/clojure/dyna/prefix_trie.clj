@@ -69,7 +69,7 @@
   (trie-reorder-keys-subselect [new-order known-values])
 
   ;; any key which is non-nil will be selected to that particular value
-  (trie-select-subkeys [key])
+  ;(trie-select-subkeys [key])
   )
 
 ;; (intern 'dyna.rexpr 'check-argument-prefix-trie (fn [x] (instance? IPrefixTrie x)))
