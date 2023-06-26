@@ -7,10 +7,9 @@
                                              is-disjunct-op?]])
   (:require [dyna.system :as system])
   (:require [dyna.base-protocols :refer :all])
-  (:require [dyna.user-defined-terms :refer [update-user-term! user-rexpr-combined-no-memo get-user-term]])
+  (:require [dyna.user-defined-terms :refer [update-user-term! add-to-user-term! user-rexpr-combined-no-memo get-user-term]])
   (:require [dyna.assumptions :refer :all])
   (:require [dyna.context :as context])
-  (:require [dyna.user-defined-terms :refer [add-to-user-term user-rexpr-combined-no-memo]])
   (:require [dyna.rexpr-builtins :refer [meta-free-dummy-free-value]])
   (:require [dyna.prefix-trie :refer :all])
   (:require [dyna.rexpr-aggregators-optimized :refer [*aggregator-op-contribute-value*
@@ -26,7 +25,7 @@
   (:import [clojure.lang IFn]))
 
 ;; the priority for system work that should be done immeditly is 1e16
-;; for user work that does not have anything set, we will give that a low priority by default.  Which will be 1e-16 in this case
+;; for user work that does not have anything set, we will give that a low priority by default.  Which will be -1e16 in this case
 (def unset-priority-default-work -1e16)
 
 (defn- get-all-children [rexpr]
@@ -784,11 +783,14 @@
                                            (assoc dat
                                                   :memoized-rexpr rexpr-with-memos))))]
     (binding [*fast-fail-on-invalid-assumption* false]
-      (add-watcher! @orig-rexpr-assumpt-v (reify Watcher
-                                            (notify-message! [this watching message] nil)
-                                            (notify-invalidated! [this watching]
-                                              ;; then it needs to rebuild the memo tables for this term
-                                              (system/push-agenda-work (->rebuild-memo-table-for-term-agenda-work term-name))))))
+      (let [watcher (reify Watcher
+                      (notify-message! [this watching message] nil)
+                      (notify-invalidated! [this watching]
+                        ;; then it needs to rebuild the memo tables for this term
+                        (system/push-agenda-work (->rebuild-memo-table-for-term-agenda-work term-name))))]
+        (add-watcher! @orig-rexpr-assumpt-v watcher)
+        ;; TODO: this should refresh the updated key instead of rebuilding the entire table
+        (add-watcher! (:def-assumption new2) watcher)))
     (let [old-tables (ensure-set (when (:memoized-rexpr old1)
                                    (filter #(or (is-memoized-access? %) (is-memoization-placeholder? %))
                                            (get-all-children (:memoized-rexpr old1)))))
@@ -809,8 +811,7 @@
       (doseq [tr (difference old-tables new-tables)
               t (get-tables-from-rexpr tr)]
         ;; these tables are no longer used, so they should be invalidated
-        (notify-invalidated! t nil))
-      )))
+        (notify-invalidated! t nil)))))
 
 (defn- identify-term-name [rexpr]
   (only (for [[projected-vars rr] (all-conjunctive-rexprs rexpr)
@@ -936,7 +937,7 @@
         ;(debug-repl "$memo")
 
         ;; save the method definition for the $memo value
-        (add-to-user-term source-file dynabase (:memoization-tracker-method-name new) 1 rexpr)
+        (add-to-user-term! source-file dynabase (:memoization-tracker-method-name new) 1 rexpr)
 
         ;; invalid assumptions that have been replaced
         (doseq [k (keys new)]
@@ -967,7 +968,7 @@
                                                    (if-not (:memoization-priorty-method dat)
                                                      (assoc dat :memoization-priorty-method (str (gensym '$priority_controller_)))
                                                      dat)))]
-      (add-to-user-term source-file dynabase (:memoization-priorty-method new) 1 rexpr)
+      (add-to-user-term! source-file dynabase (:memoization-priorty-method new) 1 rexpr)
       (if (not= (:memoization-priorty-method new) (:memoization-priorty-method old))
         (system/push-agenda-work (->rebuild-memo-table-for-term-agenda-work call-name))))))
 

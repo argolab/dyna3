@@ -5,7 +5,7 @@
   (:require [dyna.rexpr-dynabase :refer :all])
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
-  (:require [dyna.user-defined-terms :refer [add-to-user-term update-user-term! def-user-term get-user-term]])
+  (:require [dyna.user-defined-terms :refer [add-to-user-term! update-user-term! def-user-term get-user-term]])
   ;(:require [dyna.memoization-v1 :refer [set-user-term-as-memoized print-memo-table]])
   (:require [dyna.memoization-v2 :refer [handle-dollar-memo-rexpr handle-dollar-priority-rexpr print-memo-table]])
   (:require [dyna.optimize-rexpr :refer [optimize-aliased-variables]])
@@ -565,10 +565,10 @@ This is most likely not what you want."))))
                                                   (handle-dollar-priority-rexpr rexpr-opt source-file dynabase)
 
                                                   (and (= "$warning" functor-name) (= 0 functor-arity))
-                                                  (add-to-user-term nil nil  "$warning" 0 rexpr-opt)
+                                                  (add-to-user-term! nil nil  "$warning" 0 rexpr-opt)
 
                                                   :else
-                                                  (add-to-user-term source-file dynabase functor-name functor-arity
+                                                  (add-to-user-term! source-file dynabase functor-name functor-arity
                                                                     rexpr-opt))
                                             #_(when
                                               ;; this needs to mark the memo table as having a priority function.

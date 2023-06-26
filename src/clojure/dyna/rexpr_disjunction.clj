@@ -129,16 +129,15 @@
     (when-not (empty? dj-vars)
       (let [existing-tries (filter is-disjunct-op? children)
             non-tries (ClojureUnorderedVector/create (filter #(not (is-disjunct-op? %)) children))
-            non-tries-map (loop [n (count dj-vars)
-                                 s non-tries]
-                            (if (= n 0)
-                              s
-                              (recur (- n 1) (trie-hash-map nil s))))
-            base-trie (make-PrefixTrie (count dj-vars)
-                                       (if-not (empty? non-tries)
+            base-trie (if (empty? non-tries)
+                        (make-PrefixTrie (count dj-vars) 0 nil)
+                        (make-PrefixTrie (count dj-vars)
                                          (- (bit-shift-left 1 (count dj-vars)) 1)
-                                         0)
-                                       non-tries-map)
+                                         (loop [n (count dj-vars)
+                                                s non-tries]
+                                           (if (= n 0)
+                                             s
+                                             (recur (- n 1) (trie-hash-map nil s))))))
             combined-trie (loop [trie base-trie
                                  nt (first existing-tries)
                                  rt (next existing-tries)]
@@ -164,8 +163,7 @@
                                          (first rt)
                                          (next rt)))))
             ret (make-disjunct-op dj-vars
-                                  combined-trie)
-            ]
+                                  combined-trie)]
         ret))))
 
 
@@ -336,7 +334,6 @@
   :match (disjunct-op (:any-list dj-vars) (:unchecked rexprs))
   (let [contains-wildcard (.contains-wildcard ^PrefixTrie rexprs)
         trie-root (.root ^PrefixTrie rexprs)]
-    ;(debug-repl "dit")
     (when (not= contains-wildcard (- (bit-shift-left 1 (count dj-vars)) 1))
       ;; then there exists at least one variable which does not contain a whild card, so it could be iterated
       #{(reify DIterable
@@ -348,9 +345,7 @@
           (iter-variable-binding-order [this] [dj-vars])
           (iter-create-iterator [this which-binding]
             (assert (.contains (iter-variable-binding-order this) which-binding))
-            (let [ret (trie-diterator-instance (count dj-vars) trie-root dj-vars)
-                                        ;(run-trie-iterator-from-node (count dj-vars) trie-root)
-                  ]
+            (let [ret (trie-diterator-instance (count dj-vars) trie-root dj-vars)]
               ;(debug-repl "creating iterator from trie")
               ret)))})))
 
@@ -451,3 +446,14 @@
         (when-not (subset? need-vars (exposed-variables rval))
           (debug-repl "new trie"))))
     nil))
+
+
+#_(def-rewrite
+  :match (disjunct-op (:any-list var-list) ^PrefixTrie rexprs)
+  :run-at :construction
+  :is-check-rewrite true
+  (let [wild (.contains-wildcard rexprs)]
+    (doseq [[key rval] (trie-get-values-collection rexprs nil)]
+      (doseq [[i k] (zipseq (range) key)
+              :when (nil? k)]
+        (dyna-assert (not= 0 (bit-and wild (bit-shift-left 1 i))))))))

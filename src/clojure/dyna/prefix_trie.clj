@@ -32,7 +32,8 @@
 (defn- merge-map-arity [arity & args]
   (if (= arity 0)
     (ClojureUnorderedVector/concat args)
-    (apply merge-with (partial merge-map-arity (- arity 1)) args)))
+    (let [f (first args)]
+      (apply merge-with (partial merge-map-arity (- arity 1)) (if (nil? f) ClojureHashMap/EMPTY f) (rest args)))))
 
 (defsimpleinterface IPrefixTrie
   (trie-get-values-collection [key])  ;; return the values associated with a given key together
@@ -388,14 +389,15 @@
   ;; check that we have the right internals for now
   (dyna-slow-check
    (if (> arity 0)
-     ((fn rec [d n]
+     ((fn rec [d n wild]
         (if (= d 0)
           (assert (instance? ClojureUnorderedVector n))
           (do
+            (assert (or (= 1 (bit-and 1 wild)) (not (contains? n nil))))
             (assert (or (nil? n) (instance? ClojureHashMap n)))
             (doseq [v (vals n)]
-              (rec (- d 1) v)))))
-      arity root)
+              (rec (- d 1) v (bit-shift-right wild 1))))))
+      arity root wildcard)
      (assert (or (nil? root) (instance? ClojureUnorderedVector root)))))
   (PrefixTrie. arity wildcard root))
 

@@ -49,6 +49,7 @@ help() {
     echo "     --csv-export [term name] [file name]"
     echo "     --time                Time the different parts of the runtime report when the program exits"
     echo "     --fast-math           Do not check the math operations for numerical overflow"
+    echo "     --print-agenda        Print out the work that the agenda is doing"
     echo "     --random-seed=42      Set a random seed"
     echo "     --version             Print out version"
     echo ""
@@ -86,13 +87,13 @@ fi
 dyna_args=""
 import_args=""
 jvm_args="-Xss16m "
-memory="4G"
+memory="${DYNA_MEMORY:-4G}"
 perf_mode="safe"
 debug_mode="false"
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --memory=*)
+        --memory*)
             memory="${1#*=}"
             [[ $memory =~ ^[0-9]+[gGmMkK]$ ]] || {
                 echo "--memory argument was unexpected, expected number and suffix E.g. --memory=10g"
@@ -118,6 +119,11 @@ while [ $# -gt 0 ]; do
             # this should not need to be used
             debug_mode="true"
             ;;
+
+        --print-agenda)
+            jvm_arg+="-Ddyna.print_agenda_work=true -Ddyna.print_agenda_progress=true -Ddyna.print_agenda_running=true "
+            ;;
+
 
         # --fast)
         #     perf_mode="fast"

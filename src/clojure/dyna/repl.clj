@@ -106,7 +106,8 @@ print fib(100).
             :iterators iters
             :rexpr-in rexpr
             :rexpr-result rexpr-out
-            (vswap! to-print conj [(ctx-get-all-bindings (context/get-context)) (simplify rexpr-out)]))))
+            (let [sr (simplify rexpr-out)]
+              (vswap! to-print conj [(ctx-get-all-bindings (context/get-context)) sr])))))
         (assert (> (count @to-print) 0))
         (print (trim print-id) " ?\n")
         (if (and (= 1 (count @to-print)) (= (make-multiplicity 1)(second (first @to-print))) )

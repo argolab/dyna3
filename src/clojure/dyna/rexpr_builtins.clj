@@ -522,6 +522,11 @@
 (def-user-term "range" 3 (make-range v0 v1 (make-constant 1) v2 v3))
 (def-user-term "range" 2 (make-range (make-constant 0) v0 (make-constant 1) v1 v2))
 
+(defmethod rexpr-printer range-rexpr [r]
+  (if (and (= 1 (get-value (:Step r))) (= true (get-value (:Contained r))))
+    (str "range(" (rexpr-printer (:Low r)) "," (rexpr-printer (:High r)) "," (rexpr-printer (:Out r)) ")")
+    (str (rexpr-printer (:Contained r)) "=range(" (rexpr-printer (:Low r)) "," (rexpr-printer (:High r)) "," (rexpr-printer (:Step r)) "," (rexpr-printer (:Out r)) ")")))
+
 (def-rewrite
   :match (range (:ground Low) (:ground High) (:ground Step) (:ground Out) (:any Contained))
   :run-at :standard

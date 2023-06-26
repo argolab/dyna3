@@ -26,13 +26,15 @@ rule("Det", "a") = 1.
 
 length max= I for _=word(I).
 
-phrase(I,K,T) max= phrase(I,J,T1) * phrase(J,K,T2) * rule(T,T1,T2) for I < J, J < K.
+phrase(I,K,T) max= phrase(I,J,T1) * phrase(J,K,T2) * rule(T,T1,T2) for range(I+1,K,J).
 phrase(I,I+1,T) max= rule(T, word(I)).
 
-$memo(phrase[A:$free,B:$free,C:$free]) = "null".
+% $memo(phrase[A:$free,B:$free,C:$free]) = "null".
 
 print "program loaded, going to make query".
 
-phrase(A,B,C) ?
+phrase(0,1,X)?
+
+% phrase(A,B,C) ?
 
 :- print_memo_table phrase/3.

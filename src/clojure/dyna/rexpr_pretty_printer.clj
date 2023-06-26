@@ -42,7 +42,7 @@
 (defmulti rexpr-printer type)
 
 (defmethod rexpr-printer :default [rexpr]
-  (debug-repl "default printer")
+  ;(debug-repl "default printer")
   (str rexpr))
 
 (defn print-rexpr [rexpr & {:keys [width] :or {width 100}}]

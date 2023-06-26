@@ -89,7 +89,7 @@
                                                    r)))))]
     [(get old name) (get new name)]))
 
-(defn add-to-user-term [source-file dynabase name arity rexpr]
+(defn add-to-user-term! [source-file dynabase name arity rexpr]
   (let [object-name (merge {:name name
                             :arity arity}  ;; I suppose that there isn't going to be variable argument expressions, meaning that this will
                            (when (dnil? dynabase) ;; when there is a dynabase, then this requires having to merge across different values

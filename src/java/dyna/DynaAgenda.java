@@ -109,6 +109,6 @@ public class DynaAgenda {
 
     public static final boolean print_progress = Boolean.parseBoolean(System.getProperty("dyna.print_agenda_progress", "false"));
     public static final boolean print_agenda_running = Boolean.parseBoolean(System.getProperty("dyna.print_agenda_running", "true"));
-    public static final boolean print_agenda_work = Boolean.parseBoolean(System.getProperty("dyna.print_agenda_work", "false"));
+    public static final boolean print_agenda_work = Boolean.parseBoolean(System.getProperty("dyna.print_agenda_work", "true"));
 
 }

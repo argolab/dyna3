@@ -556,7 +556,7 @@
 
 (defrecord variable-rexpr [varname]
   RexprValueVariable
-  (get-value [this] (ctx-get-value (context/get-context) this))
+  (get-value [this] (context/need-context (ctx-get-value (context/get-context) this)))
   (get-value-in-context [this ctx] (ctx-get-value ctx this))
   (set-value! [this value]
     (ctx-set-value! (context/get-context) this value))
@@ -1444,7 +1444,7 @@
                                         ; though we might not want to have the matchers identifying a given expression
   (is-bound? var-name))
 
-(def-rewrite-matcher :not-ground [var] ;; TODO: I think I can just use :free instead of :not-ground, through the is only used by the unification construction
+#_(def-rewrite-matcher :not-ground [var] ;; TODO: I think I can just use :free instead of :not-ground, through the is only used by the unification construction
   (and (is-variable? var) (not (is-bound? var))))
 
 (def-rewrite-matcher :free [var-name]
@@ -1501,25 +1501,11 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-#_(def-rewrite
-  :match (unify (:any A) (:any B))
-  nil)
-
 (def-rewrite
   :match (unify (:any A) (:any B))
   :run-at :construction
   (if (= A B) ;; these two structures are equal to each other, so we can just remove the expression
     (make-multiplicity 1)))
-
-;; (def-rewrite
-;;   :match (unify (:structured A) (:structured B))
-;;   ;; that this should run early, when invoked by the make method call.
-;;   ;; there should be some methods like
-;;   :run-at :construction
-;;   (if (or (not= (count A) (count B)) (not= (car A) (car B)))
-;;     (make-multiplicity 0) ;; meaning that the names on these expressions does not match.
-;;     (make-conjunct (doall (map make-unify (cdar A) (cdar B)))) ; then make a bunch of smaller unifications on the variables themselves directly
-;;     ))
 
 (def-rewrite
   ;; the matched variable should have what value is the result of the matched expression.
@@ -1530,8 +1516,8 @@
     (make-multiplicity 0)))
 
 (def-rewrite
-  :match (unify (:ground A) (:not-ground B))
-  :run-at :construction
+  :match (unify (:ground A) (:free B))
+  :run-at [:construction :standard :inference]
   (make-unify B A))
 
 (comment
@@ -1553,34 +1539,14 @@
   )
 
 
-;; (def-rewrite
-;;   :match (unify (:structured B) (:ground A))
-;;   :run-at :construction
-;;   (let [Av (get-value A)]
-;;     (if (not (and (instance? DynaTerm Av)
-;;                   (= (.name ^DynaTerm B) (.name ^DynaTerm Av))
-;;                   (= (count (.arguments ^DynaTerm B)) (count (.arguments ^DynaTerm Av)))))
-;;       (make-multiplicity 0)
-;;       (make-conjunct (doall (map make-unify (.arguments ^DynaTerm B) (.arguments ^DynaTerm Av))))
-;;       )))
-
 ; this should run at both, so there should be a :run-at :both option that can be selected
 (def-rewrite
   :match (unify (:free A) (:ground B))
   :run-at [:standard :construction :inference] ; this will want to run at construction and when it encounters the value so that we can use it as early as possible
   (when (context/has-context)
-    ;;(debug-repl)
     (assert (not (is-bound? A))) ;; otherwise the setting the value into the context should fail
     (set-value! A (get-value B))
     (make-multiplicity 1)))
-
-;; (def-rewrite
-;;   :match (unify (:free A) (:ground B))
-;;   :run-at :standard
-;;   (when (context/has-context)
-;;     ;;(debug-repl)
-;;     (set-value! A (get-value B))
-;;     (make-multiplicity 1)))
 
 (def-iterator
   :match (unify (:iterate A) (:ground B))
