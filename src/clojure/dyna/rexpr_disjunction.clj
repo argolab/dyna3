@@ -66,9 +66,11 @@
                          (first (remove nil? (for [[key r] (trie-get-values-collection-no-wildcard rexprs vmap)]
                                                (when (some is-non-empty-rexpr? r) true))))))
   (rewrite-rexpr-children [this remap-function]
-                          (make-disjunct-op disjunction-variables
-                                            (trie-map-values rexprs nil (fn [trie-path r]
-                                                                          (remap-function r)))))
+                          (let [ret (make-disjunct-op disjunction-variables
+                                                      (trie-map-values rexprs nil (fn [trie-path r]
+                                                                                    (remap-function r))))]
+                            (debug-delay-ntimes 3000 (debug-repl "trie rewrite"))
+                            ret))
   (remap-variables-func [this remap-function]
                         (???) ;; TODO
                         )
@@ -92,7 +94,6 @@
                                                        (dyna-debug (subset?  (exposed-variables ret) (into #{} new-vars)))
                                                        (when-not (is-empty-rexpr? ret)
                                                          ret))))]
-              ;(debug-repl "trie remap")
               (make-disjunct-op new-vars new-trie))))))))
 
 
@@ -270,8 +271,6 @@
           child)
         ;; then there are multiple children, so we have to return the entire trie
         (let [ret (make-disjunct-op dj-vars @ret-children)]
-          #_(when (-> ret :rexprs .contains-wildcard (not= 0))
-              (debug-repl "wild card disjunct"))
           ret)))))
 
 
@@ -394,6 +393,25 @@
            (count va) (.root ta) (.root tbr)))
         ))))
 
+(def-rewrite
+  :match {:rexpr (disjunct-op (:any-list var-list) ^PrefixTrie rexprs)
+          :check *disjunct-op-remove-if-single*}
+  :run-at :construction
+  (loop [vars var-list
+         node (.root rexprs)]
+    (if (empty? vars)
+      (if (= 1 (count node))
+        (first node))
+      (let [v (first vars)]
+        (if (= 1 (count node))
+          (let [[k n2] (first node)]
+            (if (nil? k)
+              (recur (rest vars)
+                     n2)
+              (when (context/has-context)
+                (set-value! v k)
+                (recur (rest vars)
+                       n2)))))))))
 
 (def-rewrite
   :match (disjunct-op (:any-list var-list) rexprs)

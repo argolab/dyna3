@@ -142,3 +142,7 @@
 
 (defn is-agenda-converged? []
   (.is_done ^DynaAgenda work-agenda))
+
+(defn should-stop-processing? []
+  (when (Thread/interrupted)
+    (throw (InterruptedException.))))

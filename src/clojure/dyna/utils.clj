@@ -401,13 +401,6 @@
                                             r))]))]
     (macrolet-expand m `(do ~@body))))
 
-;; this would have to make some interface for the methods or this could just
-;; define methods which cast the type to the class, and then invoke
-
-(comment
-  (defmacro deflcass [name & methods+parent]
-    nil))
-
 
 (defn ensure-simple-symbol [s]
   (symbol (name s)))

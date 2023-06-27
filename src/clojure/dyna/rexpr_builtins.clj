@@ -544,6 +544,11 @@
     (make-unify Contained
                 (make-constant-bool successful))))
 
+(def-rewrite
+  :match {:rexpr (range (:ground Low) (:ground High) Step Out (:any Contained))
+          :check (>= (get-value Low) (get-value High))}
+  :assigns-variable Contained
+  false)
 
 (def-iterator
   :match (range (:ground Low) (:ground High) (:ground Step) (:free Out) (is-true? Contained))

@@ -166,7 +166,9 @@
         save-proj-vars (for [[idx var] (zipseq (range) disjunction-variables)
                              :when (pjv var)]
                          [idx var])
-        resulting-trie (volatile! (trie/make-PrefixTrie (count new-trie-vars) 0 nil))]
+        resulting-trie (volatile! (trie/make-PrefixTrie (count new-trie-vars) 0 nil))
+        ;num-children (volatile! 0)
+        ]
     (doseq [[var-binding children] (trie/trie-get-values-collection trie-Rs nil)]
       (let [income-val (if (nil? incoming-idx)
                          (get-value incoming)
@@ -179,11 +181,13 @@
                        (make-no-simp-unify var (make-constant bnd))))
             new-children (vec (for [c children]
                                 (make-aggregator-op-inner income-var projected-vars (make-conjunct (conj pvb c)))))]
+        ;(vswap! num-children + (count new-children))
         (vswap! resulting-trie trie/trie-update-collection trie-binding
                 (fn [col]
                   (concat col new-children)))))
     (let [ret (make-disjunct-op (vec (map second new-trie-vars)) @resulting-trie)]
-      ;(debug-repl "optimized aggregator disjunction trie")
+      #_(when (<= @num-children 1)
+        (debug-repl "optimized aggregator disjunction trie"))
       ret)))
 
 (def-rewrite

@@ -1361,6 +1361,7 @@
 
 (defn simplify-fully-no-guess [rexpr]
   (loop [cri rexpr]
+    (system/should-stop-processing?)
     (let [nri (loop [cr cri]
                 (let [nr (debug-binding [*current-top-level-rexpr* cr]
                                         (simplify cr))]

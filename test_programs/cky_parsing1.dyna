@@ -33,8 +33,10 @@ phrase(I,I+1,T) max= rule(T, word(I)).
 
 print "program loaded, going to make query".
 
-phrase(0,1,X)?
+phrase(0,2,X)?
+
+% phrase(0,1,X)?
 
 % phrase(A,B,C) ?
 
-:- print_memo_table phrase/3.
+% :- print_memo_table phrase/3.
