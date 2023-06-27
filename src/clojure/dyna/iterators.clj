@@ -375,7 +375,7 @@
 
 
 
-(defn pick-iterator [iterators binding-variables]
+(defn pick-iterator1 [iterators binding-variables]
   (let [bv (into #{} binding-variables)
         ;; we are going to consider some of the iterators which would be able to bind something
         ;; in the case that there are still values which are still unbound, it should just keep running
@@ -423,9 +423,46 @@
         ))
     ))
 
+(defn pick-iterator1 [ctx iterators binding-variables]
+  (let [[a b] (pick-iterator1 iterators binding-variables)]
+    (println "picking iterator" a)
+    #_(when (and (not (nil? a)) (> (count iterators) 1))
+      (debug-repl "iter"))
+    [a b]))
+
+(defn- pick-iterator [ctx iterators binding-variables]
+  (let [bv (ensure-set binding-variables)
+        iterators (remove #(empty? (second %))
+                          (map (fn [x] [x (if (empty? bv)
+                                            (iter-what-variables-bound x)
+                                            (intersection bv (iter-what-variables-bound x)))])
+                               iterators))]
+    (cond (empty? iterators)
+          [nil nil] ;; there is nothing to iterate so return
+
+          (= 1 (count iterators)) ;; there is only 1 iterator that we can use, so we are just going to return it
+          (let [[picked-iter can-bind] (first iterators)
+                can-bind-variables (ensure-set (iter-what-variables-bound picked-iter))
+                binding-order (first (iter-variable-binding-order picked-iter))]
+            (if (or (empty? bv) (every? #(or (can-bind-variables %) (is-constant? %)) binding-order))
+              [picked-iter binding-order]
+              (let [siter (make-skip-variables-iterator picked-iter (difference bv can-bind-variables))]
+                [siter (first (iter-variable-binding-order siter))])))
+
+          :else
+          ;; then there are multiple iterators that we can consider, so we are going to ensure that all of the variables that we can bind do get bound by smething
+          (let [;can-bind (apply union (map second iterators))
+                conj-iter (make-conjunction-iterator (map first iterators))
+                can-bind (iter-what-variables-bound conj-iter)
+                orders (iter-variable-binding-order conj-iter)
+                binding-order (first orders)]
+            (if (or (empty? bv) (every? #(or (can-bind %) (is-constant? %)) binding-order))
+              [conj-iter binding-order]
+              (let [siter (make-skip-variables-iterator conj-iter (difference bv can-bind))]
+                [siter (first (iter-variable-binding-order siter))]))))))
 
 ;; TODO: can-bind-variables can be removed now I think..
-(defn- run-iterator-fn [picked-iterator picked-binding-order can-bind-variables rexpr ctx callback-fn simplify-fn]
+#_(defn- run-iterator-fn1 [picked-iterator picked-binding-order can-bind-variables rexpr ctx callback-fn simplify-fn]
   ((fn rec [iter bind-order rexpr]
      (if (empty? bind-order)
        ;; then we have reached the end of this expression, so we are going to callback
@@ -469,6 +506,32 @@
      bo)  ;; make this a linked list so that it will quickly be able to pull items off the head of the list
    rexpr))
 
+
+(defn- run-iterator-fn [picked-iterator picked-binding-order rexpr ctx callback-fn simplify-fn]
+  (assert (not (empty? picked-binding-order)))
+  (context/bind-context-raw
+   ctx
+   ((fn rec [iter bind-order rexpr]
+      (if (empty? bind-order)
+        (callback-fn rexpr)
+        (let [v (first bind-order)
+              r (rest bind-order)]
+          (if (is-bound? v)
+            (let [it-bound (iter-bind-value iter (get-value v))]
+              (if-not (nil? it-bound)
+                (rec it-bound r rexpr)))
+            (doseq [val (iter-run-iterable iter)]
+              (should-stop-processing?)
+              (let [dctx (context/make-nested-context-disjunct rexpr)]
+                (ctx-set-value! dctx v (iter-variable-value val))
+                (context/bind-context-raw
+                 dctx
+                 (let [new-rexpr (simplify-fn rexpr)]
+                   (if-not (is-empty-rexpr? new-rexpr)
+                     (rec (iter-continuation val) r new-rexpr))))))))))
+    (iter-create-iterator picked-iterator picked-binding-order)
+    picked-binding-order
+    rexpr)))
 
 
 ;; there should be something which allows this to "know" what variables are
@@ -522,7 +585,7 @@
                      ~ctx ~(if assign-to-context
                              `(context/get-context) ;; use the existing "global" context
                              `(context/make-empty-context ~rexpr))
-                     [picked-iterator# picked-binding-order#] (pick-iterator iters# ~required-binding)
+                     [picked-iterator# picked-binding-order#] (~pick-iterator ~ctx iters# ~required-binding)
                      callback-fn# (fn [~rexpr-callback-var]
                                     ;; could use macrolet here to define the
                                     ;; encode-state-as-rexpr and then it can
@@ -540,15 +603,14 @@
                        (~run-iterator-fn
                         picked-iterator#
                         picked-binding-order#
-                        (iter-what-variables-bound picked-iterator#)
+                        ;(iter-what-variables-bound picked-iterator#)
                         ~rexpr
                         ~ctx
                         callback-fn#
                         ~simplify-method)))
                  )]
       ;(debug-repl "iter runner")
-      ret)
-    ))
+      ret)))
 
 
 ;; the iterators which bind variables that are "hidden" might still be useful,

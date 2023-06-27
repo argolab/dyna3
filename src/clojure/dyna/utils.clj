@@ -411,6 +411,7 @@
     (into #{} s)))
 
 
+;; zipseq could just be (apply map list seqs)  Not sure if that is better or worse than this....
 (defn zipseq [& seqs]
   (if (or (empty? seqs) (some empty? seqs))
     ()

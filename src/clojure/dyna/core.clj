@@ -25,7 +25,7 @@
                                        eval-string
                                        eval-ast]])
   (:require [dyna.repl :refer [repl pretty-print-query-result]])
-  (:import [dyna DynaTerm StatusCounters]))
+  (:import [dyna DynaTerm StatusCounters DynaUserError]))
 
 
 (defn init-system []
@@ -102,7 +102,13 @@
                                             (if (Boolean/parseBoolean (System/getProperty "dyna.print_raw_query_results" "false"))
                                               (println query-text " " run-filef ":" line-number "\n" result)
                                               (pretty-print-query-result query-text result)))]
-              (import-file-url (.toURL run-filef)))
+              (try
+                (import-file-url (.toURL run-filef))
+                (catch DynaUserError err
+                  (do
+                    (print "\033[0;31mError Error Error\033[0m\n")
+                    (println (.getMessage err))
+                    (System/exit 1)))))
             ;; TODO: this needs to handle the csv export functions
             (when system/status-counters
               (StatusCounters/print_counters))

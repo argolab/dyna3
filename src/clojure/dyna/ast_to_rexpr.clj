@@ -1034,37 +1034,38 @@ This is most likely not what you want."))))
     (reportFailedPredicate [recognizer exception]
       (if print-parser-errors
         (println "==========> report failed predicate" exception)
-        (throw (DynaSyntaxError.))))
+        (throw (DynaSyntaxError. "Failed predicate" exception))))
     (reportInputMismatch [recognizer exception]
       (if print-parser-errors
         (println "==========> report input missmatch" exception)
-        (throw (DynaSyntaxError.))))
+        (throw (DynaSyntaxError. "Input missmatch" exception))))
     (reportNoViableAlternative [recognizer exception]
       (if print-parser-errors
         (let [token (.getStartToken exception)
               offending (.getOffendingToken exception)
               stream (.getInputStream token)
-              continuations (map get-parser-print-name (.toList (.getExpectedTokens exception)))]
-          (println "====================================================================================================")
-          (println "PARSER ERROR -- invalid input")
-          (println "")
-          (println "Input was incomplete")
-          (println "")
-          (println (str "Line: " (.getLine token) ":" (.getCharPositionInLine token) "-" (.getLine offending) ":" (.getCharPositionInLine offending)))
-          (println "--------------------")
-          (println (.getText stream (Interval. ^int (.getStartIndex token) ^int (.getStopIndex offending))))
-          (println "--------------------")
-          (println "possible missing tokens: " (join " OR " continuations))
-          (println "===================================================================================================="))
-        (throw (DynaSyntaxError.))))
+              continuations (map get-parser-print-name (.toList (.getExpectedTokens exception)))
+              message (str
+                       "====================================================================================================\n"
+                       "PARSER ERROR -- invalid input\n"
+                       "\n"
+                       "Input was incomplete\n"
+                       (str "Line: " (.getLine token) ":" (.getCharPositionInLine token) "-" (.getLine offending) ":" (.getCharPositionInLine offending)) "\n"
+                       "--------------------\n"
+                       (.getText stream (Interval. ^int (.getStartIndex token) ^int (.getStopIndex offending))) "\n"
+                       "--------------------\n"
+                       "possible missing tokens: " (join " OR " continuations) "\n"
+                       "====================================================================================================")]
+          (println message)
+          (throw (DynaSyntaxError. message)))))
     (reportUnwantedToken [recognizer]
       (if print-parser-errors
         (println "=============> unwanted token")
-        (throw (DynaSyntaxError.))))
+        (throw (DynaSyntaxError. "Unwanted token"))))
     (reportMissingToken [recognizer]
       (if print-parser-errors
         (proxy-super reportMissingToken recognizer)
-        (throw (DynaSyntaxError.))))))
+        (throw (DynaSyntaxError. "Missing token"))))))
 
 (def lexer-error-handler
   (proxy [org.antlr.v4.runtime.ConsoleErrorListener] []

@@ -167,10 +167,11 @@
 
 
 (def-rewrite
-  :match (disjunct-op (:any-list dj-vars) (:unchecked rexprs))
+  :match (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs))
   :run-at [:standard :inference]
   :run-in-jit false
   (let [outer-context (context/get-context)
+        dj-vars-vals-init (doall (map get-value dj-vars))
         ret-children (volatile! (make-PrefixTrie (count dj-vars) 0 nil))
         num-children (volatile! 0)
         var-map (map get-value dj-vars)
@@ -257,6 +258,7 @@
                  :else
                  (save-result-in-trie new-child-rexpr child-context))))))
     ;; set the values of variables which are the same across all branches
+    (assert (= (map get-value dj-vars) dj-vars-vals-init))
     (doseq [i (range (count dj-vars))]
       (let [dv (nth child-var-values i)]
         (when (and (not= dv not-seen-in-trie) (not (nil? dv)) (is-variable? (nth dj-vars i)))
@@ -326,7 +328,7 @@
           (trie-diterator-instance (- remains 1) next-node (next variable-order)))))))
 
 (def-iterator
-  :match (disjunct-op (:any-list dj-vars) (:unchecked rexprs))
+  :match (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs))
   (let [contains-wildcard (.contains-wildcard ^PrefixTrie rexprs)
         trie-root (.root ^PrefixTrie rexprs)]
     (when (not= contains-wildcard (- (bit-shift-left 1 (count dj-vars)) 1))
