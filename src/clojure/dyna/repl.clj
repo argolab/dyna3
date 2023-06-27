@@ -263,8 +263,7 @@ print fib(100).
                         (sun.misc.Signal/handle (sun.misc.Signal. "INT")
                                                 (proxy [sun.misc.SignalHandler] []
                                                   (handle [sig]
-                                                    (.interrupt cthread)
-                                                    (println "set interrupt flag"))))
+                                                    (.interrupt cthread))))
                         (vreset! buffer-query-results true)
                         (vreset! query-buffer [])
                         (let [rexpr-result (*repl-evaluate-string* input)]

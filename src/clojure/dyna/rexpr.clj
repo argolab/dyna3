@@ -1655,7 +1655,7 @@
                                           nil)
                                         x)) children))]
     (case @mult
-      0 (make-multiplicity 0)
+      0 (or (first (filter is-empty-rexpr? children)) (make-multiplicity 0))
       1 (if (empty? others)
           (make-multiplicity 1)
           (make-conjunct others))

@@ -3,6 +3,7 @@
   (:require [dyna.base-protocols :refer :all])
   (:require [dyna.rexpr-constructors :refer :all])
   (:require [dyna.context :as context])
+  (:require [dyna.system :refer [should-stop-processing?]])
   (:require [clojure.set :refer [union intersection subset? difference]])
   ;(:require [clojure.tools.macro :refer [macrolet]])
   (:import [dyna DIterable DIterator DIteratorInstance]))
@@ -445,6 +446,7 @@
                  )))
            (if (some #{v} can-bind-variables) ;(contains? can-bind-variables v)
              (doseq [val (iter-run-iterable iter)]
+               (should-stop-processing?)
                (let [dctx (context/make-nested-context-disjunct rexpr)] ;; this should take the context as an argument?
                  (context/bind-context-raw
                   dctx

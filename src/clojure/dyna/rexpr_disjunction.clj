@@ -66,11 +66,9 @@
                          (first (remove nil? (for [[key r] (trie-get-values-collection-no-wildcard rexprs vmap)]
                                                (when (some is-non-empty-rexpr? r) true))))))
   (rewrite-rexpr-children [this remap-function]
-                          (let [ret (make-disjunct-op disjunction-variables
+                          (make-disjunct-op disjunction-variables
                                                       (trie-map-values rexprs nil (fn [trie-path r]
-                                                                                    (remap-function r))))]
-                            (debug-delay-ntimes 3000 (debug-repl "trie rewrite"))
-                            ret))
+                                                                                    (remap-function r)))))
   (remap-variables-func [this remap-function]
                         (???) ;; TODO
                         )
@@ -263,15 +261,13 @@
       (let [dv (nth child-var-values i)]
         (when (and (not= dv not-seen-in-trie) (not (nil? dv)) (is-variable? (nth dj-vars i)))
           (ctx-set-value! outer-context (nth dj-vars i) dv))))
-    (if (= @num-children 0)
-      (make-multiplicity 0) ;; there is nothing in the disjunct
-      (if (= @num-children 1)
-        ;; then there is only a single child, so we can return that
-        (let [[[child-bindings child]] (trie-get-values @ret-children nil)]
+    (case @num-children
+      0 (make-multiplicity 0)
+      1 (let [[[child-bindings child]] (trie-get-values @ret-children nil)]
+          ;; return the child directly as there is only a single child and there is no need for the disjunction
           child)
-        ;; then there are multiple children, so we have to return the entire trie
-        (let [ret (make-disjunct-op dj-vars @ret-children)]
-          ret)))))
+      (let [ret (make-disjunct-op dj-vars @ret-children)]
+        ret))))
 
 
 

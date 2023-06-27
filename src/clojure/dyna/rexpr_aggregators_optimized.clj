@@ -344,7 +344,7 @@
                    (catch UnificationFailure e (make-multiplicity 0)))
            eager-run-iterators *aggregator-op-should-eager-run-iterators*]
        (cond
-         (is-empty-rexpr? nR) (make-multiplicity 0)
+         (is-empty-rexpr? nR) nR ;(make-multiplicity 0)
 
          (and (is-multiplicity? nR) (is-bound-in-context? incoming-variable ctx))
          (let [ret (*aggregator-op-contribute-value* (get-value-in-context incoming-variable ctx) (:mult nR))]

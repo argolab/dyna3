@@ -8,7 +8,8 @@ word(6) = "spoon".
 word(7) = ".".
 
 
-rule("S", "NP", "VP") = 1.
+rule("SD", "NP", "VP") = 1.
+rule("S", "SD", ".") = 1
 rule("NP", "Det", "N") = 1.
 rule("NP", "NP", "PP") = 1.
 rule("VP", "V", "NP") = 1.
@@ -22,6 +23,7 @@ rule("V", "ate") = 1.
 rule("P", "with") = 1.
 rule("Det", "the") = 1.
 rule("Det", "a") = 1.
+rule(".", ".") = 1.
 
 
 length max= I for _=word(I).
@@ -33,7 +35,9 @@ phrase(I,I+1,T) max= rule(T, word(I)).
 
 print "program loaded, going to make query".
 
-phrase(0,2,X)?
+%phrase(0,2,X)?
+
+debug_repl_clojure phrase(0,2,X).
 
 % phrase(0,1,X)?
 
