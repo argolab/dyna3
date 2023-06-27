@@ -108,14 +108,14 @@
                                 ;; need to determine some usable binding
                                 (let [can-bind (first (filter #(some #{nv} %) usable-bindings))
                                       can-bind-iter (binding-order-iter (vec can-bind))]
-                                  (assert (not (nil? can-bind-iter)))
+                                  (dyna-assert (not (nil? can-bind-iter)))
                                   (recur (next bo)
                                          (conj bound nv)
                                          (assoc picked-map can-bind can-bind-iter)))))))
         ]
     ;(debug-repl "used bindings")
     (into {} (for [[k v] picked-bindings]
-               [k (iter-create-iterator v k)]))))
+               [k [(iter-create-iterator v k) (ensure-set (iter-what-variables-bound v))]]))))
 
 (defn- iterator-conjunction-diterator [iterators order]
   ;; iterators is a map where the key is the order of the variables which get bound, and the value is the nested diterator object
@@ -125,19 +125,20 @@
     (iter-run-iterable [this]
       (let [picked-var (first order)
             remains-var (next order)
-            possible-iterators (filter (fn [[k v]] (= (first k) picked-var)) iterators)
-            [picked-it-order picked-iterator] (first possible-iterators) ;; this should select the one that has the lowest cardinality or something....
-            picked-it-order-remains (next picked-it-order)
+            possible-iterators (filter (fn [[k [v can-bind]]] (and (= (first k) picked-var) (can-bind picked-var))) iterators)
+            [_ [picked-iterator _]] (first possible-iterators) ;; this should select the one that has the lowest cardinality or something....
+            ;picked-it-order-remains (next picked-it-order)
+            ;zzz (debug-repl "zzz")
             ret
             ((fn run [iter]
                (let [iter-val (first iter)]
                  (if (nil? iter-val)
                    () ;; then we have reached the end of the sequence, so we just stop
                    (let [iter-var-val (iter-variable-value iter-val)
-                         new-bindings (into {} (map (fn [[k v]]
+                         new-bindings (into {} (map (fn [[k [v can-bind]]]
                                                       (if (= (first k) picked-var)
-                                                        [(next k) (iter-bind-value v iter-var-val)]
-                                                        [k v]))
+                                                        [(next k) [(iter-bind-value v iter-var-val) can-bind]]
+                                                        [k [v can-bind]]))
                                                     iterators))]
                      (if (some (fn [[k v]] (nil? v)) new-bindings)
                        ;; then one of the conjuncts failed to bind, so we just are going to skip this value
@@ -155,10 +156,10 @@
       (iter-run-iterable this))
     (iter-bind-value [this value]
       (let [picked-var (first order)
-            new-bindings (into {} (map (fn [[k v]]
+            new-bindings (into {} (map (fn [[k [v can-bind]]]
                                          (if (= (first k) picked-var)
-                                           [(next k) (iter-bind-value v value)]
-                                           [k v]))
+                                           [(next k) [(iter-bind-value v value) can-bind]]
+                                           [k [v can-bind]]))
                                        iterators))]
         (if (some (fn [[k v]] (nil? v)) new-bindings)
           nil
@@ -190,18 +191,19 @@
       (iter-what-variables-bound [this] (apply union (map iter-what-variables-bound iterators)))
       (iter-variable-binding-order [this] (iterator-conjunction-orders iterators))
       (iter-create-iterator [this which-binding]
-                                        ;(debug-repl "vv")
-        (let [existing (loop [itrs iterators]
+        (let [can-bind (iter-what-variables-bound this)
+              existing (loop [itrs iterators] ;; check if there is one iterator that can just do everything for us already
                          (if (empty? itrs)
                            nil
-                           (if (some #{which-binding} (iter-variable-binding-order (first itrs)))
-                             (iter-create-iterator (first itrs) which-binding)
-                             (recur (next itrs)))))]
+                           (let [i (first itrs)]
+                             (if (and (= can-bind (iter-what-variables-bound i))
+                                      (some #{which-binding} (iter-variable-binding-order i)))
+                               (iter-create-iterator i which-binding)
+                               (recur (next itrs))))))]
           (if-not (nil? existing)
             existing
             (do
-                                        ;(debug-repl "finish writing this")
-                                        ;(???) ;; TODO: finish writing this code
+              ;; we are going to have to run multiple iterators at the same time
               (iterator-conjunction-diterator
                (iterator-conjunction-start-sub-iterators iterators which-binding)
                which-binding))))))))
@@ -375,7 +377,7 @@
 
 
 
-(defn pick-iterator1 [iterators binding-variables]
+#_(defn pick-iterator1 [iterators binding-variables]
   (let [bv (into #{} binding-variables)
         ;; we are going to consider some of the iterators which would be able to bind something
         ;; in the case that there are still values which are still unbound, it should just keep running
@@ -423,7 +425,7 @@
         ))
     ))
 
-(defn pick-iterator1 [ctx iterators binding-variables]
+#_(defn pick-iterator1 [ctx iterators binding-variables]
   (let [[a b] (pick-iterator1 iterators binding-variables)]
     (println "picking iterator" a)
     #_(when (and (not (nil? a)) (> (count iterators) 1))
@@ -444,21 +446,23 @@
           (let [[picked-iter can-bind] (first iterators)
                 can-bind-variables (ensure-set (iter-what-variables-bound picked-iter))
                 binding-order (first (iter-variable-binding-order picked-iter))]
-            (if (or (empty? bv) (every? #(or (can-bind-variables %) (is-constant? %)) binding-order))
+            #_(when (> (count (remove is-constant? binding-order)) (count can-bind-variables))
+              (debug-repl "ff"))
+            (if (every? #(or (can-bind-variables %) (is-constant? %)) binding-order)
               [picked-iter binding-order]
-              (let [siter (make-skip-variables-iterator picked-iter (difference bv can-bind-variables))]
+              (let [siter (make-skip-variables-iterator picked-iter (difference (set binding-order) can-bind-variables))]
                 [siter (first (iter-variable-binding-order siter))])))
 
           :else
           ;; then there are multiple iterators that we can consider, so we are going to ensure that all of the variables that we can bind do get bound by smething
           (let [;can-bind (apply union (map second iterators))
-                conj-iter (make-conjunction-iterator (map first iterators))
-                can-bind (iter-what-variables-bound conj-iter)
-                orders (iter-variable-binding-order conj-iter)
+                picked-iter (make-conjunction-iterator (map first iterators))
+                can-bind-variables (ensure-set (iter-what-variables-bound picked-iter))
+                orders (iter-variable-binding-order picked-iter)
                 binding-order (first orders)]
-            (if (or (empty? bv) (every? #(or (can-bind %) (is-constant? %)) binding-order))
-              [conj-iter binding-order]
-              (let [siter (make-skip-variables-iterator conj-iter (difference bv can-bind))]
+            (if (every? #(or (can-bind-variables %) (is-constant? %)) binding-order)
+              [picked-iter binding-order]
+              (let [siter (make-skip-variables-iterator picked-iter (difference (set binding-order) can-bind-variables))]
                 [siter (first (iter-variable-binding-order siter))]))))))
 
 ;; TODO: can-bind-variables can be removed now I think..

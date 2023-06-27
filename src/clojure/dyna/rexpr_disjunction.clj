@@ -335,10 +335,13 @@
       ;; then there exists at least one variable which does not contain a whild card, so it could be iterated
       #{(reify DIterable
           (iter-what-variables-bound [this]
-            (into #{} (for [idx (range (count dj-vars))
-                            :when (and (= 0 (bit-and contains-wildcard (bit-shift-left 1 idx)))
-                                       (is-variable? (nth dj-vars idx)))]
-                        (nth dj-vars idx))))
+            (let [ret (into #{} (for [idx (range (count dj-vars))
+                                      :when (and (= 0 (bit-and contains-wildcard (bit-shift-left 1 idx)))
+                                                 (is-variable? (nth dj-vars idx)))]
+                                  (nth dj-vars idx)))]
+              #_(when (and (not (empty? ret)) (not= 0 (.contains-wildcard rexprs)))
+                (debug-repl "trie iter"))
+              ret))
           (iter-variable-binding-order [this] [dj-vars])
           (iter-create-iterator [this which-binding]
             (assert (.contains (iter-variable-binding-order this) which-binding))
