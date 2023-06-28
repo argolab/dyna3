@@ -103,6 +103,7 @@ print fib(100).
          ctx
          (let [iters (find-iterators rexpr)]
            (run-iterator
+            :bind-all true
             :iterators iters
             :rexpr-in rexpr
             :rexpr-result rexpr-out

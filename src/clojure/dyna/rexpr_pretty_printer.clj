@@ -30,7 +30,7 @@
             \ufff0 (when (>= @current-line-length target-width)
                      (.append out "\n")
                      (.append out (apply str (repeat (first @indent-stack) " ")))
-                     (vreset! current-line-length (first indent-stack)))
+                     (vreset! current-line-length (first @indent-stack)))
             \ufff1 (vswap! indent-stack #(cons @current-line-length %))
             \ufff2 (vswap! indent-stack rest)
             (do

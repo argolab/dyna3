@@ -394,7 +394,7 @@
           (assert (instance? ClojureUnorderedVector n))
           (do
             (assert (or (= 1 (bit-and 1 wild)) (not (contains? n nil))))
-            (assert (or (nil? n) (instance? ClojureHashMap n)))
+            (dyna-assert (or (nil? n) (instance? ClojureHashMap n)))
             (doseq [v (vals n)]
               (rec (- d 1) v (bit-shift-right wild 1))))))
       arity root wildcard)

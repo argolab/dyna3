@@ -32,12 +32,13 @@
                                               (into #{incoming} projected))))
   (remap-variables [this variable-map]
                    ;; this is going to have to perform remapping of the body
-                   (dyna-assert (not (some (into #{incoming} projected) (keys variable-map))))
-                   (if (empty? variable-map)
-                     this
-                     (make-aggregator-op-inner incoming projected
-                                               (remap-variables body
-                                                                (apply dissoc variable-map incoming projected)))))
+                   ;(dyna-assert (not (some (into #{incoming} projected) (keys variable-map))))
+                   (let [variable-map (apply dissoc variable-map incoming projected)]
+                     (if (empty? variable-map)
+                       this
+                       (make-aggregator-op-inner incoming projected
+                                                 (remap-variables body
+                                                                  (apply dissoc variable-map incoming projected))))))
 
   (remap-variables-handle-hidden [this variable-map]
                                  (let [new-hidden-names (into {} (for [v (if (is-variable? incoming)
@@ -237,7 +238,7 @@
                         :let [[r wildcard] (convert-to-trie-rexprs (- cnt 1) v)]
                         :when (not (empty? r))]
                     (do (vswap! contains-wildcard bit-or wildcard)
-                        [k v])))]
+                        [k r])))]
       [n (bit-or (bit-shift-left @contains-wildcard 1) (if (contains? n nil) 1 0))])))
 
 (def-rewrite
@@ -386,7 +387,10 @@
                                                      :when (and (not (is-constant? v)) (is-bound? v))]
                                                  [v (make-constant (get-value v))]))
                         new-projected (vec (filter #(not (is-bound? %)) projected-vars))
-                        new-body (remap-variables inner-r remapping-map)
+                        zzz (assert (subset? (keys remapping-map) (exposed-variables inner-r)))
+                        new-body
+                        (debug-binding [*current-simplify-stack* (conj *current-simplify-stack* inner-r)]
+                                       (remap-variables inner-r remapping-map))
                         other-constraints (*aggregator-op-additional-constraints* new-incoming)
                         ;; zzz (when (and *aggregator-op-should-eager-run-iterators* (not= parent-is-bound (map is-bound? exposed)))
                         ;;       (debug-repl "agg egg run"))

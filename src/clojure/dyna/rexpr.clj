@@ -735,7 +735,8 @@
   (expose-globally make-multiplicity))
 
 (defmethod rexpr-printer multiplicity-rexpr [m]
-  (str (:mult m)))
+  ;; put an overline on all of the numbers returned for the multiplicity
+  (str (join "\u0305" (char-array (str (:mult m)))) "\u0305"))
 
 (defn fixpoint-functional-dependencies-map [m]
   (loop [m m]
@@ -869,8 +870,10 @@
                                  (let [new-hidden-name (make-variable (gensym 'proj-hidden))]
                                    (make-proj new-hidden-name (remap-variables-handle-hidden body (assoc variable-map var new-hidden-name)))))
   (remap-variables [this variable-map]
-                   #_(dyna-debug (when-not (not (some #{var} (vals variable-map)))
-                                 (debug-repl "bad remap")))
+                   (dyna-debug
+                    (when (or (some #{var} (keys variable-map))
+                              (some #{var} (vals variable-map)))
+                      (debug-repl "bad remap")))
 
                    (make-proj var (remap-variables body variable-map)))
 
@@ -965,9 +968,8 @@
            ")")
       (do
         ;; trying to print a method which as a non-standard variable mapping signature
-        (???))
-      ))
-  (???))
+        (str r))))
+  (str r))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -1364,7 +1366,7 @@
     (system/should-stop-processing?)
     (let [nri (loop [cr cri]
                 (let [nr (debug-binding [*current-top-level-rexpr* cr]
-                                        (simplify cr))]
+                                        (simplify-fast cr))]
                   (if (not= cr nr)
                     (recur nr)
                     nr)))
