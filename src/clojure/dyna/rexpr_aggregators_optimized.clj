@@ -362,7 +362,7 @@
             :bind-all true
             :rexpr-in nR
             :rexpr-result inner-r
-            :simplify simplify
+            :simplify identity ;simplify
                                         ;:required [incoming-variable] ;; we still want to loop even if we can't directly assign this value
             (do
               ;; if this is not a multiplicity, then this expression has something that can not be handled
@@ -409,7 +409,8 @@
                      ret (make-disjunct-op exposed
                                            (trie/make-PrefixTrie (count exposed) wildcard root))]
                                         ;(debug-repl "inner accum")
-                 (when (not= (exposed-variables ret) (exposed-variables rexpr))
+                 (when (not= (ensure-set (union (filter is-bound? (exposed-variables rexpr)) (exposed-variables ret)))
+                             (ensure-set (exposed-variables rexpr)))
                    (debug-repl "diff exposed"))
                  ret))
              (if (empty? @result-rexprs)

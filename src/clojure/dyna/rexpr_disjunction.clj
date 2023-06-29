@@ -188,9 +188,13 @@
                                   ;; save the resulting R-expr in the resulting trie
                                   (if (is-disjunct-op? new-child-rexpr)
                                     (let []
+                                      (println dj-key)
+                                      (println dj-vars)
+                                      (println (:disjunction-variables new-child-rexpr))
+                                      (println (.contains-wildcard ^PrefixTrie (:rexprs new-child-rexpr)))
                                       ;; this might never happen if it has disjunct-run-inner-iterator set to true, it would have already expanded
                                       ;; the trie using that
-                                      (debug-repl "should combine tries into the current trie")
+                                      (debug-repl "should combine tries into the current trie" false)
                                       (???))
                                     (let [added-new (volatile! false)]
                                       #_(when-not (empty? (filter is-unify? (conjunct-iterator new-child-rexpr)))
@@ -251,9 +255,9 @@
                       :bind-all true
                       :rexpr-in new-child-rexpr
                       :rexpr-result child-rexpr-itered
-                      :simplify simplify
+                      :simplify identity ; #(binding [*disjunct-run-inner-iterators* false] (simplify-fast %))
                       (let []
-                        (save-result-in-trie child-rexpr-itered
+                        (save-result-in-trie (simplify child-rexpr-itered)
                                              (context/get-context) ;; we have to use get-context here as the iterator might have rebound the context
                                              ))))
                    :else
