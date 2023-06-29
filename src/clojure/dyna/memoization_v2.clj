@@ -169,7 +169,6 @@
             (let [vm (into {} (for [[a v] (zipseq argument-variables variables)
                                     :when (not= a v)]
                                 [a v]))]
-              (debug-repl "memo fallthrough")
               (remap-variables orig-rexpr vm))
 
             (= control-setting :defer)
@@ -574,7 +573,7 @@
         term-name (:name (:term-name info))]
     (fn [signature] ;; the signature should be an array of argument bindings.  The last value will be the result of
       (let [ctx (context/make-empty-context memo-controller-rexpr)
-            res (binding [*dollar-free-matches-ground-values* true]
+            res (binding [];a[*dollar-free-matches-ground-values* true] ;; this essentially tunrs $free into a no-op, which allows for foo(1,2,3) and foo(FREE,FREE,FREE) to both be matched by $free.  The reason
                   (context/bind-context-raw ctx
                                             (set-value! (make-variable 'Input) (DynaTerm. term-name (vec (map #(if (nil? %) meta-free-dummy-free-value %)
                                                                                                               (drop-last signature)))))

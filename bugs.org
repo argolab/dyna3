@@ -1,21 +1,28 @@
 * bugs
-1. make-memoization-controller-function is supposed to generate efficient
-   memoization controller functions which do not have to call into R-exprs every
-   time to evaluate the policy.  This seems to currently be buggy.
-2. run-iterator is calling simplify after it binds each variable.  This is
+1. run-iterator is calling simplify after it binds each variable.  This is
    causing the R-exprs to perform a lot of rewriting, hence be slow.  This needs
    a "fast fail" flag which will attempt to just to simplification operations
    which can quickly get done without causing too much rewriting.  Even if we
    keep going with an R-expr which is equivalent to 0 (without known) it will
    still be correct, but we will just waste time on additional inner loops
-3. disjunct-op needs to allow for taking inner disjuncts which are returned and
+2. disjunct-op needs to allow for taking inner disjuncts which are returned and
    merging it into its internal representation.
    - this issue can be provoked by setting the simplify method of run-iterator
      to the identity (disabling simplify during each step of the iteration)
-4. ~$free~ when there is some value used in ~$memo~, the value will be passed.
+
+** bugs fixed
+1. Iterator when a variable is already bound to a constant, need to skip ahread in the iterator sequence
+2. ~$free~ when there is some value used in ~$memo~, the value will be passed.
    This should really just behave more like a no-op in this case.
 
 
+** bugs deferred
+1. make-memoization-controller-function is supposed to generate efficient
+   memoization controller functions which do not have to call into R-exprs every
+   time to evaluate the policy.  This seems to currently be buggy.
+   - going to just use the R-expr representation every time.  Will eventually
+     tie in the JIT such that it should get a good generated version of the
+     code, so it hopefully will not be too bad.
 
 * enhancements
 1. disjunct-op should know information about what is being stored.  There are

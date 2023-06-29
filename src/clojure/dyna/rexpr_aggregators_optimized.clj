@@ -362,7 +362,7 @@
             :bind-all true
             :rexpr-in nR
             :rexpr-result inner-r
-            :simplify simplify
+            :simplify identity ;simplify
                                         ;:required [incoming-variable] ;; we still want to loop even if we can't directly assign this value
             (do
               ;; if this is not a multiplicity, then this expression has something that can not be handled

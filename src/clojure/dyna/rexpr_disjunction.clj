@@ -189,24 +189,18 @@
                                   ;; save the resulting R-expr in the resulting trie
                                   (if (is-disjunct-op? new-child-rexpr)
                                     (let [child-trie ^PrefixTrie (:rexprs new-child-rexpr)
-                                          child-vars (:disjunction-variables new-child-rexpr)]
-                                      (println dj-key)
-                                      (println dj-vars)
-                                      (println (:disjunction-variables new-child-rexpr))
-                                      (println (.contains-wildcard ^PrefixTrie (:rexprs new-child-rexpr)))
-                                      ;; this might never happen if it has disjunct-run-inner-iterator set to true, it would have already expanded
-                                      ;; the trie using that
-                                      (debug-repl "should combine tries into the current trie" false)
-                                      (???))
+                                          child-vars (:disjunction-variables new-child-rexpr)
+                                          new-order (vec (map (zipmap child-vars (range)) dj-vars))
+                                          t-reordered (trie-reorder-keys child-trie new-order)]
+                                      (vswap! ret-children trie-merge t-reordered)
+                                      (vswap! num-children #(+ 2 %)) ;; there are at least 2 children getting added, which should ensure that we maintain the trie structure
+                                      )
                                     (let [added-new (volatile! false)]
-                                      #_(when-not (empty? (filter is-unify? (conjunct-iterator new-child-rexpr)))
-                                        (debug-repl "contains unify2"))
                                       (vswap! ret-children trie-update-collection dj-key
                                               (fn [col]
                                                 (let [[made-new ret] (merge-rexpr-disjunct-list col new-child-rexpr)]
                                                   (vreset! added-new made-new)
                                                   ret)))
-                                        ;(debug-repl "ddj")
                                       (if @added-new
                                         (vswap! num-children inc)))))))
         ]
@@ -257,7 +251,7 @@
                       :bind-all true
                       :rexpr-in new-child-rexpr
                       :rexpr-result child-rexpr-itered
-                      :simplify #(binding [*disjunct-run-inner-iterators* false] (simplify-fast %))
+                      :simplify identity ;#(binding [*disjunct-run-inner-iterators* false] (simplify-fast %))
                       (let []
                         (save-result-in-trie (simplify child-rexpr-itered)
                                              (context/get-context) ;; we have to use get-context here as the iterator might have rebound the context
