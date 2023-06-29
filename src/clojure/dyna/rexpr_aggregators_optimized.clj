@@ -387,7 +387,7 @@
                                                      :when (and (not (is-constant? v)) (is-bound? v))]
                                                  [v (make-constant (get-value v))]))
                         new-projected (vec (filter #(not (is-bound? %)) projected-vars))
-                        zzz (assert (subset? (keys remapping-map) (exposed-variables inner-r)))
+                        ;zzz (dyna-assert (subset? (keys remapping-map) (exposed-variables inner-r)))
                         new-body
                         (debug-binding [*current-simplify-stack* (conj *current-simplify-stack* inner-r)]
                                        (remap-variables inner-r remapping-map))

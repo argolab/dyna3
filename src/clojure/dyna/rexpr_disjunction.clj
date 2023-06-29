@@ -206,57 +206,59 @@
         ]
     (doseq [[var-binding child] (trie-get-values rexprs var-map)]
       ;; this should loop through the children
-      (let [child-context (context/make-nested-context-disjunct child)]
-        (doseq [i (range (count dj-vars))]
-          ;; this should create bindings for the variables in the context when they are already known
-          (let [djv (nth var-binding i)
-                dv (nth dj-vars i)]
-            (when (and (not (nil? djv)) (is-variable? dv))
-              ;(dyna-assert (not (is-bound-in-context? dv child-context)))
-              (try (ctx-set-value! child-context dv djv)
-                   (catch UnificationFailure e
-                     (do (debug-repl "bad") ;; in this case, we should stop processing, but this is not going to have set the value somewhere yet.  This is going to need to figure out what the issue is and skip it
-                         (???)))))))
-        (context/bind-context-raw
-         child-context
-         (let [new-child-rexpr (try (simplify child)
-                                    (catch UnificationFailure e (make-multiplicity 0)))]
-           ;; if the new-child-rexpr is a disjunct, then we are just going to combine that into the thing that we are processing
-           (cond (is-disjunct? new-child-rexpr)
-                 (let [args (:args new-child-rexpr)
-                       ctx (context/get-context)]
-                   (doseq [a args]
-                     (save-result-in-trie a ctx)))
+      (try
+        (let [child-context (context/make-nested-context-disjunct child)]
+          (doseq [i (range (count dj-vars))]
+            ;; this should create bindings for the variables in the context when they are already known
+            (let [djv (nth var-binding i)
+                  dv (nth dj-vars i)]
+              (when (and (not (nil? djv)) (is-variable? dv))
+                                        ;(dyna-assert (not (is-bound-in-context? dv child-context)))
+                (ctx-set-value! child-context dv djv)
+                #_(try
+                     (catch UnificationFailure e
+                       (do (debug-repl "bad") ;; in this case, we should stop processing, but this is not going to have set the value somewhere yet.  This is going to need to figure out what the issue is and skip it
+                           (???)))))))
+          (context/bind-context-raw
+           child-context
+           (let [new-child-rexpr (simplify child)]
+             ;; if the new-child-rexpr is a disjunct, then we are just going to combine that into the thing that we are processing
+             (cond (is-disjunct? new-child-rexpr)
+                   (let [args (:args new-child-rexpr)
+                         ctx (context/get-context)]
+                     (doseq [a args]
+                       (save-result-in-trie a ctx)))
 
-                 (is-disjunct-op? new-child-rexpr)
-                 (let [child-var-order (:disjunction-variables new-child-rexpr)
-                       child-prefix-trie (:rexprs new-child-rexpr)]
-                   (doseq [[key djc-rexpr] (trie-get-values child-prefix-trie nil)]
-                     (let [val-map (zipmap child-var-order key)
-                           new-keys (map #(get val-map %) dj-vars)
-                           added-new (volatile! false)]
-                       (vswap! ret-children trie-update-collection new-keys
-                               (fn [col]
-                                 (let [[made-new ret] (merge-rexpr-disjunct-list col djc-rexpr)]
-                                   (vreset! added-new made-new)
-                                   ret)))
-                       (if @added-new (vswap! num-children inc)))))
+                   (is-disjunct-op? new-child-rexpr)
+                   (let [child-var-order (:disjunction-variables new-child-rexpr)
+                         child-prefix-trie (:rexprs new-child-rexpr)]
+                     (doseq [[key djc-rexpr] (trie-get-values child-prefix-trie nil)]
+                       (let [val-map (zipmap child-var-order key)
+                             new-keys (map #(get val-map %) dj-vars)
+                             added-new (volatile! false)]
+                         (vswap! ret-children trie-update-collection new-keys
+                                 (fn [col]
+                                   (let [[made-new ret] (merge-rexpr-disjunct-list col djc-rexpr)]
+                                     (vreset! added-new made-new)
+                                     ret)))
+                         (if @added-new (vswap! num-children inc)))))
 
-                 ;; if this is a more complex expression, then we will try to run iterators on the inner expression to allow it to become simpler and split into smaller expressions in the trie
-                 (and *disjunct-run-inner-iterators* (not (is-multiplicity? new-child-rexpr)))
-                 (let [iters (find-iterators new-child-rexpr)]
-                   (run-iterator
-                    :iterators iters
-                    :bind-all true
-                    :rexpr-in new-child-rexpr
-                    :rexpr-result child-rexpr-itered
-                    :simplify simplify
-                    (let []
-                      (save-result-in-trie child-rexpr-itered
-                                           (context/get-context) ;; we have to use get-context here as the iterator might have rebound the context
-                                           ))))
-                 :else
-                 (save-result-in-trie new-child-rexpr child-context))))))
+                   ;; if this is a more complex expression, then we will try to run iterators on the inner expression to allow it to become simpler and split into smaller expressions in the trie
+                   (and *disjunct-run-inner-iterators* (not (is-multiplicity? new-child-rexpr)))
+                   (let [iters (find-iterators new-child-rexpr)]
+                     (run-iterator
+                      :iterators iters
+                      :bind-all true
+                      :rexpr-in new-child-rexpr
+                      :rexpr-result child-rexpr-itered
+                      :simplify simplify
+                      (let []
+                        (save-result-in-trie child-rexpr-itered
+                                             (context/get-context) ;; we have to use get-context here as the iterator might have rebound the context
+                                             ))))
+                   :else
+                   (save-result-in-trie new-child-rexpr child-context)))))
+        (catch UnificationFailure err nil)))
     ;; set the values of variables which are the same across all branches
     (assert (= (map get-value dj-vars) dj-vars-vals-init))
     (doseq [i (range (count dj-vars))]
