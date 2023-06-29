@@ -10,7 +10,7 @@
   (:require [dyna.user-defined-terms :refer [update-user-term! add-to-user-term! user-rexpr-combined-no-memo get-user-term]])
   (:require [dyna.assumptions :refer :all])
   (:require [dyna.context :as context])
-  (:require [dyna.rexpr-builtins :refer [meta-free-dummy-free-value]])
+  (:require [dyna.rexpr-builtins :refer [meta-free-dummy-free-value *dollar-free-matches-ground-values*]])
   (:require [dyna.prefix-trie :refer :all])
   (:require [dyna.rexpr-aggregators-optimized :refer [*aggregator-op-contribute-value*
                                                       *aggregator-op-additional-constraints*
@@ -166,7 +166,10 @@
           control-setting (try (memo-controller control-arg)
                                (catch Exception err :defer))]
       (cond (= control-setting :fallthrough)
-            (let [vm (zipmap argument-variables variables)]
+            (let [vm (into {} (for [[a v] (zipseq argument-variables variables)
+                                    :when (not= a v)]
+                                [a v]))]
+              (debug-repl "memo fallthrough")
               (remap-variables orig-rexpr vm))
 
             (= control-setting :defer)
@@ -571,10 +574,11 @@
         term-name (:name (:term-name info))]
     (fn [signature] ;; the signature should be an array of argument bindings.  The last value will be the result of
       (let [ctx (context/make-empty-context memo-controller-rexpr)
-            res (context/bind-context-raw ctx
-                                          (set-value! (make-variable 'Input) (DynaTerm. term-name (vec (map #(if (nil? %) meta-free-dummy-free-value %)
-                                                                                                            (drop-last signature)))))
-                                          (simplify-fully-no-guess memo-controller-rexpr))]
+            res (binding [*dollar-free-matches-ground-values* true]
+                  (context/bind-context-raw ctx
+                                            (set-value! (make-variable 'Input) (DynaTerm. term-name (vec (map #(if (nil? %) meta-free-dummy-free-value %)
+                                                                                                              (drop-last signature)))))
+                                            (simplify-fully-no-guess memo-controller-rexpr)))]
         (if (= (make-multiplicity 1) res)
           (let [v (ctx-get-value ctx (make-variable 'Result))]
             (if (= "none" v)
@@ -598,7 +602,9 @@
 
 (defn- make-memoization-controller-function [info]
   ;; this will return a function which represents $memo.  If the representation of the function is "sufficently simple"
-  (cond (and (= 1 (count (:memoization-modes info)))
+  ;(debug-repl "make controller")
+  (make-memoization-controller-function-rexpr-backed info)
+  #_(cond (and (= 1 (count (:memoization-modes info)))
              (= 1 (count (:memoization-argument-modes info)))
              (not (:memoization-has-non-trivial-constraint info)))
         (let [f `(do

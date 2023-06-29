@@ -161,10 +161,12 @@
 (defn- iterator-conjunction-diterator [iterators order already-bound]
   ;; iterators is a map where the key is the order of the variables which get bound, and the value is the nested diterator object
   ;; when running through a conjunction of multiple iterators, we can bind all of the iterators which match for a given variable
-  (let [iterators (for [[k [iter can-bind]] iterators
-                        :when (not (empty? k))]
-                    (loop [k k
-                           iter iter]
+  (let [iterators (for [[k1 [iter1 can-bind]] iterators
+                        :when (not (empty? k1))]
+                    (loop [k k1
+                           iter iter1]
+                      (when (nil? iter)
+                        (debug-repl))
                       (let [f (first k)]
                         (cond (is-constant? f) (recur (rest k) (iter-bind-value iter (get-value f)))
                               (contains? already-bound f) (recur (rest k) (iter-bind-value iter (already-bound f)))
@@ -191,18 +193,29 @@
                        (if (nil? iter-val)
                          () ;; then we have reached the end of the sequence, so we just stop
                          (let [iter-var-val (iter-variable-value iter-val)
-                               new-bindings (into {} (map (fn [[k [v can-bind]]]
-                                                            (if (= (first k) picked-var)
-                                                              [(next k) [(iter-bind-value v iter-var-val) can-bind]]
-                                                              [k [v can-bind]]))
-                                                          iterators))]
+                               bound (assoc already-bound picked-var iter-var-val)
+                               new-bindings (into {} (for [[k1 [iter1 can-bind]] iterators]
+                                                       (loop [k k1
+                                                              iter iter1]
+                                                         (if (nil? iter)
+                                                           [k [iter can-bind]]
+                                                           (let [f (first k)]
+                                                             (cond (is-constant? f) (recur (rest k) (iter-bind-value iter (get-value f)))
+                                                                   (contains? bound f) (recur (rest k) (iter-bind-value iter (bound f)))
+                                                                   :else [k [iter can-bind]]))))))
+                               ;; new-bindings (into {} (map (fn [[k [v can-bind]]]
+                               ;;                              (if (= (first k) picked-var)
+                               ;;                                [(next k) [(iter-bind-value v iter-var-val) can-bind]]
+                               ;;                                [k [v can-bind]]))
+                               ;;                            iterators))
+                               ]
                            (if (some (fn [[k [v _]]] (nil? v)) new-bindings)
                              ;; then one of the conjuncts failed to bind, so we just are going to skip this value
                              (recur (next iter))
                              ;; the binding was successful, so we will return a continuation
                              (cons (reify DIteratorInstance
                                      (iter-variable-value [this] iter-var-val)
-                                     (iter-continuation [this] (iterator-conjunction-diterator new-bindings remains-var (assoc already-bound picked-var iter-var-val))))
+                                     (iter-continuation [this] (iterator-conjunction-diterator new-bindings remains-var bound)))
                                    (lazy-seq (run (next iter)))))))))
                    (iter-run-iterable picked-iterator))]
                                         ;(debug-repl "g2")
@@ -227,17 +240,22 @@
                        (if (nil? iter-val)
                          ()
                          (let [iter-var-val (iter-variable-value iter-val)
-                               new-bindings (into {} (map (fn [[k [v can-bind]]]
-                                                            (if (= (first k) picked-var)
-                                                              [(next k) [(iter-bind-value v iter-var-val) can-bind]]
-                                                              [k [v can-bind]]))
-                                                          iterators))]
+                               bound (assoc already-bound picked-var iter-var-val)
+                               new-bindings (into {} (for [[k1 [iter1 can-bind]] iterators]
+                                                       (loop [k k1
+                                                              iter iter1]
+                                                         (if (nil? iter)
+                                                           [k [iter can-bind]]
+                                                           (let [f (first k)]
+                                                             (cond (is-constant? f) (recur (rest k) (iter-bind-value iter (get-value f)))
+                                                                   (contains? bound f) (recur (rest k) (iter-bind-value iter (bound f)))
+                                                                   :else [k [iter can-bind]]))))))]
                            (if (some (fn [[k [v _]]] (nil? v)) new-bindings)
                              (recur (next iter)) ;; one of the conjuncts rejected the value
                              (cons (reify DIteratorInstance
                                      (iter-variable-value [this] iter-var-val)
                                      (iter-continuation [this]
-                                       (iterator-conjunction-diterator new-bindings remains-var (assoc already-bound picked-var iter-var-val))))
+                                       (iterator-conjunction-diterator new-bindings remains-var bound)))
                                    (lazy-seq (run (next iter)))))))))
                    (iter-run-iterable-unconsolidated picked-iterator))
                   ]
@@ -249,14 +267,19 @@
             (if (= value (get-value picked-var))
               (iterator-conjunction-diterator iterators (next order) (assoc already-bound picked-var value))
               nil)
-            (let [new-bindings (into {} (map (fn [[k [v can-bind]]]
-                                               (if (= (first k) picked-var)
-                                                 [(next k) [(iter-bind-value v value) can-bind]]
-                                                 [k [v can-bind]]))
-                                             iterators))]
+            (let [bound (assoc already-bound picked-var value)
+                  new-bindings (into {} (for [[k1 [iter1 can-bind]] iterators]
+                                          (loop [k k1
+                                                 iter iter1]
+                                            (if (nil? iter)
+                                              [k [iter can-bind]]
+                                              (let [f (first k)]
+                                                (cond (is-constant? f) (recur (rest k) (iter-bind-value iter (get-value f)))
+                                                      (contains? bound f) (recur (rest k) (iter-bind-value iter (bound f)))
+                                                      :else [k [iter can-bind]]))))))]
               (if (some (fn [[k [v _]]] (nil? v)) new-bindings)
                 nil
-                (iterator-conjunction-diterator new-bindings (next order) (assoc already-bound picked-var value))))))))))
+                (iterator-conjunction-diterator new-bindings (next order) )))))))))
 
 (defn- iterator-intersect-orders [iterator-orders-set]
   (if (<= (count iterator-orders-set) 1)

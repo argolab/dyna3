@@ -92,6 +92,7 @@
                                                        (dyna-debug (subset?  (exposed-variables ret) (into #{} new-vars)))
                                                        (when-not (is-empty-rexpr? ret)
                                                          ret))))]
+              (println "remap variables new trie" variable-renaming-map)
               (make-disjunct-op new-vars new-trie))))))))
 
 
@@ -187,7 +188,8 @@
                                         (assoc! child-var-values i (if (= cv not-seen-in-trie) vv nil)))))
                                   ;; save the resulting R-expr in the resulting trie
                                   (if (is-disjunct-op? new-child-rexpr)
-                                    (let []
+                                    (let [child-trie ^PrefixTrie (:rexprs new-child-rexpr)
+                                          child-vars (:disjunction-variables new-child-rexpr)]
                                       (println dj-key)
                                       (println dj-vars)
                                       (println (:disjunction-variables new-child-rexpr))
@@ -255,7 +257,7 @@
                       :bind-all true
                       :rexpr-in new-child-rexpr
                       :rexpr-result child-rexpr-itered
-                      :simplify identity ; #(binding [*disjunct-run-inner-iterators* false] (simplify-fast %))
+                      :simplify #(binding [*disjunct-run-inner-iterators* false] (simplify-fast %))
                       (let []
                         (save-result-in-trie (simplify child-rexpr-itered)
                                              (context/get-context) ;; we have to use get-context here as the iterator might have rebound the context
@@ -275,6 +277,7 @@
           ;; return the child directly as there is only a single child and there is no need for the disjunction
           child)
       (let [ret (make-disjunct-op dj-vars @ret-children)]
+        (println "making new trie with " @num-children)
         ret))))
 
 

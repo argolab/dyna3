@@ -1,0 +1,39 @@
+* bugs
+1. make-memoization-controller-function is supposed to generate efficient
+   memoization controller functions which do not have to call into R-exprs every
+   time to evaluate the policy.  This seems to currently be buggy.
+2. run-iterator is calling simplify after it binds each variable.  This is
+   causing the R-exprs to perform a lot of rewriting, hence be slow.  This needs
+   a "fast fail" flag which will attempt to just to simplification operations
+   which can quickly get done without causing too much rewriting.  Even if we
+   keep going with an R-expr which is equivalent to 0 (without known) it will
+   still be correct, but we will just waste time on additional inner loops
+3. disjunct-op needs to allow for taking inner disjuncts which are returned and
+   merging it into its internal representation.
+   - this issue can be provoked by setting the simplify method of run-iterator
+     to the identity (disabling simplify during each step of the iteration)
+4. ~$free~ when there is some value used in ~$memo~, the value will be passed.
+   This should really just behave more like a no-op in this case.
+
+
+
+* enhancements
+1. disjunct-op should know information about what is being stored.  There are
+   currently a lot of calls to perform rewriting/simplification, and if we knew
+   that there was nothing but multiplicies inside of the trie (meaning it only
+   contains ground values), then it would be able to short cut a lot of the operations.
+2. disjunct-op is being called with simplify many times where the variable
+   bindings are unlikely to change that much.  We should save the current
+   bindings into the variable-slots and then will avoid redoing a simplification
+   of the trie in the case that there are no additional variables which are
+   ground.
+
+
+
+* further out enhancements
+1. JIT compiler
+   - integrate into the looping such that it will use it to perform the
+     simplification for a given value of an expression.
+
+2. memoization point wise update when a user-definition is changed.  This needs
+   to not rebuild the memo tables from scratch, as that is going to be slow.
