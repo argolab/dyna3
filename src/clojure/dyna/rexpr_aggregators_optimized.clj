@@ -351,7 +351,6 @@
          (let [ret (*aggregator-op-contribute-value* (get-value-in-context incoming-variable ctx) (:mult nR))]
            ret)
 
-
          (or (every? is-bound? exposed) eager-run-iterators)
          (let [iterators (find-iterators nR)
                accumulator (volatile! nil)
@@ -362,7 +361,8 @@
             :bind-all true
             :rexpr-in nR
             :rexpr-result inner-r
-            :simplify identity ;simplify
+            :simplify simplify
+
                                         ;:required [incoming-variable] ;; we still want to loop even if we can't directly assign this value
             (do
               ;; if this is not a multiplicity, then this expression has something that can not be handled

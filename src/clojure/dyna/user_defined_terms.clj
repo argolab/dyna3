@@ -255,7 +255,8 @@
 
 
 (def-rewrite
-  :match (user-call (:unchecked name) (:unchecked var-map) (#(< % @system/user-recursion-limit) call-depth) (:unchecked parent-call-arguments))
+  :match {:rexpr (user-call (:unchecked name) (:unchecked var-map) (#(< % @system/user-recursion-limit) call-depth) (:unchecked parent-call-arguments))
+          :check (not *simplify-looking-for-fast-fail-only*)}
   (let [ut (get-user-term name)]
     #_(when (nil? ut)
       (debug-repl "nil user term")

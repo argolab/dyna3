@@ -1315,6 +1315,7 @@
     false))
 
 (def ^{:dynamic true} *simplify-with-inferences* false)
+(def ^{:dynamic true} *simplify-looking-for-fast-fail-only* false) ;; meaning that a rewrite which might take a lot of time should be skipped
 
 (defn simplify-fast [rexpr]
   (debug-binding

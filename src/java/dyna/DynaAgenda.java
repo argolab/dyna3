@@ -73,6 +73,10 @@ public class DynaAgenda {
                   if(work == null) break;
                   queued_work.remove(work);
               }
+              // the main idea is that the work could tell us if it is safe to run concurrently.  The memoization values should be able to do that
+              // without too much trouble as long as it checks that the relevant values are not modified inbetween the start and finishing of processing
+              // other work (such as making new memo tables or other management tasks) would just run single threaded as they would be required to grab
+              // the write lock which would block until everything else is taken out
               Lock lock = work.can_run_concurrently() ? concurrent_work_lock.readLock() : concurrent_work_lock.writeLock();
               lock.lock();
               try {

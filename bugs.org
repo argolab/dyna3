@@ -5,15 +5,15 @@
    which can quickly get done without causing too much rewriting.  Even if we
    keep going with an R-expr which is equivalent to 0 (without known) it will
    still be correct, but we will just waste time on additional inner loops
-2. disjunct-op needs to allow for taking inner disjuncts which are returned and
-   merging it into its internal representation.
-   - this issue can be provoked by setting the simplify method of run-iterator
-     to the identity (disabling simplify during each step of the iteration)
 
 ** bugs fixed
 1. Iterator when a variable is already bound to a constant, need to skip ahread in the iterator sequence
 2. ~$free~ when there is some value used in ~$memo~, the value will be passed.
    This should really just behave more like a no-op in this case.
+2. disjunct-op needs to allow for taking inner disjuncts which are returned and
+   merging it into its internal representation.
+   - this issue can be provoked by setting the simplify method of run-iterator
+     to the identity (disabling simplify during each step of the iteration)
 
 
 ** bugs deferred

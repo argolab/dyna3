@@ -251,7 +251,7 @@
                       :bind-all true
                       :rexpr-in new-child-rexpr
                       :rexpr-result child-rexpr-itered
-                      :simplify identity ;#(binding [*disjunct-run-inner-iterators* false] (simplify-fast %))
+                      :simplify #(binding [*disjunct-run-inner-iterators* false] (simplify-fast %))
                       (let []
                         (save-result-in-trie (simplify child-rexpr-itered)
                                              (context/get-context) ;; we have to use get-context here as the iterator might have rebound the context
