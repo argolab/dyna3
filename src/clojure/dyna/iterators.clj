@@ -265,7 +265,7 @@
                     new-bindings (compute-bindings bound)]
                 (if (some (fn [[k [v _]]] (nil? v)) new-bindings)
                   nil
-                  (iterator-conjunction-diterator iterators (next order) (assoc already-bound picked-var value))))
+                  (iterator-conjunction-diterator new-bindings (next order) bound)))
               nil)
             (let [bound (assoc already-bound picked-var value)
                   new-bindings (compute-bindings bound)]

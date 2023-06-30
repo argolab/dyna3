@@ -351,7 +351,9 @@
          (let [ret (*aggregator-op-contribute-value* (get-value-in-context incoming-variable ctx) (:mult nR))]
            ret)
 
-         (or (every? is-bound? exposed) eager-run-iterators)
+         (or (every? is-bound? exposed)
+             (and eager-run-iterators
+                  (not *simplify-looking-for-fast-fail-only*)))
          (let [iterators (find-iterators nR)
                accumulator (volatile! nil)
                result-rexprs (volatile! nil)]
@@ -361,7 +363,7 @@
             :bind-all true
             :rexpr-in nR
             :rexpr-result inner-r
-            :simplify simplify
+            :simplify #(binding [*simplify-looking-for-fast-fail-only* true] (simplify %))
 
                                         ;:required [incoming-variable] ;; we still want to loop even if we can't directly assign this value
             (do
@@ -415,22 +417,7 @@
                  ret))
              (if (empty? @result-rexprs)
                (make-multiplicity 0)
-               (make-disjunct (vec @result-rexprs))))
-
-           #_(if (empty? @accumulator)
-                 (make-multiplicity 0)
-                 (do
-                   ;; this is going ot have to conver this into a disjunct-op where the accumulator corresponds with the order of th evalues
-                   (debug-repl "inner accum")
-                   (???)))
-
-           #_(if (empty? @result-rexprs)
-             ;; then everything has been processed, so there is no need for this to remain
-             (do
-             ;  (debug-repl "agg inner 0")
-               (make-multiplicity 0))
-             ;; there exists some branches which could not be fully resolved, so this is going to remain
-             (make-disjunct (vec @result-rexprs))))
+               (make-disjunct (vec @result-rexprs)))))
 
          :else
          (let [new-incoming (if (is-bound-in-context? incoming-variable ctx)

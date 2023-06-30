@@ -35,7 +35,9 @@ $memo(phrase[A:$free,B:$free,C:$free]) = "null".
 
 print "program loaded, going to make query".
 
-phrase(I:range(10),I+1,X)?
+% phrase(I:range(10),I+1,X)?
+
+phrase(A,B,C)?
 
 %phrase(0,2,X)?
 

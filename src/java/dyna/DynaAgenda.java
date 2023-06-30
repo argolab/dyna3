@@ -66,6 +66,9 @@ public class DynaAgenda {
       }
 
       private void run_agenda_from_thread() {
+          // this would have to manage the clojure variable dynamic values.  Maybe do something like get the dynamic values from the initial thread
+          // and then push those values on all of the worker threads
+
           while(!is_interrupted) {
               IDynaAgendaWork work;
               synchronized (this) {

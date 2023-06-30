@@ -168,7 +168,8 @@
 
 
 (def-rewrite
-  :match (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs))
+  :match {:rexpr (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs))
+          :check (not *simplify-looking-for-fast-fail-only*)}
   :run-at [:standard :inference]
   :run-in-jit false
   (let [outer-context (context/get-context)
@@ -244,14 +245,16 @@
                          (if @added-new (vswap! num-children inc)))))
 
                    ;; if this is a more complex expression, then we will try to run iterators on the inner expression to allow it to become simpler and split into smaller expressions in the trie
-                   (and *disjunct-run-inner-iterators* (not (is-multiplicity? new-child-rexpr)))
+                   (and *disjunct-run-inner-iterators*
+                        (not *simplify-looking-for-fast-fail-only*)
+                        (not (is-multiplicity? new-child-rexpr)))
                    (let [iters (find-iterators new-child-rexpr)]
                      (run-iterator
                       :iterators iters
                       :bind-all true
                       :rexpr-in new-child-rexpr
                       :rexpr-result child-rexpr-itered
-                      :simplify #(binding [*disjunct-run-inner-iterators* false] (simplify-fast %))
+                      :simplify #(binding [*simplify-looking-for-fast-fail-only* false] (simplify-fast %))
                       (let []
                         (save-result-in-trie (simplify child-rexpr-itered)
                                              (context/get-context) ;; we have to use get-context here as the iterator might have rebound the context
