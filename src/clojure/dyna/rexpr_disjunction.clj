@@ -13,13 +13,9 @@
 
 (def ^:dynamic *disjunct-op-remove-if-single* true)
 
-;(def ^:dynamic *disjunct-constructed-add-function* nil)
-
 (def ^:dynamic *disjunct-run-inner-iterators* true)
 
 (declare ^:private remap-variables-disjunct-op)
-
-;(def ^{:dynamic true :private true} *make-optimized-disjuncts* true)
 
 ;; TODO: wonder if there should be some kind index which is cached, it could
 ;; allow for more efficient queries in some cases, but the cached index would
@@ -92,7 +88,7 @@
                                                        (dyna-debug (subset?  (exposed-variables ret) (into #{} new-vars)))
                                                        (when-not (is-empty-rexpr? ret)
                                                          ret))))]
-              (println "remap variables new trie" variable-renaming-map)
+              ;(println "remap variables new trie" variable-renaming-map)
               (make-disjunct-op new-vars new-trie))))))))
 
 
@@ -167,6 +163,87 @@
         ret))))
 
 
+(defn- disjunct-op-rewrite-internals [dj-vars ^PrefixTrie rexprs simplify]
+  (let [outer-context (context/get-context)
+        ret-children (volatile! (make-PrefixTrie (count dj-vars) 0 nil))
+        num-children (volatile! 0)
+        dj-var-values (map get-value dj-vars)
+        ;; track the different values which have been seen when added to the trie to identify things which are constant
+        child-var-values (transient (vec (repeat (count dj-vars) not-seen-in-trie)))
+        save-result-in-trie (fn save-result-in-trie [new-child-rexpr child-context]
+                              (when-not (is-empty-rexpr? new-child-rexpr)
+                                (let [dj-key (map #(get-value-in-context % child-context) dj-vars)]
+                                  ;; track what values we have seen
+                                  (doseq [[i v x] (zipseq (range) dj-key child-var-values)
+                                          :when (and (not= x nil) (not= x v))]
+                                    (assoc! child-var-values i (if (= not-seen-in-trie x)
+                                                                 v
+                                                                 nil)))
+                                  (if (is-disjunct-op? new-child-rexpr)
+                                    (let [child-trie ^PrefixTrie (:rexprs new-child-rexpr)
+                                          child-vars (:disjunction-variables new-child-rexpr)
+                                          new-order (vec (map (zipmap child-vars (range)) dj-vars))
+                                          t-reordered (trie-reorder-keys child-trie new-order)]
+                                      (vswap! ret-children trie-merge t-reordered)
+                                      (vswap! num-children #(+ 2 %)) ;; there should be at least 2 children getting added, so we will still return a trie in the end
+                                      )
+                                    (let [added-new (volatile! false)]
+                                      (vswap! ret-children trie-update-collection dj-key
+                                              (fn [col]
+                                                (let [[made-new ret] (merge-rexpr-disjunct-list col new-child-rexpr)]
+                                                  (vreset! added-new made-new)
+                                                  ret)))
+                                      (if @added-new
+                                        (vswap! num-children inc)))))))]
+    (doseq [[var-binding child] (trie-get-values rexprs dj-var-values)]
+      ;; loop through all of the children which at least match on the values
+      (try
+        (let [child-context (context/make-nested-context-disjunct child)]
+          (doseq [[dv djv] (zipseq dj-vars var-binding)
+                  :when (not (nil? djv))]
+            (if (is-constant? dv)
+              (when (not= (get-value dv) djv)
+                (throw (UnificationFailure. "not equal to const")))
+              (ctx-set-value! child-context dv djv)))
+          (context/bind-context-raw
+           child-context
+           (let [new-child-rexpr (simplify child)]
+             ;; deal with the resulting child expression and save it into the trie
+             (???))))
+        (catch UnificationFailure err nil)))
+    ;; set the value of variables which are the same along all branches
+    (doseq [[v x] (zipseq dj-vars child-var-values)
+            :when (not (contains? #{not-seen-in-trie nil} x))]
+      (set-value! v x))
+    (case @num-children
+      0 (make-multiplicity 0)
+      1 (let [[[child-bindings child]] (trie-get-values @ret-children nil)]
+          (doseq [[dv djv] (zipseq dj-vars child-bindings)]
+            (set-value! dv djv))
+          child)
+      (let [new-vars (vec (map (fn [v]
+                                 (if (is-bound? v)
+                                   (make-constant (get-value v))
+                                   v))
+                               dj-vars))
+            ret (make-disjunct-op new-vars @ret-children)]
+        ret))))
+
+#_(def-rewrite
+  :match {:rexpr (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs))
+          :check (not *simplify-looking-for-fast-fail-only*)}
+  :run-at :standard
+  :run-in-jit false)
+
+#_(def-rewrite
+  :match {:rexpr (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs))
+          :check (not *simplify-looking-for-fast-fail-only*)}
+  :run-at :inference
+  :run-in-jit false
+  ;; this will always attempt to do rewrites on the internal structure, as there might be something that we can infer as a result
+  ;; if we tracked the different types of R-exprs which are contained, then
+  (disjunct-op-rewrite-internals dj-vars rexprs simplify))
+
 (def-rewrite
   :match {:rexpr (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs))
           :check (not *simplify-looking-for-fast-fail-only*)}
@@ -215,11 +292,7 @@
                   dv (nth dj-vars i)]
               (when (and (not (nil? djv)) (is-variable? dv))
                                         ;(dyna-assert (not (is-bound-in-context? dv child-context)))
-                (ctx-set-value! child-context dv djv)
-                #_(try
-                     (catch UnificationFailure e
-                       (do (debug-repl "bad") ;; in this case, we should stop processing, but this is not going to have set the value somewhere yet.  This is going to need to figure out what the issue is and skip it
-                           (???)))))))
+                (ctx-set-value! child-context dv djv))))
           (context/bind-context-raw
            child-context
            (let [new-child-rexpr (simplify child)]
@@ -274,7 +347,7 @@
           ;; return the child directly as there is only a single child and there is no need for the disjunction
           child)
       (let [ret (make-disjunct-op dj-vars @ret-children)]
-        (println "making new trie with " @num-children)
+        ;(println "making new trie with " @num-children)
         ret))))
 
 

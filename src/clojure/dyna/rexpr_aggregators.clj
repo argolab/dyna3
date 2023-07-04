@@ -130,7 +130,7 @@
   (if (and (instance? DynaTerm v)
            (= (.name ^DynaTerm v) "$with_key"))
     ;; the value will be first, and the key associated with the value is second
-    (get (.arguments ^DynaTerm v) 0)
+    (get v 0)
     v))
 
 
@@ -145,7 +145,8 @@
 
 (def-aggregator "max="
   :combine (fn [a b] (if (> (get-aggregated-value a) (get-aggregated-value b)) a b))
-  :combine-mult (fn [a b mult] (if (> (get-aggregated-value a) (get-aggregated-value b)) a b))
+  :combine-mult (fn [a b mult]
+                  (if (> (get-aggregated-value a) (get-aggregated-value b)) a b))
   :identity ##-Inf
   :allows-with-key true
   ;; this will let us add expressions to the R-expr so that this can eleminate branches which are not useful

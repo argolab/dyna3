@@ -94,10 +94,12 @@
                       [k v])))
          {:work-agenda (DynaAgenda. ^DynaAgenda (:work-agenda system))}))
 
+(def ^:dynamic *dyna-active-system* nil)
 
 (defmacro run-under-system [system & args]
   `(let [state# ~system]
-     (binding [user-defined-terms (:user-defined-terms state#)
+     (binding [*dyna-active-system* state#
+               user-defined-terms (:user-defined-terms state#)
                user-exported-terms (:user-exported-terms state#)
                imported-files (:imported-files state#)
                work-agenda (:work-agenda state#)
@@ -105,7 +107,7 @@
                query-output (:query-output state#)
                globally-defined-user-term (:globally-defined-user-term state#)]
        (when-not @(:system-is-inited state#)
-         ((var-get #'dyna.core/init-system))
+         ((find-var 'dyna.core/init-system))
          (reset! (:system-is-inited state#) true))
        ~@args)))
 

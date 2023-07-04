@@ -121,7 +121,7 @@ while [ $# -gt 0 ]; do
             ;;
 
         --print-agenda)
-            jvm_arg+="-Ddyna.print_agenda_work=true -Ddyna.print_agenda_progress=true -Ddyna.print_agenda_running=true "
+            jvm_args+="-Ddyna.print_agenda_work=true -Ddyna.print_agenda_progress=true -Ddyna.print_agenda_running=true "
             ;;
 
 
@@ -196,6 +196,11 @@ while [ $# -gt 0 ]; do
         install-python-no-confirm)
             install_python
             exit 0
+            ;;
+
+        --*)
+            echo "Unknown command $1"
+            exit 1
             ;;
 
         *)

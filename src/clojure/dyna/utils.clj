@@ -449,5 +449,5 @@
 (defmacro dyna-slow-check [& args]
   ;; extra debugging checks which are slow
   ;(when (= "true" (System/getProperty "dyna.debug_slow_checks" "true")))
-  `(do ~@args)
+  ;`(do ~@args)
   )

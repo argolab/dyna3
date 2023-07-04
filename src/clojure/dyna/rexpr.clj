@@ -1129,17 +1129,18 @@
                            ~(when system/status-counters `(StatusCounters/match_sucessful))
                            ~@body))))
 
-(defn- make-rewriter-function [kw-args matcher body from-file]
+(defn- make-rewriter-function [kw-args matcher body form]
   ;; this needs to go through and define something where the different functions
   ;; are invoked on the relvant parts of the expression.  Because the
   ;; expressions have different field values, and are not positional, this means
   ;; that those matchers will have to extract the right values (or something
   (let [res (gensym 'res)
+        ;functor-name (car (if (map? matcher) (:rexpr matcher) matcher))
         do-rewrite-body `(let [~res (do ~body)]
                            ~(when system/print-rewrites-performed
                               `(when (and (not (nil? ~res)) (not= ~res ~'rexpr))
                                  ;(debug-delay-ntimes 1000 (debug-repl))
-                                 (print ~(str "Performed rewrite:"  (meta from-file) "\nOLD: ") ~'rexpr "NEW: " ~res "CONTEXT:" (context/get-context))))
+                                 (print ~(str "Performed rewrite:"  (meta form) "\nOLD: ") ~'rexpr "NEW: " ~res "CONTEXT:" (context/get-context))))
                            ~(when system/status-counters
                               `(when (and (not (nil? ~res)) (not= ~res ~'rexpr))
                                  (StatusCounters/rewrite_performed)))
@@ -1997,15 +1998,23 @@
 
 (def-base-rexpr delayed-rexpr-renamed [:var-map vmap
                                        :unchecked deferred-rexpr]
-  (rexpr-jit-info [this] {:jittable false}))
+  (rexpr-jit-info [this] {:jittable false})
+  (primitive-rexpr [this] (remap-variables deferred-rexpr vmap)))
 
 (def-rewrite
   :match (delayed-rexpr-renamed (:unchecked vmap) (:unchecked deferred-rexpr))
   (let [nctx (context/make-empty-context deferred-rexpr)]
     (doseq [[vdef vcur] vmap
-            :let [val (get-value vcur)]]
-      (when-not (nil? val)
-        (ctx-set-value! nctx vdef val)))
+            :let [val (get-value vcur)]
+            :when (not (nil? val))]
+      (ctx-set-value! nctx vdef val))
     (let [nr (context/bind-context nctx
                            (simplify deferred-rexpr))]
       (remap-variables nr vmap))))
+
+(def-rewrite
+  ;; if there is nothing in the renammping map, then we can just not exist in
+  ;; the first place as there is no point
+  :match (delayed-rexpr-renamed (empty? vmap) (:unchecked deferred-rexpr))
+  :run-at :construction
+  deferred-rexpr)

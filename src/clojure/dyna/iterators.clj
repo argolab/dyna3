@@ -158,6 +158,21 @@
     (into {} (for [[k [v can-bind]] picked-bindings]
                [k [(iter-create-iterator v k) can-bind]]))))
 
+(defn- iterator-conjunction-select-min-cardinality [iterators]
+  (let [f (first iterators)
+        r (rest iterators)]
+    (if (empty? r)
+      f
+      (loop [f f
+             c (iter-estimate-cardinality (first (second (first iterators))))
+             r r]
+        (if (empty? r)
+          f
+          (let [o (iter-estimate-cardinality (first (second (first r))))]
+            (if (< o c)
+              (recur (first r) o (rest r))
+              (recur f c (rest r)))))))))
+
 (defn- iterator-conjunction-diterator [iterators order already-bound]
   ;; iterators is a map where the key is the order of the variables which get bound, and the value is the nested diterator object
   ;; when running through a conjunction of multiple iterators, we can bind all of the iterators which match for a given variable
@@ -199,7 +214,10 @@
                   zzz (when (empty? possible-iterators)
                         (debug-repl "use alread bound to find something else")
                         (???))
-                  [_ [picked-iterator _]] (first possible-iterators) ;; this should select the one that has the lowest cardinality or something....
+                  ;; www (when (> (count possible-iterators) 1)
+                  ;;       (debug-repl "multiple possible iterators"))
+                  [_ [picked-iterator _]] (iterator-conjunction-select-min-cardinality possible-iterators)
+                                        ;(first possible-iterators) ;; this should select the one that has the lowest cardinality or something....
                                         ;picked-it-order-remains (next picked-it-order)
                                         ;zzz (debug-repl "zzz")
                   ret
@@ -238,7 +256,7 @@
                   zzz (when (empty? possible-iterators)
                         (debug-repl "use alread bound to find something else")
                         (???))
-                  [_ [picked-iterator _]] (first possible-iterators)
+                  [_ [picked-iterator _]] (iterator-conjunction-select-min-cardinality possible-iterators) ;(first possible-iterators)
                   ret
                   ((fn run [iter]
                      (let [iter-val (first iter)]

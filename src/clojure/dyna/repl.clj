@@ -3,7 +3,7 @@
   (:import [org.jline.reader.impl DefaultParser DefaultParser$Bracket])
   (:import [org.jline.reader LineReader LineReader$Option LineReaderBuilder EOFError UserInterruptException EndOfFileException])
 
-  (:require [dyna.ast-to-rexpr :refer [eval-string print-parser-errors parse-string]])
+  (:require [dyna.ast-to-rexpr :refer [eval-string print-parser-errors parse-string import-file-url]])
   (:require [dyna.system :as system])
   (:require [dyna.rexpr :refer [find-iterators simplify]])
   (:require [dyna.base-protocols :refer [is-empty-rexpr? exposed-variables ctx-get-all-bindings]])
@@ -12,7 +12,8 @@
   (:require [dyna.iterators :refer [run-iterator]])
   (:require [dyna.utils :refer [debug-repl]])
   (:require [dyna.rexpr-pretty-printer :refer [print-rexpr *print-variable-name*]])
-  (:require [clojure.string :refer [trim join]])
+  (:require [clojure.string :refer [trim join split]])
+  (:require [clojure.java.io :refer [file]])
   (:import [dyna DynaUserAssert DynaUserError])
   (:import [org.antlr.v4.runtime InputMismatchException]))
 
@@ -21,7 +22,8 @@
 (defn- is-command? [line]
   (contains? #{"exit" "quit" "run-agenda" "clear-agenda" "help"
                "debug-clojure-repl" "debug-print-raw"
-               } (trim line)))
+               "run" "reset"}
+             (first (split (trim line) #" "))))
 
 (defn- repl-help []
   (println "Dyna help:
@@ -30,6 +32,8 @@ Commands:
     exit/quit/Ctrl-D  quit the Dyna REPL
     run-agenda        Run the agenda immeditly (the agenda will be automattically run before a query is answered)
     clear-agenda      Delete everything on the agenda.  Note: this can leave the systen in an inconsistent state
+    run               Run/import a file into the repl
+    reset             Reset the Dyna REPL back to a clean initial state
     Ctrl-C            Stop processing
 
 Example programs:
@@ -177,7 +181,8 @@ print fib(100).
 ;; https://github.com/jline/jline3/blob/master/console/src/test/java/org/jline/example/Console.java
 ;; https://github.com/jline/jline3/blob/master/demo/src/main/java/org/jline/demo/Repl.java
 (defn- repl-core []
-  (let [terminal (-> (TerminalBuilder/builder)
+  (let [active-system (volatile! system/*dyna-active-system*)
+        terminal (-> (TerminalBuilder/builder)
                      (.name "dyna")
                      (.build))
         parser (let [p (proxy [DefaultParser] []
@@ -224,65 +229,69 @@ print fib(100).
                                 (if @buffer-query-results
                                   (vreset! buffer-query-results false)
                                   (flush-query-buffer)))]
-          (binding [system/query-output query-output-fn
-                    #_(fn [[query-text query-line-number] result]
-                        ;; ignore the line number as this is running interc
-                        (println "========== Query ==========")
-                        (println query-text)
-                        (println)
-                        (println "Variable assignments:" (:context-value-map result))
-                        (when (not= (make-multiplicity 1) (:rexpr result))
-                          (println "Rexpr:" (:rexpr result)))
-                        (println "==========================="))]
-            (loop []
-              (let [input (loop [did-ctrlc false]
-                            (let [v (try (.readLine line-reader "dyna> ")
-                                         (catch UserInterruptException err
-                                           (if-not did-ctrlc
-                                             nil
-                                             (throw err))))]
-                              (if (nil? v)
-                                (recur true)
-                                v)))]
+          (loop []
+            (let [input (loop [did-ctrlc false]
+                          (let [v (try (.readLine line-reader "dyna> ")
+                                       (catch UserInterruptException err
+                                         (if-not did-ctrlc
+                                           nil
+                                           (throw err))))]
+                            (if (nil? v)
+                              (recur true)
+                              v)))]
                                         ;(println "read input" input)
-                (when (#{"exit" "quit"} (trim input))
-                  (System/exit 0))
-                (when-not (contains? #{"exit" "quit" "continue"} (trim input))
-                  (if (is-command? input)
-                    (case (trim input)
-                      "run-agenda" (system/run-agenda)
+              (when (#{"exit" "quit"} (trim input))
+                (System/exit 0))
+              (when-not (contains? #{"exit" "quit" "continue"} (trim input))
+                (if (is-command? input)
+                  (case (first (split (trim input) #" "))
+                    "run" (let [fname (second (split (trim input) #" " 2))]
+                            (if (nil? @active-system)
+                              (binding [system/query-output query-output-fn]
+                                (import-file-url (.toURL (file fname))))
+                              (system/run-under-system @active-system
+                                                       (binding [system/query-output query-output-fn]
+                                                         (import-file-url (.toURL (file fname)))))))
+                    "reset" (do (vreset! active-system (system/make-new-dyna-system))
+                                (println "System state has been reset.  All user defined functors have been deleted."))
+                    "run-agenda" (system/run-agenda)
                                         ;"run_agenda" (system/run-agenda)
-                      "debug-clojure-repl" (debug-repl)
-                      "debug-print-raw" (def print-raw-rexprs true)
-                      "clear-agenda" (do
-                                       (.clear_agenda system/work-agenda)
-                                       (println "Agenda cleared\nWARNING: this can cause the system to return incorrect results as some updates will not have been processed"))
-                      "help" (repl-help))
+                    "debug-clojure-repl" (debug-repl)
+                    "debug-print-raw" (def print-raw-rexprs true)
+                    "clear-agenda" (do
+                                     (.clear_agenda system/work-agenda)
+                                     (println "Agenda cleared\nWARNING: this can cause the system to return incorrect results as some updates will not have been processed"))
+                    "help" (repl-help))
 
-                    (try
-                      (let [cthread (Thread/currentThread)]
-                        (sun.misc.Signal/handle (sun.misc.Signal. "INT")
-                                                (proxy [sun.misc.SignalHandler] []
-                                                  (handle [sig]
-                                                    (.interrupt cthread))))
-                        (vreset! buffer-query-results true)
-                        (vreset! query-buffer [])
-                        (let [rexpr-result (*repl-evaluate-string* input)]
-                          (if (= (make-multiplicity 1) rexpr-result)
-                            (if (and (empty? @query-buffer) @buffer-query-results)
-                              (println "ok")
-                              (do
-                                (doseq [[query-text query-line-number result] @query-buffer]
-                                  (print-query-result query-text result))
-                                (vreset! query-buffer [])))
-                            (println rexpr-result))))
-                      (catch DynaUserAssert e
-                        (println (.getMessage e)))
-                      (catch DynaUserError e
-                        (println (.getMessage e)))
-                      (catch InterruptedException e
-                        (println "Interrupted"))))
-                  (recur))))))
+                  (try
+                    (let [cthread (Thread/currentThread)]
+                      (sun.misc.Signal/handle (sun.misc.Signal. "INT")
+                                              (proxy [sun.misc.SignalHandler] []
+                                                (handle [sig]
+                                                  (.interrupt cthread))))
+                      (vreset! buffer-query-results true)
+                      (vreset! query-buffer [])
+                      (let [rexpr-result (if (nil? @active-system)
+                                           (binding [system/query-output query-output-fn]
+                                             (*repl-evaluate-string* input))
+                                           (system/run-under-system @active-system
+                                                                    (binding [system/query-output query-output-fn]
+                                                                      (*repl-evaluate-string* input))))]
+                        (if (= (make-multiplicity 1) rexpr-result)
+                          (if (and (empty? @query-buffer) @buffer-query-results)
+                            (println "ok")
+                            (do
+                              (doseq [[query-text query-line-number result] @query-buffer]
+                                (print-query-result query-text result))
+                              (vreset! query-buffer [])))
+                          (println rexpr-result))))
+                    (catch DynaUserAssert e
+                      (println (.getMessage e)))
+                    (catch DynaUserError e
+                      (println (.getMessage e)))
+                    (catch InterruptedException e
+                      (println "Interrupted"))))
+                (recur)))))
         (catch UserInterruptException err nil)
         (catch EndOfFileException err nil)))))
 

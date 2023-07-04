@@ -118,7 +118,7 @@
   :match {:rexpr (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable)
                              (#(= % true) body-is-conjunctive) (:rexpr R))
           :check system/*use-optimized-rexprs*}
-  :run-at :construction
+  :run-at [:construction :inference]
   (let [inner (make-aggregator-op-inner incoming-variable
                                                         []
                                                         R)]
