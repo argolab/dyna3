@@ -232,6 +232,10 @@ print fib(100).
           (loop []
             (let [input (loop [did-ctrlc false]
                           (let [v (try (.readLine line-reader "dyna> ")
+                                       (catch EOFError err
+                                         (if-not did-ctrlc
+                                           nil
+                                           (throw err)))
                                        (catch UserInterruptException err
                                          (if-not did-ctrlc
                                            nil

@@ -1168,7 +1168,8 @@ This is most likely not what you want."))))
         (if (nil? parse)
           (when print-parser-errors
             (println (str "WARNING: file " url " did not contain any dyna rules")))
-          (let [result (convert-from-ast parse (make-constant true) {} url)]
+          (let [result (context/bind-no-context
+                        (convert-from-ast parse (make-constant true) {} url))]
             (when-not (= result (make-multiplicity 1))
               (when print-parser-errors
                 (println (str "failed to load file " url))
@@ -1197,7 +1198,8 @@ This is most likely not what you want."))))
   :run-at [:standard :construction] ;; this should run at both standard time and construction
                                         ;:run-at :standard-and-construction ;; this should run when it is constructed and when it might have a ground variable
   (let [a (get-value ast)]
-    (convert-from-ast a out-variable variable-name-mapping source-file)))
+    (context/bind-no-context
+     (convert-from-ast a out-variable variable-name-mapping source-file))))
 
 
 ;; (def-rewrite

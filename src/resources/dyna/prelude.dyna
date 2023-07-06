@@ -46,7 +46,7 @@ random(Key) = random(Key, 0, 1).
 random = `(random(*)).
 
 :- macro random/2.
-random(Lower, Upper) = `(random(*, Lower, Upper)).
+random(Lower, Upper) = `(random(*, `Lower, `Upper)).
 
 :- make_system_term random/0.
 :- make_system_term random/2.

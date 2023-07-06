@@ -13,46 +13,44 @@
 (defn optimize-aliased-variables
   ;; remove excess unify and project between variables which are unnecessary in the expression
   ([rexpr] (let [[unified-vars new-rexpr] (optimize-aliased-variables rexpr #{})]
+             #_(when-not (= (exposed-variables rexpr) (exposed-variables new-rexpr))
+               (debug-repl "not equal expose"))
              new-rexpr))
   ([rexpr proj-out-vars]
    (let [var-unifies (transient {})
          mr (cond
-              (is-proj? rexpr) (let [ufv (:var rexpr)
-                                     prexpr (:body rexpr)
-                                     [nested-unifies nested-rexpr] (optimize-aliased-variables prexpr
-                                                                                   (conj proj-out-vars ufv))
-                                     self-var (disj (get nested-unifies ufv) ufv)
-                                     ret-rexpr (if (not (empty? self-var))
-                                                 ;; then there is some variable that we can use to replace this statement
-                                                 ;; if it is a constant, then we can do the replacement such that it will avoid
-                                                 (let [const (some is-constant? self-var)
-                                                       replace-with (if const
-                                                                      (first (filter is-constant? self-var))
-                                                                      (first self-var))]
-                                                   (remap-variables nested-rexpr {ufv replace-with}))
+              (is-proj? rexpr)
+              (let [pvar (:var rexpr)
+                    prexpr (:body rexpr)
+                    [nested-unifies nested-rexpr] (optimize-aliased-variables prexpr (conj proj-out-vars proj-out-vars)) ;; why are we passing the projected out var here, seems unnecessary?
+                    self-var-unifies (disj (get nested-unifies pvar) pvar)  ;; if there is any other variable here
+                    ret-rexpr (if-not (empty? self-var-unifies)
+                                (let [new-variable (if (some is-constant? self-var-unifies)
+                                                     (first (filter is-constant? self-var-unifies))
+                                                     (first self-var-unifies))]
+                                  (remap-variables nested-rexpr {pvar new-variable}))
+                                (if (= nested-rexpr prexpr)
+                                  rexpr ;; no change, so just return ourself
+                                  (make-proj pvar nested-rexpr)))]
+                (doseq [[k v] nested-unifies
+                        :when (not= k pvar)]
+                  (assoc! var-unifies k (union (get var-unifies k) (disj v pvar))))
+                ;(dyna-assert (= (exposed-variables rexpr) (exposed-variables ret-rexpr)))
+                ret-rexpr)
 
-                                                 (if (= nested-rexpr prexpr)
-                                                   rexpr
-                                                   (make-proj ufv nested-rexpr)))]
-                                 ;; we need to take the nested-unifies and add
-                                 ;; in the info here, but filter out any
-                                 ;; information which references our variable
-                                 (doseq [[k v] nested-unifies]
-                                   (when (not= k ufv)
-                                     (assoc! var-unifies k (union (get var-unifies k) (disj v ufv)))))
-                                 ret-rexpr)
               (is-unify? rexpr) (let [[a b] (get-arguments rexpr)]
                                   (assoc! var-unifies a (conj (get var-unifies a #{}) b))
                                   (assoc! var-unifies b (conj (get var-unifies b #{}) a))
                                   rexpr) ;; there is no change to the expression here
               (is-disjunct? rexpr) rexpr ;; we do not evaluate disjunctions for variables which might get unified together
               :else ;; otherwise we should check all of the children of the expression to see if there is some structure
-              (rewrite-rexpr-children-no-simp rexpr
-                                      (fn [r]
-                                        (let [[unifies nr] (optimize-aliased-variables r proj-out-vars)]
-                                          (doseq [[k v] unifies]
-                                            (assoc! var-unifies k (union v (get var-unifies k))))
-                                          nr))))]
+              (let [rr (rewrite-rexpr-children-no-simp rexpr
+                                                       (fn [r]
+                                                         (let [[unifies nr] (optimize-aliased-variables r proj-out-vars)]
+                                                           (doseq [[k v] unifies]
+                                                             (assoc! var-unifies k (union v (get var-unifies k))))
+                                                           nr)))]
+                rr))]
      [(persistent! var-unifies) mr])))
 
 (defn optimize-lift-up-det-variables [rexpr]
@@ -79,8 +77,10 @@
   ;; this might be useful in the case of recursive programs.
   )
 
-(defn optimize-remove-unnecessary-nested-aggregators [rexpr]
-  ;; if there are
+#_(defn optimize-remove-unnecessary-nested-aggregators [rexpr]
+  ;; the aggregator will get removed if there is only a single child in the
+  ;; first place though if we are going to take the min of a min for example,
+  ;; then we do not need to run two different aggregators.
   )
 
 ;; (defn- check-rexpr-basecases

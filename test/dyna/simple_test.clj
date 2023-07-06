@@ -448,3 +448,13 @@ assert Seven=7, map(((X) max= X; Seven), [1,5,10]) = [7,7,10].
 
 ;; asser
 ;; ")
+
+(str-test random-range "
+print random(0,10).
+")
+
+(str-test is-defined "
+r = is_defined(foo).
+
+assert r == false.
+")

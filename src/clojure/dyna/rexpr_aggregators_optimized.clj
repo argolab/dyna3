@@ -292,7 +292,10 @@
                                                (catch UnificationFailure e (make-multiplicity 0))))]
         (if (is-empty-rexpr? ret)
           (if (nil? @accumulator)
-            (make-multiplicity 0)
+            (do ;(debug-repl )
+                ;(make-multiplicity 0)
+                ;; just pass along the empty result, as this might have tracing information attached
+                ret)
             (do
               ;; this needs to identify any values contained in the accumulator trie and turn those into some disjunct or return the single value
               ;; there should be no aggregator remaining in this case, as it will have that all of the values will have already gotten resolved
@@ -358,51 +361,58 @@
                accumulator (volatile! nil)
                result-rexprs (volatile! nil)]
            ;; will loop over assignments to all of the variables
-           (run-iterator
-            :iterators iterators
-            :bind-all true
-            :rexpr-in nR
-            :rexpr-result inner-r
-            :simplify #(binding [*simplify-looking-for-fast-fail-only* true] (simplify %))
+           (try
+             (run-iterator
+              :iterators iterators
+              :bind-all true
+              :rexpr-in nR
+              :rexpr-result inner-r
+              :simplify #(binding [*simplify-looking-for-fast-fail-only* true] (simplify %))
 
                                         ;:required [incoming-variable] ;; we still want to loop even if we can't directly assign this value
-            (do
-              ;; if this is not a multiplicity, then this expression has something that can not be handled
-              ;; in which case this will need to report an error, or return the R-expr while having that it can not be solved...
-              (if (is-multiplicity? inner-r)
-                (let [val (get-value incoming-variable)
-                      mult (:mult inner-r)]
-                  (when-not (= mult 0)
-                    (dyna-assert (not (nil? val)))
-                    (let [rc (*aggregator-op-contribute-value* val mult)]
-                      (when-not (is-empty-rexpr? rc)
-                        ;; then we have to save the result of this R-expr, as it could not get processed for some reason
-                        (if eager-run-iterators
-                          (vswap! accumulator update-in (map get-value exposed) conj rc)
-                          (vswap! result-rexprs conj rc))))))
-                (when-not (*aggregator-op-saturated*)
-                  ;(debug-repl "all bound but not done")
-                  (let [new-incoming (if (is-bound? incoming-variable)
-                                       (make-constant (get-value incoming-variable))
-                                       incoming-variable)
-                        remapping-map (into {} (for [v (cons incoming-variable projected-vars)
-                                                     :when (and (not (is-constant? v)) (is-bound? v))]
-                                                 [v (make-constant (get-value v))]))
-                        new-projected (vec (filter #(not (is-bound? %)) projected-vars))
-                        ;zzz (dyna-assert (subset? (keys remapping-map) (exposed-variables inner-r)))
-                        new-body
-                        (debug-binding [*current-simplify-stack* (conj *current-simplify-stack* inner-r)]
-                                       (remap-variables inner-r remapping-map))
-                        other-constraints (*aggregator-op-additional-constraints* new-incoming)
-                        ;; zzz (when (and *aggregator-op-should-eager-run-iterators* (not= parent-is-bound (map is-bound? exposed)))
-                        ;;       (debug-repl "agg egg run"))
-                        rc (make-aggregator-op-inner new-incoming new-projected
-                                                     (if (not= (make-multiplicity 1) other-constraints)
-                                                       (make-conjunct [new-body other-constraints])
-                                                       new-body))]
-                    (if eager-run-iterators
-                      (vswap! accumulator update-in (map get-value exposed) conj rc)
-                      (vswap! result-rexprs conj rc)))))))
+              (let [inner-r (simplify inner-r)]
+                ;; if this is not a multiplicity, then this expression has something that can not be handled
+                ;; in which case this will need to report an error, or return the R-expr while having that it can not be solved...
+                (when (is-empty-rexpr? inner-r)
+                  (debug-repl "empty r"))
+                (if (is-multiplicity? inner-r)
+                  (let [val (get-value incoming-variable)
+                        mult (:mult inner-r)]
+                    (when-not (= mult 0)
+                      (dyna-assert (not (nil? val)))
+                      (let [rc (*aggregator-op-contribute-value* val mult)]
+                        (when-not (is-empty-rexpr? rc)
+                          ;; then we have to save the result of this R-expr, as it could not get processed for some reason
+                          (if eager-run-iterators
+                            (vswap! accumulator update-in (map get-value exposed) conj rc)
+                            (vswap! result-rexprs conj rc))))))
+                  (when-not (*aggregator-op-saturated*)
+                                        ;(debug-repl "all bound but not done")
+                    (let [new-incoming (if (is-bound? incoming-variable)
+                                         (make-constant (get-value incoming-variable))
+                                         incoming-variable)
+                          remapping-map (into {} (for [v (cons incoming-variable projected-vars)
+                                                       :when (and (not (is-constant? v)) (is-bound? v))]
+                                                   [v (make-constant (get-value v))]))
+                          new-projected (vec (filter #(not (is-bound? %)) projected-vars))
+                                        ;zzz (dyna-assert (subset? (keys remapping-map) (exposed-variables inner-r)))
+                          new-body
+                          (debug-binding [*current-simplify-stack* (conj *current-simplify-stack* inner-r)]
+                                         (remap-variables inner-r remapping-map))
+                          other-constraints (*aggregator-op-additional-constraints* new-incoming)
+                          ;; zzz (when (and *aggregator-op-should-eager-run-iterators* (not= parent-is-bound (map is-bound? exposed)))
+                          ;;       (debug-repl "agg egg run"))
+                          rc (make-aggregator-op-inner new-incoming new-projected
+                                                       (if (not= (make-multiplicity 1) other-constraints)
+                                                         (make-conjunct [new-body other-constraints])
+                                                         new-body))]
+                      (when (is-empty-rexpr? rc)
+                        (debug-repl "add empty"))
+                      (if eager-run-iterators
+                        (vswap! accumulator update-in (map get-value exposed) conj rc)
+                        (vswap! result-rexprs conj rc)))))))
+             (catch Exception err
+               (debug-repl "err")))
 
            (if eager-run-iterators
              (if (empty? @accumulator)
@@ -414,10 +424,15 @@
                  (when (not= (ensure-set (union (filter is-bound? (exposed-variables rexpr)) (exposed-variables ret)))
                              (ensure-set (exposed-variables rexpr)))
                    (debug-repl "diff exposed"))
+                 (when (is-empty-rexpr? ret)
+                   (debug-repl "empty ret"))
                  ret))
              (if (empty? @result-rexprs)
                (make-multiplicity 0)
-               (make-disjunct (vec @result-rexprs)))))
+               (let [ret (make-disjunct (vec @result-rexprs))]
+                 (when (is-empty-rexpr? ret)
+                   (debug-repl "empty ret"))
+                 ret))))
 
          :else
          (let [new-incoming (if (is-bound-in-context? incoming-variable ctx)

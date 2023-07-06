@@ -4,7 +4,8 @@
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.rexpr-builtins :refer [make-lessthan make-lessthan-eq
                                          make-add make-times make-min make-max make-lor make-land
-                                         make-not-equals make-colon-line-tracking-min upcast-big-int]])
+                                         make-not-equals make-colon-line-tracking-min upcast-big-int
+                                         maybe-cast-to-float]])
   (:require [dyna.context :as context])
   (:require [dyna.iterators :refer [run-iterator make-skip-variables-iterator]])
   (:import (dyna UnificationFailure DynaTerm DynaUserError ParserUtils DynaMap))
@@ -304,6 +305,24 @@
   :identity (DynaMap. {})
   :combine (fn [a b]
              (DynaMap. (merge (.map-elements ^DynaMap a) (.map-elements ^DynaMap b)))))
+
+(defrecord mean-equals-aggregator-count [val count])
+(defn- mean-equals-make [v]
+  (if (instance? mean-equals-aggregator-count v)
+    v
+    (mean-equals-aggregator-count. v 1)))
+(def-aggregator "mean="
+  :identity (mean-equals-aggregator-count. 0 0)
+  :combine (fn [a b]
+             (let [a (mean-equals-make a)
+                   b (mean-equals-make b)]
+               (mean-equals-aggregator-count. (+ (:val a) (:val b))
+                                              (+ (:count a) (:count b)))))
+  :lower-value (fn [x]
+                 (let [x (mean-equals-make x)]
+                   (when (= 0 (:count x))
+                     (throw (UnificationFailure. "no aggregands for mean=")))
+                   (/ (:val x) (maybe-cast-to-float (:count x))))))
 
 
 (def-rewrite

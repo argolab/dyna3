@@ -181,21 +181,30 @@
                              (map :rexpr term-bodies))
            strip-agg (fn [in-var r]
                        (if (is-aggregator? r)
-                         (remap-variables-handle-hidden (:body r)
-                                          {(:incoming r) in-var})
-                         r))
+                         (if (is-constant? (:incoming r))
+                           (???)
+                           (remap-variables-handle-hidden (:body r)
+                                                          {(:incoming r) in-var}))
+                         (do
+                           (debug-repl "???")
+                           (???)
+                           r)))
            make-aggs (fn [op out-var in-var rexprs]
-                       (let [res
+                       (let [dj (make-disjunct (vec rexprs))
+                             zzz (dyna-assert (contains? (exposed-variables dj) in-var))
+                             res
                              (make-aggregator op out-var in-var
                                               true ;; the body is conjunctive, meaning that we can move constraints out
-                                              (make-disjunct (vec rexprs)))]
+                                              dj)]
                          res))
            groupped-aggs (into {} (for [[op children] grouped]
                                     (if (= 1 (count children))
                                       [op (first children)]
                                       (let [new-in (make-variable (gensym 'comb_incoming_var))
                                             new-children (for [c children]
-                                                           (strip-agg new-in c))]
+                                                           (let [r (strip-agg new-in c)]
+                                                             (dyna-assert (contains? (exposed-variables r) new-in))
+                                                             r))]
                                         [op (make-aggs op (first out-vars) new-in new-children)]))))]
        (assert (= 1 (count out-vars))) ;; the out var should have the same name as we have standarized the names of the arguments
 
@@ -232,25 +241,7 @@
         (:memoized-rexpr term-rep))
       (do
         (depend-on-assumption (:is-not-memoized-null term-rep))
-        (user-rexpr-combined-no-memo term-rep)))
-
-    #_(case (:memoization-mode term-rep)
-      :none (do
-              (depend-on-assumption (:is-not-memoized-null term-rep)) ;; memization of unk is fine, but null requires that we redo all of the computation
-              (user-rexpr-combined-no-memo term-rep))
-      :unk (do
-             (depend-on-assumption (:is-memoized-unk term-rep))
-             (:memoized-rexpr term-rep))
-      :null (do
-              (depend-on-assumption (:is-memoized-null term-rep))
-              (:memoized-rexpr term-rep))
-      :complex (do
-                 (when (:unk (:memoiztaion-modes term-rep))
-                   (depend-on-assumption (:is-memoized-unk term-rep)))
-                 (if (:null (:memoization-modes term-rep))
-                   (depend-on-assumption (:is-memoized-null term-rep))
-                   (depend-on-assumption (:is-not-memoized-null term-rep)))
-                 (:memoized-rexpr term-rep)))))
+        (user-rexpr-combined-no-memo term-rep)))))
 
 
 
@@ -301,6 +292,8 @@
           (dyna-debug (let [exp-var (exposed-variables variable-map-rr)]
                         (when-not (subset? exp-var (set (vals new-var-map)))
                           (debug-repl "should not happen, extra exposed variables"))))
+          (dyna-assert (or (= (set (filter is-variable? (vals new-var-map))) (set (exposed-variables variable-map-rr)))
+                           (is-empty-rexpr? variable-map-rr)))
           (if-not (nil? with-key-var)
             (let [result-var (get var-map (make-variable (str "$" (:arity name))))
                   value-call (make-user-call {:name "$value" :arity 1}

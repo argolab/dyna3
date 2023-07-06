@@ -6,7 +6,7 @@
   (:require [dyna.system :refer [should-stop-processing?]])
   (:require [clojure.set :refer [union intersection subset? difference]])
   ;(:require [clojure.tools.macro :refer [macrolet]])
-  (:import [dyna DIterable DIterator DIteratorInstance]))
+  (:import [dyna DIterable DIterator DIteratorInstance UnificationFailure]))
 
 ;; iterators are going to allow for there to efficiently loop over the values which are assigned to variables
 
@@ -655,13 +655,15 @@
                 (rec it-bound r rexpr)))
             (doseq [val (iter-run-iterable iter)]
               (should-stop-processing?)
-              (let [dctx (context/make-nested-context-disjunct rexpr)]
-                (ctx-set-value! dctx v (iter-variable-value val))
-                (context/bind-context-raw
-                 dctx
-                 (let [new-rexpr (simplify-fn rexpr)]
-                   (if-not (is-empty-rexpr? new-rexpr)
-                     (rec (iter-continuation val) r new-rexpr))))))))))
+              (try
+                (let [dctx (context/make-nested-context-disjunct rexpr)]
+                  (ctx-set-value! dctx v (iter-variable-value val))
+                  (context/bind-context-raw
+                   dctx
+                   (let [new-rexpr (simplify-fn rexpr)]
+                     (if-not (is-empty-rexpr? new-rexpr)
+                       (rec (iter-continuation val) r new-rexpr)))))
+                (catch UnificationFailure _ nil)))))))
     (iter-create-iterator picked-iterator picked-binding-order)
     picked-binding-order
     rexpr)))

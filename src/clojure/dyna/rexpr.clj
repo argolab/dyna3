@@ -1743,7 +1743,10 @@
     ;; the intersected context is what can be passed up to the parent, we are going to have to make new contexts for the children
     (ctx-add-context! outer-context intersected-ctx)
                                         ;(debug-repl "disjunct standard")
-    (make-disjunct children-with-contexts)))
+    (let [ret (make-disjunct children-with-contexts)]
+      (when-not (= (exposed-variables ret) (exposed-variables rexpr))
+        (debug-repl "disjunct exposed"))
+      ret)))
 
 (def-iterator
   :match (disjunct (:rexpr-list children))
