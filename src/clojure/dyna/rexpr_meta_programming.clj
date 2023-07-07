@@ -31,6 +31,10 @@
 
 (def reflect-ignore-arg (make-constant (Object.)))  ;; a special value which indicates that the dynabase should just get ignored
 
+;; maybe the $reflect/3 should just have $nil dynabase instead of allowing it to
+;; unify with any dynabase.  So if something attempts to reflect when there is a
+;; dynabase, it would just result in it failing, which is a bit more consistent behavior
+
 (let [junk-arity (make-variable (gensym))]
   (def-user-term "$reflect" 3 (make-conjunct [(make-unify v3 (make-constant true)) ;; reflect always return true
                                               (make-proj junk-arity

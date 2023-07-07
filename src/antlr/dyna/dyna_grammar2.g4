@@ -84,7 +84,7 @@ atom returns[String t]
         $t = $m.getText();
         $t = $t.substring(1, $t.length() - 1);
         if($t.startsWith("\$_"))
-            throw new RuntimeException("the namespace \$_ is reserved for internal use");
+            throw new DynaSyntaxError("the namespace \$_ is reserved for internal use");
       }
     ;
 
@@ -547,7 +547,7 @@ expressionRoot returns [DynaTerm rterm]
     | db=dynabase { $rterm = $db.rterm; }
     | v=Variable '(' arguments ')' {
             if($v.getText().equals("_")) {
-                throw new DynaUserError("Calling an unscore function is not supported");
+                throw new DynaSyntaxError("Calling an unscore function is not supported");
             }
             // for doing an indirect call to some value
             $arguments.args.add(0, DynaTerm.create("\$variable", $v.getText()));
@@ -569,7 +569,7 @@ expressionDynabaseAccess returns[DynaTerm rterm]
     : a=expressionRoot {$rterm=$a.rterm;}
       ('.' m=methodCall {
                 if($rterm.name.equals("\$quote") || $rterm.name.equals("\$inline_function")) {
-                    throw new RuntimeException("syntax error");
+                    throw new DynaSyntaxError();//"syntax error");
                     //assert(false); /// should be a syntax error
                 }
                 if($rterm.name.equals("\$quote1")) {
@@ -584,8 +584,7 @@ expressionDynabaseAccess returns[DynaTerm rterm]
         })*
       ('.' bracketTerm {
         if($rterm.name.equals("\$quote") || $rterm.name.equals("\$quote1") || $rterm.name.equals("\$dynabase_quote1")) {
-            throw new RuntimeException("syntax error");
-            //assert(false); // should be a syntax error
+            throw new DynaSyntaxError("Structured terms can not be used as a dynabase");
         }
         $rterm = DynaTerm.create("\$dynbase_quote1", $rterm, DynaTerm.create_arr($bracketTerm.name, $bracketTerm.args)); })?
     ;
@@ -612,8 +611,7 @@ locals [DynaTerm add_arg=null]
                || $rterm.name.equals("\$dynabase_create") || $rterm.name.equals("\$map_empty") || $rterm.name.equals("\$map_element")
                || $rterm.name.equals("\$nil") || $rterm.name.equals("\$cons"))
                {
-               throw new RuntimeException("syntax error");
-               //assert(false); // this should return a syntax error rather than an assert(false)
+               throw new DynaSyntaxError("Implicit call using {} can only be done to a term");
                }
             if($rterm.name.equals("\$dynabase_call")) {
                 // have to put the argument onto the dynabase call element,

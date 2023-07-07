@@ -468,6 +468,8 @@
   (v1 (not v0)))
 (def-user-term ["not" "!"] 1 (make-not v0 v1))
 
+(defmethod rexpr-printer not-rexpr [r]
+  (str (rexpr-printer (:v1 r)) "= !" (rexpr-printer (:v0 r))))
 
 
 (def-builtin-rexpr sin 2

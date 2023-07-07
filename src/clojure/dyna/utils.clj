@@ -405,7 +405,8 @@
 (defn ensure-simple-symbol [s]
   (symbol (name s)))
 
-(defn ensure-set [s]
+(def ensure-set set)
+#_(defn ensure-set [s]
   (if (set? s)
     s
     (into #{} s)))

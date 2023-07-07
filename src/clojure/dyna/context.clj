@@ -47,6 +47,8 @@
   ;; TODO: there should be a recursive version of the set-value! function which avoids rechecking what the current
   ;; value of the variable is
   (ctx-set-value! [this variable value]
+    (when (.contains (str variable) "agg-op-hidden23593")
+      (debug-repl "setting h var"))
     (assert (not (nil? value)))
     (let [current-value (ctx-get-value this variable)]
       (if-not (nil? current-value)
@@ -54,7 +56,7 @@
           (throw (UnificationFailure. "Value does not match")))
         ;; then depending on the kind of context this is, we might have different behavior of
         ;; setting the value of the variable.
-        (if (or (contains? #{:root :disjunct :aggregator :if-expr-coditional :memo-expr-conditional ;:aggregator-op-outer
+        (if (or (contains? #{:root :disjunct :aggregator :if-expr-coditional :memo-expr-conditional :aggregator-op-outer
                              } context-kind)
                 (and (contains? #{:aggregator-conjunctive :proj :aggregator-op-inner} context-kind)
                      (contains? value-map variable)))
@@ -128,16 +130,18 @@
       (= context-kind :aggregator-op-inner) (do
                                               ;; Any variable that is bound will be remapped by the aggregator itself, we do not need to anything here
                                               resulting-rexpr)
-      (= context-kind :aggregator-op-outer) (if (empty? value-map)
-                                              resulting-rexpr
-                                              (do
-                                                (assert (empty? value-map))
-                                                resulting-rexpr
-                                                #_(when value-map
-                                                  (debug-repl "agg outer")
-                                                  (???)) ;; this is wrong.  Nothing is projected with outer.  All of the values should just "float up"
-                                                #_(make-conjunct [(make-variable-assignment-conjunct value-map)
-                                                                  resulting-rexpr])))
+      (= context-kind :aggregator-op-outer) (do
+                                              [value-map resulting-rexpr])
+      #_(if (empty? value-map)
+          resulting-rexpr
+          (do
+            (assert (empty? value-map))
+            resulting-rexpr
+            #_(when value-map
+                (debug-repl "agg outer")
+                (???)) ;; this is wrong.  Nothing is projected with outer.  All of the values should just "float up"
+            #_(make-conjunct [(make-variable-assignment-conjunct value-map)
+                              resulting-rexpr])))
       :else (do
               (dyna-debug (debug-repl "context unknown kind"))
               (???))))  ;; todo: other kinds of contexts which are going

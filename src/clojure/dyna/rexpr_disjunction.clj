@@ -81,15 +81,15 @@
           ;; this is going to have to remap the variables
           (if (= new-vars this-dv)
             this  ;; then nothing has changed so don't create a new structure
-            (let [new-trie (trie-map-values-subset (:rexprs this)
-                                                   new-vars-values
-                                                   (fn [key rr]
-                                                     (let [ret (remap-fn rr variable-renaming-map)]
-                                                       (dyna-debug (subset?  (exposed-variables ret) (into #{} new-vars)))
-                                                       (when-not (is-empty-rexpr? ret)
-                                                         ret))))]
-              ;(println "remap variables new trie" variable-renaming-map)
-              (make-disjunct-op new-vars new-trie))))))))
+            (context/bind-no-context
+             (let [new-trie (trie-map-values-subset (:rexprs this)
+                                                    new-vars-values
+                                                    (fn [key rr]
+                                                      (let [ret (remap-fn rr variable-renaming-map)]
+                                                        (dyna-debug (subset?  (exposed-variables ret) (into #{} new-vars)))
+                                                        (when-not (is-empty-rexpr? ret)
+                                                          ret))))]
+               (make-disjunct-op new-vars new-trie)))))))))
 
 
 (def ^:private not-seen-in-trie (Object.))

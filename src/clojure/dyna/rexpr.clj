@@ -768,6 +768,18 @@
   (join (str "*" (optional-line-break)) (map rexpr-printer (:args r))))
 
 (def-base-rexpr disjunct [:rexpr-list args]
+  (remap-variables [this variable-renaming-map]
+                   (context/bind-no-context
+                    (make-disjunct (vec (map #(remap-variables % variable-renaming-map) args)))))
+  (remap-variables-handle-hidden [this variable-renaming-map]
+                   (context/bind-no-context
+                    (make-disjunct (vec (map #(remap-variables-handle-hidden % variable-renaming-map) args)))))
+  (rewrite-rexpr-children [this remap-function]
+                          (context/bind-no-context
+                           (make-disjunct (vec (map remap-function args)))))
+  (remap-variables-func [this remap-function]
+                        (context/bind-no-context
+                         (make-disjunct (vec (map #(remap-variables-func % remap-function) args)))))
   (is-non-empty-rexpr? [this] (some is-non-empty-rexpr? args))
   (rexpr-jit-info [this] {:jittable false}))
 

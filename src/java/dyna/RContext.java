@@ -22,7 +22,7 @@ public interface RContext {
 
     Object ctx_all_rexprs();
 
-    Rexpr ctx_exit_context(Rexpr resulting_rexpr);
+    Object ctx_exit_context(Rexpr resulting_rexpr);
 
     Object ctx_intersect(RContext other);
 

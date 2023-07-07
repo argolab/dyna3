@@ -33,22 +33,29 @@
   (remap-variables [this variable-map]
                    ;; this is going to have to perform remapping of the body
                    ;(dyna-assert (not (some (into #{incoming} projected) (keys variable-map))))
-                   (let [variable-map (apply dissoc variable-map incoming projected)]
-                     (if (empty? variable-map)
-                       this
-                       (make-aggregator-op-inner incoming projected
-                                                 (remap-variables body
-                                                                  (apply dissoc variable-map incoming projected))))))
-
+                   (let [ret
+                         (let [variable-map (apply dissoc variable-map incoming projected)]
+                           (if (empty? variable-map)
+                             this
+                             (make-aggregator-op-inner incoming projected
+                                                       (remap-variables body
+                                                                        (apply dissoc variable-map incoming projected)))))]
+                     (when (some (conj (set projected) incoming) (vals variable-map))
+                       (debug-repl "remap hidden"))
+                     ret))
   (remap-variables-handle-hidden [this variable-map]
-                                 (let [new-hidden-names (into {} (for [v (if (is-variable? incoming)
-                                                                           (cons incoming projected)
-                                                                           projected)]
-                                                                   [v (make-variable (gensym 'agg-op-hidden))]))
-                                       new-map (merge variable-map new-hidden-names)]
-                                   (make-aggregator-op-inner (get new-map incoming incoming)
-                                                             (vec (map new-map projected))
-                                                             (remap-variables-handle-hidden body new-map))))
+                                 (let [ret
+                                       (let [new-hidden-names (into {} (for [v (if (is-variable? incoming)
+                                                                                 (cons incoming projected)
+                                                                                 projected)]
+                                                                         [v (make-variable (gensym 'agg-op-hidden))]))
+                                             new-map (merge variable-map new-hidden-names)]
+                                         (make-aggregator-op-inner (get new-map incoming incoming)
+                                                                   (vec (map new-map projected))
+                                                                   (remap-variables-handle-hidden body new-map)))]
+                                   (when (some (conj (set projected) incoming) (vals variable-map))
+                                     (debug-repl "remap hidden"))
+                                   ret))
   (all-conjunctive-rexprs [this]
                           (cons [#{} this]
                                 (let [vs (conj (ensure-set projected) incoming)]
@@ -132,6 +139,7 @@
   :run-at :construction
   (make-aggregator-op-inner incoming (conj projected-vars hid-var) R))
 
+;; if there is a project nested inside of a conjunction, then we are going to pull that conjunct out
 (def-rewrite
   :match {:rexpr (aggregator-op-inner (:any incoming) (:variable-list projected-vars) (conjunct (:rexpr-list Rs)))}
   :run-at :construction
@@ -288,8 +296,9 @@
               *aggregator-op-additional-constraints* additional-constraint-func
               *aggregator-op-saturated* check-saturated-func
               *aggregator-op-should-eager-run-iterators* false]
-      (let [ret (context/bind-context ctx (try (simplify Rbody)
-                                               (catch UnificationFailure e (make-multiplicity 0))))]
+      (let [[ret-value-map ret] (context/bind-context ctx
+                                                      (try (simplify Rbody)
+                                                           (catch UnificationFailure e (make-multiplicity 0))))]
         (if (is-empty-rexpr? ret)
           (if (nil? @accumulator)
             (do ;(debug-repl )
@@ -318,19 +327,29 @@
                                                           trie-wildcard
                                                           trie-root)))))))))))
           (if (nil? @accumulator)
-            (make-aggregator-op-outer operator result-variable ret)
-            (let [accum-vals (if (empty? exposed-vars)
-                               (make-aggregator-op-inner (make-constant (get @accumulator nil)) [] (make-multiplicity 1))
-                               (make-disjunct-op exposed-vars
-                                                 (let [[trie-root trie-wildcard] (convert-to-trie-agg (count exposed-vars) @accumulator)]
-                                                   (trie/make-PrefixTrie (count exposed-vars) trie-wildcard trie-root))))
-                  ;; this will merge the tries due to rewrites on the disjunction construction
-                  rr (make-aggregator-op-outer operator result-variable (make-disjunct [accum-vals
-                                                                                        ret]))
-                  rr2 (if (and (= simplify simplify-inference) (:add-to-out-rexpr operator) (empty? exposed-vars) (not (nil? (get @accumulator nil))))
-                        (make-conjunct [rr ((:add-to-out-rexpr operator) (get @accumulator nil) result-variable)])
-                        rr)]
-              rr2)))))))
+            (do
+              (doseq [[var val] ret-value-map]
+                (set-value! var val))
+              (make-aggregator-op-outer operator result-variable ret))
+            (do
+              (when-not (empty? ret-value-map)  ;; TODO: handle this
+                (debug-repl "handle value map")
+                (???))
+              (let [accum-vals (if (empty? exposed-vars)
+                                 (make-aggregator-op-inner (make-constant (get @accumulator nil)) [] (make-multiplicity 1))
+                                 (make-disjunct-op exposed-vars
+                                                   (let [[trie-root trie-wildcard] (convert-to-trie-agg (count exposed-vars) @accumulator)]
+                                                     (trie/make-PrefixTrie (count exposed-vars) trie-wildcard trie-root))))
+                    ;; this will merge the tries due to rewrites on the disjunction construction
+                    rr (make-aggregator-op-outer operator result-variable (make-disjunct [accum-vals
+                                                                                          ret]))
+                    rr2 (if (and (= simplify simplify-inference)
+                                 (:add-to-out-rexpr operator)
+                                 (empty? exposed-vars)
+                                 (not (nil? (get @accumulator nil))))
+                          (make-conjunct [rr ((:add-to-out-rexpr operator) (get @accumulator nil) result-variable)])
+                          rr)]
+                rr2))))))))
 
 ;; in the case that the disjunct is lifted out, it would be possible that
 ;; something which does not contain the proejcted vars and does not contain the
@@ -340,13 +359,16 @@
   :match (aggregator-op-inner (:any incoming-variable) (:any-list projected-vars) (:rexpr Rbody))
   :run-at [:standard :inference]
   (let [ctx (context/make-nested-context-aggregator-op-inner Rbody projected-vars incoming-variable)]
+    (when (some is-bound? projected-vars)
+      (debug-repl "some bound"))
     (context/bind-context-raw
      ctx
      (let [exposed (vec (exposed-variables rexpr)) ;; if all of the exposed are ground, then we should just go ahead and compute the value
            parent-is-bound (vec (map is-bound? exposed))
            nR (try (simplify Rbody)
                    (catch UnificationFailure e (make-multiplicity 0)))
-           eager-run-iterators *aggregator-op-should-eager-run-iterators*]
+           eager-run-iterators *aggregator-op-should-eager-run-iterators*
+           all-exposed-bound (every? is-bound? exposed)]
        (cond
          (is-empty-rexpr? nR) nR ;(make-multiplicity 0)
 
@@ -354,7 +376,7 @@
          (let [ret (*aggregator-op-contribute-value* (get-value-in-context incoming-variable ctx) (:mult nR))]
            ret)
 
-         (or (every? is-bound? exposed)
+         (or all-exposed-bound
              (and eager-run-iterators
                   (not *simplify-looking-for-fast-fail-only*)))
          (let [iterators (find-iterators nR)
@@ -370,7 +392,8 @@
               :simplify #(binding [*simplify-looking-for-fast-fail-only* true] (simplify %))
 
                                         ;:required [incoming-variable] ;; we still want to loop even if we can't directly assign this value
-              (let [inner-r (simplify inner-r)]
+              (let [inner-r1 inner-r
+                    inner-r ((if all-exposed-bound simplify-fully simplify) inner-r)]
                 ;; if this is not a multiplicity, then this expression has something that can not be handled
                 ;; in which case this will need to report an error, or return the R-expr while having that it can not be solved...
                 (when (is-empty-rexpr? inner-r)
