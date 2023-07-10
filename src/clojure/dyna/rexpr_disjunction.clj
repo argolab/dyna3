@@ -73,23 +73,25 @@
 (defn- remap-variables-disjunct-op [this variable-renaming-map remap-fn]
   (if (empty? variable-renaming-map)
     this
-    (let [this-dv (:disjunction-variables this)
-          new-vars (vec (map #(get variable-renaming-map % %) this-dv))]
-      (if (= new-vars this-dv)
-        this ;; return this unchanged, as the variable names are the same
-        (let [new-vars-values (vec (map #(when (is-constant? %) (get-value %)) new-vars))]
-          ;; this is going to have to remap the variables
-          (if (= new-vars this-dv)
-            this  ;; then nothing has changed so don't create a new structure
-            (context/bind-no-context
-             (let [new-trie (trie-map-values-subset (:rexprs this)
-                                                    new-vars-values
-                                                    (fn [key rr]
-                                                      (let [ret (remap-fn rr variable-renaming-map)]
-                                                        (dyna-debug (subset?  (exposed-variables ret) (into #{} new-vars)))
-                                                        (when-not (is-empty-rexpr? ret)
-                                                          ret))))]
-               (make-disjunct-op new-vars new-trie)))))))))
+    (debug-binding
+     [*current-simplify-stack* (conj *current-simplify-stack* this)]
+     (let [this-dv (:disjunction-variables this)
+           new-vars (vec (map #(get variable-renaming-map % %) this-dv))]
+       (if (= new-vars this-dv)
+         this ;; return this unchanged, as the variable names are the same
+         (let [new-vars-values (vec (map #(when (is-constant? %) (get-value %)) new-vars))]
+           ;; this is going to have to remap the variables
+           (if (= new-vars this-dv)
+             this  ;; then nothing has changed so don't create a new structure
+             (context/bind-no-context
+              (let [new-trie (trie-map-values-subset (:rexprs this)
+                                                     new-vars-values
+                                                     (fn [key rr]
+                                                       (let [ret (remap-fn rr variable-renaming-map)]
+                                                         (dyna-debug (subset?  (exposed-variables ret) (into #{} new-vars)))
+                                                         (when-not (is-empty-rexpr? ret)
+                                                           ret))))]
+                (make-disjunct-op new-vars new-trie))))))))))
 
 
 (def ^:private not-seen-in-trie (Object.))

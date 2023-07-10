@@ -21,7 +21,7 @@
 
 (defn get-context [] *context*)
 
-(def context-set-value-history {})
+;(def context-set-value-history {})
 
 (deftype context
     [parent
@@ -47,7 +47,7 @@
   ;; TODO: there should be a recursive version of the set-value! function which avoids rechecking what the current
   ;; value of the variable is
   (ctx-set-value! [this variable value]
-    (when (.contains (str variable) "agg-op-hidden23593")
+    #_(when (.contains (str variable) "agg-op-hidden23628")
       (debug-repl "setting h var"))
     (assert (not (nil? value)))
     (let [current-value (ctx-get-value this variable)]
@@ -62,7 +62,8 @@
                      (contains? value-map variable)))
           ;; then we set the value locally
           (do (set! value-map (assoc value-map variable value))
-              (def context-set-value-history (assoc context-set-value-history variable [value (Throwable.)])))
+              ;(def context-set-value-history (assoc context-set-value-history variable [value (Throwable.)]))
+              )
           ;; then we are going to pass this up to something else
           (ctx-set-value! parent variable value)))))
   (ctx-add-rexpr! [this rexpr]

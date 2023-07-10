@@ -5,8 +5,23 @@
    which can quickly get done without causing too much rewriting.  Even if we
    keep going with an R-expr which is equivalent to 0 (without known) it will
    still be correct, but we will just waste time on additional inner loops
-2. Macros are not subsuiting the variables in correctly it seems
-3. I think that variable renaming is causing the quicksort program to fail atm
+   - this is now setting a fast fail flag, which blocks some operations such as
+     expanding user calls.  This should at least prevent those from running and
+     getting the result which corresponds with an error
+
+2. I think that variable renaming is causing the quicksort program to fail atm
+   - when one of the disjuncts causes it to unify with an expression, it will
+     result in it finding that there is some result which handle that value.
+
+3. factorial program is not terminating atm, but somehow pressing Ctrl-C is able
+   to cause it to stop and return the right answer?  Now sure why it would get
+   interrupted and then somehow get the right answer.  Though I suppose this
+   could be something with backchaining going on for too long?  It would have
+   that there is something that might cause it to run for too long.
+   - pressing Ctrl-C will set the thread interrupted flag, which stops
+     simplification from continuing to run in a loop.
+   - now this is just not stopping anymore, so seems like it is doing too many
+     steps of simplification.
 
 ** bugs fixed
 1. Iterator when a variable is already bound to a constant, need to skip ahread in the iterator sequence
@@ -16,7 +31,7 @@
    merging it into its internal representation.
    - this issue can be provoked by setting the simplify method of run-iterator
      to the identity (disabling simplify during each step of the iteration)
-
+2. Macros are not subsuiting the variables in correctly it seems
 
 ** bugs deferred
 1. make-memoization-controller-function is supposed to generate efficient
@@ -46,3 +61,21 @@
 
 2. memoization point wise update when a user-definition is changed.  This needs
    to not rebuild the memo tables from scratch, as that is going to be slow.
+
+
+3. should track what the user call stack is for different operations.  Currently
+   it is too hard to figure out where something is going wrong.  if it tracked
+   the call stack, then it would be able to figure out which of the operations
+   will correspond to it getting some result.  But the call stack is going to
+   become more complicated when it has different things like memoization
+   involved, as those call stack sequence will not really correspond with
+   anything.
+   - I suppose that debugging the program could also be done by adding
+     additional rules to track stuff, but not sure if that will work out
+     correctly either?  I think that debugging the programs is just going to
+     difficult in general given the number of things which are getting combined
+     together to make a final result.  If everything is "simple" meaning that it
+     is all ground values, then there is not that much of an issue, but once
+     there are complex delayed constraints, those constraints are going to cause
+     it to get some result which can only happen in the exact case where all of
+     those delayed constraints combine together to make some inference.

@@ -1400,6 +1400,11 @@
         jr
         (recur jr)))))
 
+(def simplify-fully-internal simplify-fully-with-jit
+  ;; simplify-fully if needed to be used by something internal.  Should avoid
+  ;; creating new guesses as that might cause the system to make a bad guess causing it to not terminate
+  )
+
 (defn simplify-fully [rexpr]
   (try
     (loop [cri rexpr]

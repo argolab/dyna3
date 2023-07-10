@@ -191,7 +191,6 @@
                            r)))
            make-aggs (fn [op out-var in-var rexprs]
                        (let [dj (make-disjunct (vec rexprs))
-                             zzz (dyna-assert (contains? (exposed-variables dj) in-var))
                              res
                              (make-aggregator op out-var in-var
                                               true ;; the body is conjunctive, meaning that we can move constraints out
@@ -203,7 +202,6 @@
                                       (let [new-in (make-variable (gensym 'comb_incoming_var))
                                             new-children (for [c children]
                                                            (let [r (strip-agg new-in c)]
-                                                             (dyna-assert (contains? (exposed-variables r) new-in))
                                                              r))]
                                         [op (make-aggs op (first out-vars) new-in new-children)]))))]
        (assert (= 1 (count out-vars))) ;; the out var should have the same name as we have standarized the names of the arguments
@@ -294,6 +292,8 @@
                           (debug-repl "should not happen, extra exposed variables"))))
           (dyna-assert (or (= (set (filter is-variable? (vals new-var-map))) (set (exposed-variables variable-map-rr)))
                            (is-empty-rexpr? variable-map-rr)))
+          #_(when (= "partition" (:name name))
+            (debug-repl "return partition"))
           (if-not (nil? with-key-var)
             (let [result-var (get var-map (make-variable (str "$" (:arity name))))
                   value-call (make-user-call {:name "$value" :arity 1}
