@@ -1761,7 +1761,7 @@
     (ctx-add-context! outer-context intersected-ctx)
                                         ;(debug-repl "disjunct standard")
     (let [ret (make-disjunct children-with-contexts)]
-      (when-not (= (exposed-variables ret) (exposed-variables rexpr))
+      #_(when-not (= (exposed-variables ret) (exposed-variables rexpr))
         (debug-repl "disjunct exposed"))
       ret)))
 

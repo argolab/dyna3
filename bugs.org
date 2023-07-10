@@ -79,3 +79,12 @@
      there are complex delayed constraints, those constraints are going to cause
      it to get some result which can only happen in the exact case where all of
      those delayed constraints combine together to make some inference.
+
+
+* working on a large relational system
+https://news.ycombinator.com/item?id=18442941
+- oracle database where new flags are added to handle the different use cases
+https://www.postgresql.org/message-id/flat/31cc6df9-53fe-3cd9-af5b-ac0d801163f4%40iki.fi
+- postgres has around 1666 variables which are "global" to a connection to tack
+  various aspects of the session state.  Conceptually similar to the case we
+  have here

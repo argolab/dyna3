@@ -646,7 +646,7 @@
    ctx
    ((fn rec [iter bind-order rexpr]
       (if (empty? bind-order)
-        (callback-fn rexpr)
+        (callback-fn rexpr true)
         (let [v (first bind-order)
               r (rest bind-order)]
           (if (is-bound? v)
@@ -707,7 +707,7 @@
         rexpr (gensym 'rexpr)
         simplify-method (:simplify kw-args 'simplify)
         ;; the macro let does not work with the debug-repl.  I suppose that
-        ;; there could be something simpler which woul djust keep the same form,
+        ;; there could be something simpler which would just keep the same form,
         ;; but would expand the macro in place?  Or that it would
         ;; callback-body (macroexpand `(macrolet [~'iterator-encode-state-as-rexpr
         ;;                                        ([] `(do
@@ -721,7 +721,7 @@
                              `(context/get-context) ;; use the existing "global" context
                              `(context/make-empty-context ~rexpr))
                      [picked-iterator# picked-binding-order#] (~pick-iterator ~ctx iters# ~required-binding)
-                     callback-fn# (fn [~rexpr-callback-var]
+                     callback-fn# (fn [~rexpr-callback-var ~'did-run-some-iterator]
                                     ;; could use macrolet here to define the
                                     ;; encode-state-as-rexpr and then it can
                                     ;; expand into whatever is required we know
@@ -733,7 +733,7 @@
                                                   ~body))
                      ]
                  (if (nil? picked-iterator#)
-                   (callback-fn# ~rexpr) ;; there is nothing to iterate, so just run the callback function
+                   (callback-fn# ~rexpr false) ;; there is nothing to iterate, so just run the callback function
                    (do ;(dyna-assert (subset? picked-binding-order# (ensure-set (iter-what-variables-bound picked-iterator#))))
                        (~run-iterator-fn
                         picked-iterator#
