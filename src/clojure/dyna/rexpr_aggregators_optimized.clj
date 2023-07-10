@@ -239,7 +239,10 @@
 
 (defn- convert-to-trie-rexprs [cnt trie]
   (if (= cnt 0)
-    [(ClojureUnorderedVector/create trie) 0]
+    (do
+      (when (or (rexpr? trie) (map? trie))
+        (debug-repl "trie map"))
+      [(ClojureUnorderedVector/create trie) 0])
     (let [contains-wildcard (volatile! 0)
           n (into ClojureHashMap/EMPTY
                   (for [[k v] trie
@@ -379,10 +382,7 @@
            parent-is-bound (vec (map is-bound? exposed))
            nR (try (simplify Rbody)
                    (catch UnificationFailure e (make-multiplicity 0)))
-           eager-run-iterators *aggregator-op-should-eager-run-iterators*
            all-exposed-bound (every? is-bound? exposed)]
-       (when (some #(and (int? %) (<= % 0)) (map get-value exposed))
-         (debug-repl "neg"))
        (cond
          (is-empty-rexpr? nR) nR ;(make-multiplicity 0)
 
@@ -392,7 +392,7 @@
 
          :else
          (let [should-run-iterator (and (or all-exposed-bound
-                                            eager-run-iterators)
+                                            *aggregator-op-should-eager-run-iterators*)
                                         (not *simplify-looking-for-fast-fail-only*))
                additional-constraints (*aggregator-op-additional-constraints* incoming-variable)
                nR2 (if (not= (make-multiplicity 1) additional-constraints)
@@ -400,8 +400,7 @@
                      nR)
                iterators (when should-run-iterator
                            (find-iterators nR2))
-               accumulator (volatile! nil)
-               result-rexprs (volatile! nil)]
+               accumulator (volatile! nil)]
            ;; will loop over assignments to all of the variables
            (try
              (run-iterator
@@ -410,13 +409,12 @@
               :rexpr-in nR2
               :rexpr-result inner-r
               :simplify #(binding [*simplify-looking-for-fast-fail-only* true] (simplify-fast %))
-              (let [inner-r (if did-run-some-iterator
+              (let [inner-r (if (or (not= inner-r nR)
+                                    did-run-some-iterator)
                               (simplify inner-r)  ;((if all-exposed-bound simplify-fully-internal simplify) inner-r)
                               inner-r)]
                 ;; if this is not a multiplicity, then this expression has something that can not be handled
                 ;; in which case this will need to report an error, or return the R-expr while having that it can not be solved...
-                #_(when (is-empty-rexpr? inner-r)
-                  (debug-repl "empty r"))
                 (if (is-multiplicity? inner-r)
                   (let [val (get-value incoming-variable)
                         mult (:mult inner-r)]
@@ -425,9 +423,7 @@
                       (let [rc (*aggregator-op-contribute-value* val mult)]
                         (when-not (is-empty-rexpr? rc)
                           ;; then we have to save the result of this R-expr, as it could not get processed for some reason
-                          (if eager-run-iterators
-                            (vswap! accumulator update-in (map get-value exposed) conj rc)
-                            (vswap! result-rexprs conj rc))))))
+                          (vswap! accumulator update-in (map get-value exposed) conj rc)))))
                   (when-not (*aggregator-op-saturated*)
                                         ;(debug-repl "all bound but not done")
                     (let [new-incoming (if (is-bound? incoming-variable)
@@ -448,25 +444,35 @@
                                                        (if (not= (make-multiplicity 1) other-constraints)
                                                          (make-conjunct [new-body other-constraints])
                                                          new-body))]
-                      (if eager-run-iterators
-                        (vswap! accumulator update-in (map get-value exposed) conj rc)
-                        (vswap! result-rexprs conj rc)))))))
+                      (vswap! accumulator update-in (map get-value exposed) conj rc))))))
              (catch Exception err
                (throw err)
                ;(debug-repl "err")
                ))
 
-           (if eager-run-iterators
-             (if (empty? @accumulator)
-               (make-multiplicity 0)
-               (let [[root wildcard] (convert-to-trie-rexprs (count exposed) @accumulator)
-                     ret (make-disjunct-op exposed
-                                           (trie/make-PrefixTrie (count exposed) wildcard root))]
-                 ret))
-             (if (empty? @result-rexprs)
-               (make-multiplicity 0)
-               (let [ret (make-disjunct (vec @result-rexprs))]
-                 ret))))
+           (if (empty? @accumulator)
+             (make-multiplicity 0)
+             (if (empty? exposed)
+               (make-disjunct (get @accumulator nil))
+               (make-conjunct (loop [ret []
+                                     ev exposed
+                                     trie @accumulator]
+                                (if (empty? ev)
+                                  (if (= 1 (count trie))
+                                    (conj ret (first trie))
+                                    (conj ret (make-disjunct trie)))
+                                  (if (= 1 (count trie))
+                                    (let [[[val r]] (seq trie)]
+                                      (recur (if (nil? val)
+                                               ret
+                                               (conj ret (make-unify (first ev) (make-constant val))))
+                                             (rest ev)
+                                             r))
+                                    (conj ret (make-disjunct-op ev
+                                                                (let [[trie-root trie-wildcard] (convert-to-trie-rexprs (count ev) trie)]
+                                                                  (trie/make-PrefixTrie (count ev)
+                                                                                        trie-wildcard
+                                                                                        trie-root)))))))))))
 
          #_:else
          #_(let [zzz (debug-repl "else")
