@@ -176,7 +176,8 @@
                               (when-not (is-empty-rexpr? new-child-rexpr)
                                 (let [dj-key (map #(get-value-in-context % child-context) dj-vars)]
                                   ;; track what values we have seen
-                                  (doseq [[i v x] (zipseq (range) dj-key child-var-values)
+                                  (doseq [[i v] (zipseq (range) dj-key)
+                                          :let [x (nth child-var-values i)]
                                           :when (and (not= x nil) (not= x v))]
                                     (assoc! child-var-values i (if (= not-seen-in-trie x)
                                                                  v
@@ -211,16 +212,20 @@
            child-context
            (let [new-child-rexpr (simplify child)]
              ;; deal with the resulting child expression and save it into the trie
-             (???))))
+             (save-result-in-trie new-child-rexpr child-context)
+             #_(when-not (is-empty-rexpr? new-child-rexpr)
+               (debug-repl "todo")
+               (???)))))
         (catch UnificationFailure err nil)))
     ;; set the value of variables which are the same along all branches
-    (doseq [[v x] (zipseq dj-vars child-var-values)
+    (doseq [[v x] (zipseq dj-vars (persistent! child-var-values))
             :when (not (contains? #{not-seen-in-trie nil} x))]
       (set-value! v x))
     (case @num-children
       0 (make-multiplicity 0)
       1 (let [[[child-bindings child]] (trie-get-values @ret-children nil)]
-          (doseq [[dv djv] (zipseq dj-vars child-bindings)]
+          (doseq [[dv djv] (zipseq dj-vars child-bindings)
+                  :when (not (nil? djv))]
             (set-value! dv djv))
           child)
       (let [new-vars (vec (map (fn [v]
@@ -231,13 +236,20 @@
             ret (make-disjunct-op new-vars @ret-children)]
         ret))))
 
-#_(def-rewrite
+(def-rewrite
   :match {:rexpr (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs))
           :check (not *simplify-looking-for-fast-fail-only*)}
   :run-at :standard
-  :run-in-jit false)
+  :run-in-jit false
+  (let [new-dj-vars (map #(let [v (get-value %)] (if (nil? v) % (make-constant v))) dj-vars)]
+    ;; the internal steps of rewriting might require many passes to get to the result, so this might not actually work out this well.
+    ;; how this figures out that there were no changes, or that the changes are unnecessary to process is going to require additional checking or something.  Not entirely sure what to do about that....
+    ;; how this might figure out that some of these operations will find that it could work through it to get that
+    #_(when (not= new-dj-vars dj-vars) ;; if none of the exposed variables are now bound, then we are not going to call simplify, as the internals are going to be the same
+)
+    (disjunct-op-rewrite-internals (vec new-dj-vars) rexprs simplify)))
 
-#_(def-rewrite
+(def-rewrite
   :match {:rexpr (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs))
           :check (not *simplify-looking-for-fast-fail-only*)}
   :run-at :inference
@@ -246,7 +258,7 @@
   ;; if we tracked the different types of R-exprs which are contained, then
   (disjunct-op-rewrite-internals dj-vars rexprs simplify))
 
-(def-rewrite
+#_(def-rewrite
   :match {:rexpr (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs))
           :check (not *simplify-looking-for-fast-fail-only*)}
   :run-at [:standard :inference]
