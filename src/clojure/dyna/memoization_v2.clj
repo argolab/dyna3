@@ -19,7 +19,7 @@
                                                       *aggregator-op-should-eager-run-iterators*]])
   (:require [dyna.rexpr-disjunction :refer [trie-diterator-instance]])
   (:require [clojure.set :refer [union difference]])
-  (:import [dyna DynaUserError IDynaAgendaWork DynaTerm InvalidAssumption UnificationFailure DIterable DynaAgenda])
+  (:import [dyna DynaUserError IDynaAgendaWork DynaTerm InvalidAssumption UnificationFailure DIterable DynaAgenda ClojureUnorderedVector ClojureHashMap])
   (:import [dyna.assumptions Watcher Assumption])
   (:import [dyna.prefix_trie PrefixTrie])
   (:import [clojure.lang IFn]))
@@ -323,12 +323,14 @@
             ;; this is a new trie which will contain all of the new R-expr values which are represented
             ;; how this will encode the different values will mean that
             accum-vals-wrapped (update-vals accumulated-agg-values (fn [x]
-                                                                     [(make-aggregator-op-inner (make-constant x) [] (make-multiplicity 1))]))
+                                                                     (ClojureUnorderedVector/create
+                                                                      [(make-aggregator-op-inner (make-constant x) [] (make-multiplicity 1))])))
             new-values (if (is-empty-rexpr? ret-rexpr)
                          accum-vals-wrapped
-                         (update accum-vals-wrapped key (fn [x] (conj (or x []) ret-rexpr))))
+                         (update accum-vals-wrapped key (fn [x] (ClojureUnorderedVector/concat [x [ret-rexpr]]))))
             new-values-freq (frequencies new-values)
             ]
+
         (let [need-to-redo (volatile! false)
               messages-to-send (volatile! nil)]
           (swap! data (fn [[valid has-computed mv]]
@@ -349,9 +351,10 @@
                                   (vreset! messages-to-send nil)
                                   [valid has-computed mv])
                                 (do ;; there are new values to insert
-                                  ;(debug-repl "memo insert")
-                                  (when (some #(some nil? %) (map first (keys new-values-freq)))
-                                    (debug-repl "insert free"))
+                                        ;(debug-repl "memo insert")
+                                  (dyna-debug
+                                   (when (some #(some nil? %) (map first (keys new-values-freq)))
+                                     (debug-repl "insert free")))
                                   (vreset! messages-to-send nil)
                                   (let [with-deleted
                                         #_(reduce-kv (fn [[kk _]]))
@@ -366,6 +369,8 @@
                                                 (if (contains? new-values kk)
                                                   (recur cmv (next kks))
                                                   (do
+                                                    (debug-delay-ntimes 100
+                                                                        (debug-repl "memo"))
                                                     (vswap! messages-to-send conj kk)
                                                     (recur (trie-delete-matched cmv kk) (next kks)))))))
                                         with-added (loop [cmv with-deleted
@@ -376,6 +381,8 @@
                                                          #_(when-not (= mult 1)
                                                              (debug-repl "mult?"))
                                                          ;; TODO: this needs to check that
+                                                         (debug-delay-ntimes 100
+                                                                             (debug-repl "memo2"))
                                                          (vswap! messages-to-send conj kk)
                                                          (recur (trie-update-collection cmv kk (fn [c]
 
