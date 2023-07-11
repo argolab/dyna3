@@ -199,7 +199,7 @@
 
                   ;; has-key is true, so we are going to return the matched values from the data trie
                   (let [;has-nil (some nil? variable-values)
-                        lrexpr (make-no-simp-disjunct-op argument-variables memoized-values) ;; build a disjunct opt which holds the current memoized values
+                        lrexpr (make-no-simp-disjunct-op argument-variables memoized-values nil) ;; build a disjunct opt which holds the current memoized values
                         lcontext (context/make-empty-context lrexpr)
                         variables-map (zipmap variables argument-variables)]
                     (doseq [[var val] (zipseq argument-variables variable-values)
@@ -250,7 +250,7 @@
                         (iter-variable-binding-order [this]
                           [variables])
                         (iter-create-iterator [this which-binding]
-                          (assert (.contains (iter-variable-binding-order this) which-binding))
+                          ;(assert (.contains (iter-variable-binding-order this) which-binding))
                           ;; this is using the same code as the optimized disjunct to create an iterator, as they are both just looping through
                           ;; the values of the prefix trie
                           ;(debug-repl "create memo iterator")

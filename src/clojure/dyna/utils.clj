@@ -3,7 +3,8 @@
   (:require [clojure.main :refer [demunge]])
   (:require [clojure.reflect :refer [reflect]])
   (:require [clojure.set :refer [union]])
-  (:import [dyna DynaTerm]))
+  (:import [dyna DynaTerm ThreadVar])
+  (:import [java.lang.reflect Method]))
 
 (def ^:dynamic debug-on-assert-fail true)
 
@@ -199,21 +200,6 @@
         (debug-repl "failed override")))
     ret))
 
-
-;; (defmacro deftype-with-overrides
-;;   [name args overrides & bodies]
-;;   )
-
-;; (defn overrideable-function
-;;   "Allows for a function in a macro to be overriden via the optional arguments"
-;;   [opts name body]
-;;   (let [ret (atom body)]
-;;     (doseq [o opts]
-;;       (if (= (car o) name)
-;;         (reset! ret o)))
-;;     @ret))
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
@@ -339,7 +325,7 @@
                         (:members refl))
         super-members (into #{} (map (fn [x] [(name (:name x)) (count (:parameter-types x))]) (apply union (map #(get-superclass-methods (resolve %)) (:bases refl)))))
         this-var (gensym)
-        methods-to-create (into #{} (for [mth (.getDeclaredMethods cls)
+        methods-to-create (into #{} (for [^Method mth (.getDeclaredMethods cls)
                                           :when (not (contains? super-members [(.getName mth) (.getParameterCount mth)]))]
                                       [(.getName mth) (.getParameterCount mth)]))]
     `(let []  ;; we can do this as a single compile unit
@@ -395,7 +381,7 @@
                                                             mat (re-matches #"%([0-9]+)" n)]
                                                         (if (= n "%")
                                                           (nth args 0)
-                                                          (if mat (nth args (Integer/valueOf (second mat)))
+                                                          (if mat (nth args (Integer/valueOf ^String (second mat)))
                                                               a)))
                                                       a))]
                                             r))]))]
@@ -452,3 +438,54 @@
   ;(when (= "true" (System/getProperty "dyna.debug_slow_checks" "true")))
   ;`(do ~@args)
   )
+
+(def ^:private tlocal-vars (set
+                            (map :name
+                                 (filter #(and (instance? clojure.reflect.Field %) ((:flags %) :public))
+                                         (:members (reflect ThreadVar))))))
+
+(comment
+  (defmacro tlocal-def [v]
+    (let [v (symbol (munge (name v)))]
+      (assert (tlocal-vars v))
+      nil))
+
+  (defmacro tlocal [v]
+    (let [v (symbol (munge (name v)))]
+      (assert (tlocal-vars v))
+      `(. ^ThreadVar (ThreadVar/get) ~v)))
+
+  (defmacro tbinding [bnds & body]
+    (assert (even? (count bnds)))
+    (let [thread-var (gensym 'thread-var)
+          stash-names (into {} (for [[k _] (partition 2 bnds)
+                                     :let [k2 (symbol (munge (name k)))]]
+                                 (do
+                                   (assert (contains? tlocal-vars k2))
+                                   [k2 (gensym (str "stash-" k2))])))]
+      `(let* [^ThreadVar ~thread-var (ThreadVar/get)
+              ~@(apply concat (for [[k s] stash-names] ;; cache all of the old values
+                                [s `(. ^ThreadVar ~thread-var ~k)]))
+              ret#
+              (try
+                (do
+                  ~@(for [[k v] (partition 2 bnds)]  ;; set all of the values
+                      `(set! (. ^ThreadVar ~thread-var ~(symbol (munge (name k)))) ~v))
+                                        ;(debug-repl)
+                  ~@body ;; evaluate the body
+                  )
+                (finally
+                  (do
+                    ~@(for [[k s] stash-names] ;; unset all of the bindings
+                        `(set! (. ^ThreadVar ~thread-var ~k) ~s)))))]
+                                        ;(debug-repl "unset")
+         ret#)))
+
+  (defmacro tlocal-def [v]
+    `(def ^{:dynamic true} ~v))
+
+  (defmacro tlocal [v]
+    v)
+
+  (defmacro tbinding [bnds & body]
+    `(binding ~bnds ~@body)))

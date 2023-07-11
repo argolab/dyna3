@@ -36,6 +36,9 @@
       (apply merge-with (partial merge-map-arity (- arity 1)) (if (nil? f) ClojureHashMap/EMPTY f) (rest args)))))
 
 (defsimpleinterface IPrefixTrie
+  (trie-arity [])
+  (trie-wildcard [])
+  (trie-root [])
   (trie-get-values-collection [key])  ;; return the values associated with a given key together
   (trie-get-values [key])  ;; return the values associated with a given key seperatly
 
@@ -87,6 +90,9 @@
                      ;^{:tag int :unsynchronized-mutable true} hashCodeCache
                      ]
   IPrefixTrie
+  (trie-arity [this] arity)
+  (trie-wildcard [this] contains-wildcard)
+  (trie-root [this] root)
   (trie-get-values-collection [this key]
     (let [key (if (nil? key) (repeat arity nil) key)]
       (assert (= (count key) arity))
@@ -227,10 +233,10 @@
                                        (conj (or prev-val []) val))))
 
   (trie-merge [this other]
-    (assert (= arity (.arity other)))
+    (assert (= arity (trie-arity other)))
     (make-PrefixTrie arity
-                 (bit-or contains-wildcard (.contains-wildcard other))
-                 (merge-map-arity arity root (.root other))))
+                 (bit-or contains-wildcard (trie-wildcard other))
+                 (merge-map-arity arity root (trie-root other))))
 
   (trie-delete-matched [this key]
     (if (or (nil? key) (every? nil? key))
@@ -364,14 +370,14 @@
   (valAt [this key] (.valAt this key nil))
   (valAt [this key notfound]
     (assert (seqable? key))
-    (let [ret (map second (trie-get-values key))]
+    (let [ret (map second (trie-get-values this key))]
       (if (empty? ret) [notfound] ret)))
 
   clojure.lang.Seqable
   (seq [this] (trie-get-values this nil))
 
   clojure.lang.IPersistentCollection
-  (count [this] (count (trie-get-values this)))
+  (count [this] (count (trie-get-values this nil)))
   (cons [this other] (???))
   (equiv [^IPrefixTrie this other]
     (.equals this other))
@@ -379,9 +385,9 @@
   clojure.lang.Associative
   (containsKey [this key]
     (assert (seqable? key))
-    (not (empty? (trie-get-values key))))
+    (not (empty? (trie-get-values this key))))
   (entryAt [this key]
-    (into {} (trie-get-values this )))
+    (into {} (trie-get-values this nil)))
   (assoc [this key val]
     (trie-insert-val this key val)))
 

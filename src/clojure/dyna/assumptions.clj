@@ -7,6 +7,7 @@
 
 ;; any assumption which the current expression depends
 (def ^:dynamic *current-watcher*)
+;(tlocal-def current-watcher)
 (def ^:dynamic *fast-fail-on-invalid-assumption* false)
 
 (declare depend-on-assumption
@@ -144,7 +145,8 @@
                             ]
   ;; in this case, we are stating that the current computation would need to get
   ;; redone if the current assumption becomes invalid
-  (when (bound? #'*current-watcher*)
+  ;(let [w (tlocal current-watcher)])
+  (when (bound? #'*current-watcher*);(nil? w)
     (add-watcher! ass *current-watcher*)
     ;; check the assumption after adding it might get invalidated inbetween
     (when (not (is-valid? ass))
@@ -153,12 +155,17 @@
       (throw (InvalidAssumption. "attempting to use invalid assumption")))))
 
 (defmacro bind-assumption [assumpt & body]
+  #_`(tbinding
+   [current-watcher ~assumpt]
+   ~@body)
   `(binding [*current-watcher* ~assumpt]
-     ~@body))
+    ~@body))
 
 (defmacro compute-with-assumption [& body]
   `(loop [assumpt# (make-assumption)]
      (let [[ok# res#]
+           #_(tbinding
+            [current-watcher assumpt#])
            (binding [*current-watcher* assumpt#
                      *fast-fail-on-invalid-assumption* true]
              (try

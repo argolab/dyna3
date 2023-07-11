@@ -47,7 +47,7 @@
 
     `(def-rewrite
        :match (~name ~@(for [var all-vars]
-                         (if (.contains required-ground var)
+                         (if (some #{var} required-ground)
                            `(:ground ~(symbol (str "g" var)))
                            `(:free ~var))))
 
@@ -954,7 +954,7 @@
 (defn- cast-to-float [x]
   (if (instance? String x)
     (Double/parseDouble ^String x)
-    (.doubleVaue ^Number (num x))))
+    (. ^Number (num x) doubleVaue)))
 
 (def-builtin-rexpr float-cast 2
   (:allground (= v1 (cast-to-float v0)))

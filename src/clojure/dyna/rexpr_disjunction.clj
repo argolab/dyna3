@@ -27,8 +27,13 @@
 ;; as some kind of an upper bound instead of a tight bound for the value?  In
 ;; which case it could allow for iterators to run faster in some cases
 
+;; the metadata should track useful information for the disjunct
+;; I suppose that this could be things like the types of R-exprs contained in the trie
+;; as well as which variables still have constraints on them
+
 (def-base-rexpr disjunct-op [:var-list disjunction-variables
-                             :prefix-trie rexprs]
+                             :prefix-trie rexprs
+                             :unchecked metadata]
   (primitive-rexpr [this]
                    ;; this might want to remap back into a disjunct which is
                    ;; simple, in which case it would want to find all of the
@@ -63,8 +68,9 @@
                                                (when (some is-non-empty-rexpr? r) true))))))
   (rewrite-rexpr-children [this remap-function]
                           (make-disjunct-op disjunction-variables
-                                                      (trie-map-values rexprs nil (fn [trie-path r]
-                                                                                    (remap-function r)))))
+                                            (trie-map-values rexprs nil (fn [trie-path r]
+                                                                          (remap-function r)))
+                                            metadata))
   (remap-variables-func [this remap-function]
                         (???) ;; TODO
                         )
@@ -90,8 +96,11 @@
                                                        (let [ret (remap-fn rr variable-renaming-map)]
                                                          (dyna-debug (subset?  (exposed-variables ret) (into #{} new-vars)))
                                                          (when-not (is-empty-rexpr? ret)
-                                                           ret))))]
-                (make-disjunct-op new-vars new-trie))))))))))
+                                                           ret))))
+                    metadata (:metadata this)
+                    new-metadata (when-not (nil? metadata)
+                                   (assoc metadata :rexprs-exposed-vars (set (map #(get variable-renaming-map % %) (:rexprs-exposed-vars metadata)))))]
+                (make-disjunct-op new-vars new-trie new-metadata))))))))))
 
 
 (def ^:private not-seen-in-trie (Object.))
@@ -161,7 +170,8 @@
                                          (first rt)
                                          (next rt)))))
             ret (make-disjunct-op dj-vars
-                                  combined-trie)]
+                                  combined-trie
+                                  nil)]
         ret))))
 
 
@@ -169,11 +179,23 @@
   (let [outer-context (context/get-context)
         ret-children (volatile! (make-PrefixTrie (count dj-vars) 0 nil))
         num-children (volatile! 0)
+        new-metadata (volatile! {:contained-rexprs #{}
+                                 :rexprs-exposed-vars #{}
+                                        ;:all-constraints  if everything contained in the trie is a constraint, then we could remove the aggregator, even in the case that we still have a disjunct.  Though not 100% sure if that would be all that helpful, it would essentially just be rewriting the R-expr such that the result passes through the aggregator and then we can remove the outer and inner aggregators in that case
+                                 ;; all-constraints would also require that there are no wildcards and the max number of branches are 1.
+                                 ;; this might be redudant, as if it has rexprs-exposed-vars is an empty set, then it should be able to run the aggregators on all branches as long as there are no wildcards.  It would just have to combine all of the values that it sees along a given branch
+                                 })
         dj-var-values (map get-value dj-vars)
         ;; track the different values which have been seen when added to the trie to identify things which are constant
         child-var-values (transient (vec (repeat (count dj-vars) not-seen-in-trie)))
         save-result-in-trie (fn save-result-in-trie [new-child-rexpr child-context]
                               (when-not (is-empty-rexpr? new-child-rexpr)
+                                (vswap! new-metadata (fn [m]
+                                                       ;; track information about the R-exprs which are contained in the trie.  This information should
+                                                       ;; be useful to figure out which operations we need to perform
+                                                       (assoc m
+                                                              :contained-rexprs (conj (:contained-rexprs m) (rexpr-name new-child-rexpr))
+                                                              :rexprs-exposed-vars (union (:rexprs-exposed-vars m) (exposed-variables new-child-rexpr)))))
                                 (let [dj-key (map #(get-value-in-context % child-context) dj-vars)]
                                   ;; track what values we have seen
                                   (doseq [[i v] (zipseq (range) dj-key)
@@ -221,7 +243,7 @@
     (doseq [[v x] (zipseq dj-vars (persistent! child-var-values))
             :when (not (contains? #{not-seen-in-trie nil} x))]
       (set-value! v x))
-    (case @num-children
+    (case (long @num-children)
       0 (make-multiplicity 0)
       1 (let [[[child-bindings child]] (trie-get-values @ret-children nil)]
           (doseq [[dv djv] (zipseq dj-vars child-bindings)
@@ -233,11 +255,13 @@
                                    (make-constant (get-value v))
                                    v))
                                dj-vars))
-            ret (make-disjunct-op new-vars @ret-children)]
+            ret (make-disjunct-op new-vars @ret-children @new-metadata)]
+        ;(println @new-metadata)
+                                        ;(debug-repl)
         ret))))
 
 (def-rewrite
-  :match {:rexpr (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs))
+  :match {:rexpr (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs) metadata)
           :check (not *simplify-looking-for-fast-fail-only*)}
   :run-at :standard
   :run-in-jit false
@@ -250,7 +274,7 @@
     (disjunct-op-rewrite-internals (vec new-dj-vars) rexprs simplify)))
 
 (def-rewrite
-  :match {:rexpr (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs))
+  :match {:rexpr (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs) metadata)
           :check (not *simplify-looking-for-fast-fail-only*)}
   :run-at :inference
   :run-in-jit false
@@ -259,7 +283,7 @@
   (disjunct-op-rewrite-internals dj-vars rexprs simplify))
 
 #_(def-rewrite
-  :match {:rexpr (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs))
+  :match {:rexpr (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs) metadata)
           :check (not *simplify-looking-for-fast-fail-only*)}
   :run-at [:standard :inference]
   :run-in-jit false
@@ -360,7 +384,7 @@
       1 (let [[[child-bindings child]] (trie-get-values @ret-children nil)]
           ;; return the child directly as there is only a single child and there is no need for the disjunction
           child)
-      (let [ret (make-disjunct-op dj-vars @ret-children)]
+      (let [ret (make-disjunct-op dj-vars @ret-children nil)]
         ;(println "making new trie with " @num-children)
         ret))))
 
@@ -421,7 +445,7 @@
           (trie-diterator-instance (- remains 1) next-node (next variable-order)))))))
 
 (def-iterator
-  :match (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs))
+  :match (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs) metadata)
   (let [contains-wildcard (.contains-wildcard ^PrefixTrie rexprs)
         trie-root (.root ^PrefixTrie rexprs)]
     (when (not= contains-wildcard (- (bit-shift-left 1 (count dj-vars)) 1))
@@ -488,7 +512,7 @@
         ))))
 
 (def-rewrite
-  :match {:rexpr (disjunct-op (:any-list var-list) ^PrefixTrie rexprs)
+  :match {:rexpr (disjunct-op (:any-list var-list) ^PrefixTrie rexprs metadata)
           :check *disjunct-op-remove-if-single*}
   :run-at :construction
   (loop [vars var-list
@@ -508,7 +532,7 @@
                        n2)))))))))
 
 (def-rewrite
-  :match (disjunct-op (:any-list var-list) rexprs)
+  :match (disjunct-op (:any-list var-list) rexprs metadata)
   :run-at :construction
   :is-debug-check-rewrite true
   :run-in-jit false
@@ -525,47 +549,3 @@
       (let [rx (into [] (map second (trie-get-values rexprs nil)))]
         (debug-repl "R-expr in trie has extra exposed variables"))
       (???))))
-
-#_(def-rewrite
-  :match (disjunct-op (:any-list var-list) ^PrefixTrie rexprs)
-  :run-at :construction
-  :is-check-rewrite true
-  (let [var-set (ensure-set var-list)
-        res (for [[bindings rexpr] (trie-get-values rexprs nil)
-                  r (conjunct-iterator rexpr)
-                  :when (is-unify? r)]
-              [bindings r])]
-    (when-not (empty? res)
-      (let [sw (java.io.StringWriter.)]
-        (.printStackTrace (Throwable.) (java.io.PrintWriter. sw))
-        (when-not (or (.contains (.toString sw) "rexpr_disjunction.clj:132")  ;; this is the place where it is first constructed
-                      (.contains (.toString sw) "rexpr_disjunction.clj:57") ;; the remap disjunction variables op
-                      (.contains (.toString sw) "user_defined_terms.clj:227") ;; rewrite user defined terms when they are introduced
-                      (.contains (.toString sw) "memoization.clj:171")  ;; when the rexpr is getting returned by a memoized expression
-                      )
-          (debug-repl "contains unify"))))))
-
-
-#_(def-rewrite
-  :match (disjunct-op (:any-list var-list) ^PrefixTrie rexprs)
-  :run-at :construction
-  :is-check-rewrite true
-  (let []
-    (doseq [[key rval] (trie-get-values rexprs nil)]
-      (let [need-vars (into #{} (for [[var vv] (zipseq var-list key)
-                                      :when (and (nil? vv) (not (is-constant? var)))]
-                                  var))]
-        (when-not (subset? need-vars (exposed-variables rval))
-          (debug-repl "new trie"))))
-    nil))
-
-
-#_(def-rewrite
-  :match (disjunct-op (:any-list var-list) ^PrefixTrie rexprs)
-  :run-at :construction
-  :is-check-rewrite true
-  (let [wild (.contains-wildcard rexprs)]
-    (doseq [[key rval] (trie-get-values-collection rexprs nil)]
-      (doseq [[i k] (zipseq (range) key)
-              :when (nil? k)]
-        (dyna-assert (not= 0 (bit-and wild (bit-shift-left 1 i))))))))

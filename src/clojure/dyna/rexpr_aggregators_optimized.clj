@@ -164,7 +164,7 @@
 
 ;; lift the optimized disjunct out of the aggregation inner
 (def-rewrite
-  :match {:rexpr (aggregator-op-inner (:any incoming) (:any-list projected-vars) (disjunct-op (:any-list disjunction-variables) (:unchecked trie-Rs)))
+  :match {:rexpr (aggregator-op-inner (:any incoming) (:any-list projected-vars) (disjunct-op (:any-list disjunction-variables) (:unchecked trie-Rs) _))
           :check system/*use-optimized-rexprs*}
   :run-at :construction
   (let [incoming-idx (indexof disjunction-variables #{incoming})
@@ -194,9 +194,7 @@
         (vswap! resulting-trie trie/trie-update-collection trie-binding
                 (fn [col]
                   (concat col new-children)))))
-    (let [ret (make-disjunct-op (vec (map second new-trie-vars)) @resulting-trie)]
-      #_(when (<= @num-children 1)
-        (debug-repl "optimized aggregator disjunction trie"))
+    (let [ret (make-disjunct-op (vec (map second new-trie-vars)) @resulting-trie nil)]
       ret)))
 
 (def-rewrite
@@ -336,7 +334,8 @@
                                   (let [[trie-root trie-wildcard] (convert-to-trie-mul1 (count ev) trie (:lower-value operator identity))]
                                     (trie/make-PrefixTrie (+ 1 (count ev))
                                                           trie-wildcard
-                                                          trie-root)))))))))))
+                                                          trie-root))
+                                  nil)))))))))
           (if (nil? @accumulator)
             (do
               ;; there is a resulting R-expr, but we do not have anything which has been stored into the accumulator, so we are just going to set those values directly
@@ -348,8 +347,9 @@
               (let [accum-vals (if (empty? exposed-vars)
                                  (make-aggregator-op-inner (make-constant (get @accumulator nil)) [] (make-multiplicity 1))
                                  (make-no-simp-disjunct-op exposed-vars
-                                                   (let [[trie-root trie-wildcard] (convert-to-trie-agg (count exposed-vars) @accumulator)]
-                                                     (trie/make-PrefixTrie (count exposed-vars) trie-wildcard trie-root))))
+                                                           (let [[trie-root trie-wildcard] (convert-to-trie-agg (count exposed-vars) @accumulator)]
+                                                             (trie/make-PrefixTrie (count exposed-vars) trie-wildcard trie-root))
+                                                           nil))
                     ;; this will merge the tries due to rewrites on the disjunction construction
                     rr (make-aggregator-op-outer operator result-variable (make-disjunct [accum-vals
                                                                                           (make-conjunct (vec (conj (for [[var val] ret-value-map]
@@ -472,7 +472,8 @@
                                                                 (let [[trie-root trie-wildcard] (convert-to-trie-rexprs (count ev) trie)]
                                                                   (trie/make-PrefixTrie (count ev)
                                                                                         trie-wildcard
-                                                                                        trie-root)))))))))))
+                                                                                        trie-root))
+                                                                nil)))))))))
 
          #_:else
          #_(let [zzz (debug-repl "else")

@@ -1675,7 +1675,7 @@
                                           (swap! num-mults inc)
                                           nil)
                                         x)) children))]
-    (case @mult
+    (case (long @mult)
       0 (or (first (filter is-empty-rexpr? children)) (make-multiplicity 0))
       1 (if (empty? others)
           (make-multiplicity 1)

@@ -428,7 +428,7 @@
       (if (is-bound-in-context? incoming-variable ctx)
         (if (is-multiplicity? nR)
           ;; then we need to multiply in the result
-          (case (:mult nR)
+          (case (long (:mult nR))
             0 (if body-is-conjunctive
                 (do
                   ;(debug-repl "agg 0")

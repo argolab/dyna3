@@ -385,8 +385,8 @@ This is most likely not what you want."))))
                                                                                   (.arguments disp-term)))]
                                                        (when-not (nil? *compiler-expression-dynabase*)
                                                          (throw (DynaUserError. "Dispose is not support on Dynabase methods.")))
-                                                       (update-user-term! {:name (.name disp-term)
-                                                                          :arity (.arity disp-term)
+                                                       (update-user-term! {:name (.name ^DynaTerm disp-term)
+                                                                          :arity (.arity ^DynaTerm disp-term)
                                                                           :source-file source-file}
                                                                          (fn [o]
                                                                            (let [ret (assoc o :dispose-arguments disp-arg-map)]
@@ -659,7 +659,7 @@ This is most likely not what you want."))))
                                      ;(make-conjunct [structure meta-struct])
                                      structure)
 
-            ["$dynabase_call" 2] (let [[dynabase-var call-term] (.arguments ast)
+            ["$dynabase_call" 2] (let [[^DynaTerm dynabase-var ^DynaTerm call-term] (.arguments ast)
                                        dynabase-val (get-value dynabase-var)
                                        call-vals (get-arg-values (.arguments call-term))
                                        arity (count call-vals)
@@ -816,7 +816,7 @@ This is most likely not what you want."))))
                                ;; result (context/bind-context-raw ctx (system/converge-agenda
                                ;;                                       (simplify-fully rexpr)))
                                rel-path (if (instance? URL source-file)
-                                          (str (.relativize current-dir-path (Paths/get (.toURI source-file))))
+                                          (str (.relativize ^Paths current-dir-path (Paths/get (.toURI source-file))))
                                           (str source-file))]
                            (*user-print-function* rel-path line-number text-rep ctx result result-variable)
                            (make-unify out-variable (make-constant true)))
@@ -1039,7 +1039,7 @@ This is most likely not what you want."))))
       (if print-parser-errors
         (println "==========> report input missmatch" exception)
         (throw (DynaSyntaxError. "Input missmatch" exception))))
-    (reportNoViableAlternative [recognizer exception]
+    (reportNoViableAlternative [^org.antlr.v4.runtime.Parser recognizer ^org.antlr.v4.runtime.NoViableAltException exception]
       (if print-parser-errors
         (let [token (.getStartToken exception)
               offending (.getOffendingToken exception)
@@ -1125,7 +1125,7 @@ This is most likely not what you want."))))
                    (URL. ^String file-url)
                    (do (assert (instance? URL file-url))
                      file-url))]
-    (parse-stream (.openStream url)
+    (parse-stream (.openStream ^URL url)
                   :fragment-allowed false)))
 
 
