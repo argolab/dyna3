@@ -980,7 +980,8 @@
 ;; if this value is used, then $free will return true.  This should make it easier to run this against
 ;; though it would only match against $free rather than having it actually match against an unbound value
 ;; this might be better if is changed to some dummy type rather than having this represented as a DynaTerm, so it is forced to be checked by $free
-(def ^:dynamic *dollar-free-matches-ground-values* false)
+;(def ^:dynamic *dollar-free-matches-ground-values* false)
+(def-tlocal dollar-free-matches-ground-values)
 
 (defrecord meta-free-dummy-value []
   Object
@@ -998,10 +999,10 @@
   :assigns-variable result
   ;; this can only match the dummy placeholder value for free, otherwise then it would clearly be bound to something else
   (or (= meta-free-dummy-free-value (get-value input))
-      *dollar-free-matches-ground-values*))
+      (tlocal *dollar-free-matches-ground-values*)))
 (def-rewrite
   :match {:rexpr (meta-is-free _ (:any result))
-          :check *dollar-free-matches-ground-values*}
+          :check (tlocal *dollar-free-matches-ground-values*)}
   :assigns-variable result
   true)
 (def-rewrite

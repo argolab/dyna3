@@ -1,13 +1,12 @@
 (ns dyna.assumptions
   (:require [dyna.system :as system])
   (:require [dyna.utils :refer :all])
-  ;(:require [dyna.base-protocols :refer :all])
   (:import [java.util WeakHashMap])
   (:import [dyna InvalidAssumption IDynaAgendaWork]))
 
 ;; any assumption which the current expression depends
-(tlocal-def current-watcher)
-(tlocal-def fast-fail-on-invalid-assumption)
+(def-tlocal current-watcher)
+(def-tlocal fast-fail-on-invalid-assumption)
 
 (declare depend-on-assumption
          make-assumption)
@@ -23,8 +22,6 @@
   (add-watcher! [^dyna.assumptions.Watcher watcher])
   (send-message! [message]))
 
-
-;(debug-repl "loading")
 
 (deftype assumption-no-message-cls
     [^WeakHashMap watchers

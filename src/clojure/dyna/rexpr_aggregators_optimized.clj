@@ -37,15 +37,15 @@
                          (let [variable-map (apply dissoc variable-map incoming projected)]
                            (if (empty? variable-map)
                              this
-                             (debug-binding
-                              [*current-simplify-stack* (conj *current-simplify-stack* this)]
+                             (debug-tbinding
+                              [current-simplify-stack (conj (tlocal *current-simplify-stack*) this)]
                               (make-aggregator-op-inner incoming projected
                                                         (remap-variables body
                                                                          (apply dissoc variable-map incoming projected))))))]
                      ret))
   (remap-variables-handle-hidden [this variable-map]
-                                 (debug-binding
-                                  [*current-simplify-stack* (conj *current-simplify-stack* this)]
+                                 (debug-tbinding
+                                  [current-simplify-stack (conj (tlocal *current-simplify-stack*) this)]
                                   (let [ret
                                         (let [new-hidden-names (into {} (for [v (if (is-variable? incoming)
                                                                                   (cons incoming projected)
@@ -87,7 +87,7 @@
   (make-aggregator-op-inner (make-constant value) [] (make-multiplicity mult)))
 ;; this might be something that the memoization is going to want to override,
 ;; which would allow for it to get the result of aggregation directly
-(def ^{:dynamic true} *aggregator-op-contribute-value*
+#_(def ^{:dynamic true} *aggregator-op-contribute-value*
   aggregator-op-contribute-value-default
   #_(fn r
     ([value mult]
@@ -95,36 +95,40 @@
      ;; to take the value, this can hold the value until there is something else
      (make-aggregator-op-inner (make-constant value) [] (make-multiplicity mult)))))
     ;([value] (r value 1))
+(def-tlocal aggregator-op-contribute-value)
 
 
 (defn- aggregator-op-additional-constraints-default [incoming-variable]
   (make-multiplicity 1))
-(def ^{:dynamic true} *aggregator-op-additional-constraints*
+#_(def ^{:dynamic true} *aggregator-op-additional-constraints*
   ;; additional constraints that can be added to the R-expr in the case that it
   ;; would not be resolved, this can take into account the current value known
   ;; to the aggregator
   aggregator-op-additional-constraints-default
   #_(fn [incoming-variable]
     (make-multiplicity 1)))
+(def-tlocal aggregator-op-additional-constraints)
 
-(def ^{:dynamic true} *aggregator-op-saturated*
+#_(def ^{:dynamic true} *aggregator-op-saturated*
   ;; if the current bindings to variables are sautrated, meaning that the
   ;; contributed values are done, then we can avoid continuing to process other stuff
   (fn [] false))
+(def-tlocal aggregator-op-saturated)
 
-(def ^{:dynamic true} *aggregator-op-get-variable-value*
+#_(def ^{:dynamic true} *aggregator-op-get-variable-value*
   ;; aggregator uses get-value by default to get the value of a variable from
   ;; the context we might need to override that in some cases---such as
   ;; memoization where the variables have been renamed, but we might not be
   ;; using the new names, or in the jit generated code
   get-value)
+(def-tlocal aggregator-op-get-variable-value)
 
-(def ^{:dynamic true} *aggregator-op-should-eager-run-iterators*
+#_(def ^{:dynamic true} *aggregator-op-should-eager-run-iterators*
   ;; if we want to eagerly run iterators.  This is something that we want to do
   ;; in the case of memoization, as that corresponds with doing work ahead of
   ;; time (before it will get put into the memo table)
   false)
-
+(def-tlocal aggregator-op-should-eager-run-iterators)
 
 (def-rewrite
   :match {:rexpr (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable)
@@ -265,7 +269,7 @@
         contrib-func (fn [value mult]
                        (assert (>= mult 1))
                        (dyna-assert (not (nil? value)))
-                       (let [kvals (vec (map *aggregator-op-get-variable-value* exposed-vars))]
+                       (let [kvals (vec (map (tlocal *aggregator-op-get-variable-value*) exposed-vars))]
                          ;(debug-in-block "contrib")
                          (vswap! accumulator update-in kvals (fn [old]
                                                                (if (nil? old)
@@ -277,7 +281,7 @@
         (if (and (= simplify simplify-inference) (:add-to-in-rexpr operator))
           (let [ati (:add-to-in-rexpr operator)]
             (fn [incoming-variable]
-              (let [kvals (vec (map *aggregator-op-get-variable-value* exposed-vars))
+              (let [kvals (vec (map (tlocal *aggregator-op-get-variable-value*) exposed-vars))
                     cur-val (if (empty? exposed-vars)
                               (get @accumulator nil)
                               (get-in @accumulator kvals))]
@@ -290,7 +294,7 @@
         (if (:saturate operator)
           (let [sf (:saturate operator)]
             (fn []
-              (let [kvals (vec (map *aggregator-op-get-variable-value* exposed-vars))
+              (let [kvals (vec (map (tlocal *aggregator-op-get-variable-value*) exposed-vars))
                    cur-val (if (empty? exposed-vars)
                               (get @accumulator nil)
                               (get-in @accumulator kvals))]
@@ -299,10 +303,10 @@
                 (when-not (nil? cur-val)
                   (sf cur-val)))))
           (fn [] false))]
-    (binding [*aggregator-op-contribute-value* contrib-func
-              *aggregator-op-additional-constraints* additional-constraint-func
-              *aggregator-op-saturated* check-saturated-func
-              *aggregator-op-should-eager-run-iterators* false]
+    (tbinding [aggregator-op-contribute-value contrib-func
+              aggregator-op-additional-constraints additional-constraint-func
+              aggregator-op-saturated check-saturated-func
+              aggregator-op-should-eager-run-iterators false]
       (let [[ret-value-map ret] (context/bind-context ctx
                                                       (try (simplify Rbody)
                                                            (catch UnificationFailure e (make-multiplicity 0))))]
@@ -392,14 +396,14 @@
          (is-empty-rexpr? nR) nR ;(make-multiplicity 0)
 
          (and (is-multiplicity? nR) (is-bound-in-context? incoming-variable ctx))
-         (let [ret (*aggregator-op-contribute-value* (get-value-in-context incoming-variable ctx) (:mult nR))]
+         (let [ret ((tlocal *aggregator-op-contribute-value*) (get-value-in-context incoming-variable ctx) (:mult nR))]
            ret)
 
          :else
          (let [should-run-iterator (and (or all-exposed-bound
-                                            *aggregator-op-should-eager-run-iterators*)
-                                        (not *simplify-looking-for-fast-fail-only*))
-               additional-constraints (*aggregator-op-additional-constraints* incoming-variable)
+                                            (tlocal *aggregator-op-should-eager-run-iterators*))
+                                        (not (tlocal *simplify-looking-for-fast-fail-only*)))
+               additional-constraints ((tlocal *aggregator-op-additional-constraints*) incoming-variable)
                nR2 (if (not= (make-multiplicity 1) additional-constraints)
                      (make-conjunct [additional-constraints nR])
                      nR)
@@ -413,7 +417,7 @@
               :bind-all true
               :rexpr-in nR2
               :rexpr-result inner-r
-              :simplify #(binding [*simplify-looking-for-fast-fail-only* true] (simplify-fast %))
+              :simplify #(tbinding [simplify-looking-for-fast-fail-only true] (simplify-fast %))
               (let [inner-r (if (or (not= inner-r nR)
                                     did-run-some-iterator)
                               (simplify inner-r)  ;((if all-exposed-bound simplify-fully-internal simplify) inner-r)
@@ -425,11 +429,11 @@
                         mult (:mult inner-r)]
                     (when-not (= mult 0)
                       (dyna-assert (not (nil? val)))
-                      (let [rc (*aggregator-op-contribute-value* val mult)]
+                      (let [rc ((tlocal *aggregator-op-contribute-value*) val mult)]
                         (when-not (is-empty-rexpr? rc)
                           ;; then we have to save the result of this R-expr, as it could not get processed for some reason
                           (vswap! accumulator update-in (map get-value exposed) conj rc)))))
-                  (when-not (*aggregator-op-saturated*)
+                  (when-not ((tlocal *aggregator-op-saturated*))
                                         ;(debug-repl "all bound but not done")
                     (let [new-incoming (if (is-bound? incoming-variable)
                                          (make-constant (get-value incoming-variable))
@@ -440,9 +444,9 @@
                           new-projected (vec (filter #(not (is-bound? %)) projected-vars))
                                         ;zzz (dyna-assert (subset? (keys remapping-map) (exposed-variables inner-r)))
                           new-body
-                          (debug-binding [*current-simplify-stack* (conj *current-simplify-stack* inner-r)]
+                          (debug-tbinding [current-simplify-stack (conj (tlocal *current-simplify-stack*) inner-r)]
                                          (remap-variables inner-r remapping-map))
-                          other-constraints (*aggregator-op-additional-constraints* new-incoming)
+                          other-constraints ((tlocal *aggregator-op-additional-constraints*) new-incoming)
                           ;; zzz (when (and *aggregator-op-should-eager-run-iterators* (not= parent-is-bound (map is-bound? exposed)))
                           ;;       (debug-repl "agg egg run"))
                           rc (make-aggregator-op-inner new-incoming new-projected

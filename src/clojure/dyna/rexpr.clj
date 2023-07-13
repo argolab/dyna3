@@ -58,17 +58,20 @@
 
 
 ;(def ^:dynamic *current-matched-rexpr* nil)
-(def ^:dynamic *current-top-level-rexpr* nil)
-(def ^:dynamic *current-simplify-stack* [])  ;; the last value of this is used for tracking :constructed-from
-(def ^:dynamic *current-simplify-running* nil)
+#_(def ^:dynamic *current-top-level-rexpr* nil)
+#_(def ^:dynamic *current-simplify-stack* [])  ;; the last value of this is used for tracking :constructed-from
+#_(def ^:dynamic *current-simplify-running* nil)
+(def-tlocal current-top-level-rexpr)
+(def-tlocal current-simplify-stack)
+(def-tlocal current-simplify-running)
 
 
 (when system/track-where-rexpr-constructed  ;; meaning that the above variable will be defined
   (swap! debug-useful-variables assoc
-         'rexpr (fn [] (last *current-simplify-stack*))
-         'rexpr-top-level (fn [] *current-top-level-rexpr*)
-         'top-level-rexpr (fn [] *current-top-level-rexpr*)
-         'simplify-stack (fn [] *current-simplify-stack*)))
+         'rexpr (fn [] (last (tlocal *current-simplify-stack*)))
+         'rexpr-top-level (fn [] (tlocal *current-top-level-rexpr*))
+         'top-level-rexpr (fn [] (tlocal *current-top-level-rexpr*))
+         'simplify-stack (fn [] (tlocal *current-simplify-stack*))))
 
 #_(def deep-equals-compare-fn (atom {}))
 #_(defmacro def-deep-equals [rexpr args & body]
@@ -263,8 +266,8 @@
                  (throw ~'error)))
            ))
          (~'remap-variables ~'[this variable-map]
-          (debug-binding
-           [*current-simplify-stack* (conj *current-simplify-stack* ~'this)]
+          (debug-tbinding
+           [current-simplify-stack (conj (tlocal *current-simplify-stack*) ~'this)]
            (context/bind-no-context  ;; this is annoying, this will want to be
             ;; something that we can avoid doing
             ;; multiple times.  Which rewrites that we
@@ -300,8 +303,8 @@
                   (~(symbol (str "make-" name)) ~@(for [v vargroup]
                                                     (symbol (str "new-" (cdar v)))))))))))
          (~'remap-variables-func ~'[this remap-function]
-          (debug-binding
-           [*current-simplify-stack* (conj *current-simplify-stack* ~'this)]
+          (debug-tbinding
+           [current-simplify-stack (conj (tlocal *current-simplify-stack*) ~'this)]
            (context/bind-no-context
             (let ~(vec (apply concat (for [v vargroup]
                                        [(symbol (str "new-" (cdar v)))
@@ -467,7 +470,7 @@
                                   (for [[var idx] (zipseq vargroup (range))]
                                     `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
           nil                           ; the cached unique variables
-          ~@(if system/track-where-rexpr-constructed `[(Throwable.) (last dyna.rexpr/*current-simplify-stack*)])
+          ~@(if system/track-where-rexpr-constructed `[(Throwable.) (last (tlocal *current-simplify-stack*))])
           ~@(map cdar vargroup))
          )
 
@@ -493,7 +496,7 @@
                                                                                           ;; (when-not (or (not (nil? dyna.rexpr/*current-matched-rexpr*))
                                                                                           ;;               (empty?  dyna.rexpr/*current-simplify-stack*))
                                                                                           ;;   (throw (RuntimeException. "failed to set the matched R-expr")))
-                                                                                          (last dyna.rexpr/*current-simplify-stack*))])
+                                                                                          (last (tlocal *current-simplify-stack*)))])
                               ~@(map cdar vargroup))))
        (swap! rexpr-constructors assoc ~(str name) ~(symbol (str "make-" name)))
        (defn ~(symbol (str "is-" name "?"))
@@ -1055,7 +1058,7 @@
          present-variables f (fn [pv]
                                (make-context-matching-function pv r body)))))
     (let [rexpr-context (gensym 'rexpr-context)]
-      `(do (dyna-debug (dyna-assert (= simplify-inference *current-simplify-running*)))
+      `(do (dyna-debug (dyna-assert (= simplify-inference (tlocal *current-simplify-running*))))
            (context/scan-through-context-by-type (context/get-context)
                                                  ~(symbol (str (car context-match) "-rexpr"))
                                                  ~rexpr-context
@@ -1319,21 +1322,25 @@
     (.value ^constant-value-rexpr variable)
     (ctx-get-value (context/get-context) variable)))
 
-(def ^{:dynamic true} *memoization-make-guesses-handler*
+#_(def ^{:dynamic true} *memoization-make-guesses-handler*
   ;; this function is called before a guess is going to be made.  If this function returns true, then it will make the guess
   ;; otherwise it will not make the guess and delay
   ;;
   ;; This is important as making a bad guess could cause the system to not terminate, so we attempt to delay guessing for as long as possible
   (fn [memo-table variables variable-values]
     false))
+(def-tlocal memoization-make-guesses-handler)
 
-(def ^{:dynamic true} *simplify-with-inferences* false)
-(def ^{:dynamic true} *simplify-looking-for-fast-fail-only* false) ;; meaning that a rewrite which might take a lot of time should be skipped
+
+#_(def ^{:dynamic true} *simplify-with-inferences* false)
+#_(def ^{:dynamic true} *simplify-looking-for-fast-fail-only* false) ;; meaning that a rewrite which might take a lot of time should be skipped
+(def-tlocal simplify-with-inferences)
+(def-tlocal simplify-looking-for-fast-fail-only)
 
 (defn simplify-fast [rexpr]
-  (debug-binding
-   [*current-simplify-stack* (conj *current-simplify-stack* rexpr)
-    *current-simplify-running* simplify]
+  (debug-tbinding
+   [current-simplify-stack (conj (tlocal *current-simplify-stack*) rexpr)
+    current-simplify-running simplify]
    (assert (context/has-context))
    ;(ctx-add-rexpr! rexpr)
    (let [ret ((get @rexpr-rewrites-func (type rexpr) simplify-identity) rexpr simplify)]
@@ -1352,9 +1359,9 @@
 
 
 (defn simplify-construct [rexpr]
-  (debug-binding
-   [*current-simplify-stack* (conj *current-simplify-stack* rexpr)
-    *current-simplify-running* simplify-construct]
+  (debug-tbinding
+   [current-simplify-stack (conj (tlocal *current-simplify-stack*) rexpr)
+    current-simplify-running simplify-construct]
    (let [ret ((get @rexpr-rewrites-construct-func (type rexpr) simplify-identity) rexpr simplify-construct)]
      (if (nil? ret)
        rexpr
@@ -1363,9 +1370,9 @@
          ret)))))
 
 (defn simplify-inference [rexpr]
-  (debug-binding
-   [*current-simplify-stack* (conj *current-simplify-stack* rexpr)
-    *current-simplify-running* simplify-inference]
+  (debug-tbinding
+   [current-simplify-stack (conj (tlocal *current-simplify-stack*) rexpr)
+    current-simplify-running simplify-inference]
    (let [ctx (context/get-context)]
      (ctx-add-rexpr! ctx rexpr)
      (let [ret ((get @rexpr-rewrites-inference-func (type rexpr) simplify-identity) rexpr simplify-inference)]
@@ -1379,13 +1386,13 @@
   (loop [cri rexpr]
     (system/should-stop-processing?)
     (let [nri (loop [cr cri]
-                (let [nr (debug-binding [*current-top-level-rexpr* cr]
+                (let [nr (debug-tbinding [current-top-level-rexpr cr]
                                         (simplify-fast cr))]
                   (if (not= cr nr)
                     (recur nr)
                     nr)))
-          nrif (debug-binding [*current-top-level-rexpr* nri]
-                              (binding [*simplify-with-inferences* true]
+          nrif (debug-tbinding [current-top-level-rexpr nri]
+                              (tbinding [simplify-with-inferences true]
                                 (simplify-inference nri)))]
       (if (not= nrif nri)
         (recur nrif)
@@ -1409,7 +1416,7 @@
   (try
     (loop [cri rexpr]
       (let [nri (simplify-fully-with-jit cri)
-            nri2 (binding [*memoization-make-guesses-handler* (fn [memo-table variable variable-values]
+            nri2 (tbinding [memoization-make-guesses-handler (fn [memo-table variable variable-values]
                                                                 ;; it is possible that there are multiple *different* kinds of guesses which could be made
                                                                 ;; this function could be replaced with something that is smarter and chooses between multiple different options for what to guess about
                                                                 true)]

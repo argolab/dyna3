@@ -79,8 +79,8 @@
 (defn- remap-variables-disjunct-op [this variable-renaming-map remap-fn]
   (if (empty? variable-renaming-map)
     this
-    (debug-binding
-     [*current-simplify-stack* (conj *current-simplify-stack* this)]
+    (debug-tbinding
+     [current-simplify-stack (conj (tlocal *current-simplify-stack*) this)]
      (let [this-dv (:disjunction-variables this)
            new-vars (vec (map #(get variable-renaming-map % %) this-dv))]
        (if (= new-vars this-dv)
@@ -262,7 +262,7 @@
 
 (def-rewrite
   :match {:rexpr (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs) metadata)
-          :check (not *simplify-looking-for-fast-fail-only*)}
+          :check (not (tlocal *simplify-looking-for-fast-fail-only*))}
   :run-at :standard
   :run-in-jit false
   (let [new-dj-vars (map #(let [v (get-value %)] (if (nil? v) % (make-constant v))) dj-vars)]
@@ -275,7 +275,7 @@
 
 (def-rewrite
   :match {:rexpr (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs) metadata)
-          :check (not *simplify-looking-for-fast-fail-only*)}
+          :check (not (tlocal *simplify-looking-for-fast-fail-only*))}
   :run-at :inference
   :run-in-jit false
   ;; this will always attempt to do rewrites on the internal structure, as there might be something that we can infer as a result

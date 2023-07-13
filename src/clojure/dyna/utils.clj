@@ -3,6 +3,7 @@
   (:require [clojure.main :refer [demunge]])
   (:require [clojure.reflect :refer [reflect]])
   (:require [clojure.set :refer [union]])
+  (:require [clojure.string])
   (:import [dyna DynaTerm ThreadVar])
   (:import [java.lang.reflect Method]))
 
@@ -444,13 +445,13 @@
                                  (filter #(and (instance? clojure.reflect.Field %) ((:flags %) :public))
                                          (:members (reflect ThreadVar))))))
 
-(defmacro tlocal-def [v]
+(defmacro def-tlocal [v]
   (let [v (symbol (munge (name v)))]
     (assert (tlocal-vars v))
     nil))
 
 (defmacro tlocal [v]
-  (let [v (symbol (munge (name v)))]
+  (let [v (symbol (clojure.string/replace (munge (name v)) "_STAR_" ""))]
     (assert (tlocal-vars v))
     `(. ^ThreadVar (ThreadVar/get) ~v)))
 
@@ -491,3 +492,12 @@
 
   (defmacro tbinding [bnds & body]
     `(binding ~bnds ~@body)))
+
+(defmacro debug-tbinding [b & body]
+  (if debug-statements;(= "true" (System/getProperty "dyna.debug" "true"))
+    `(tbinding ~b ~@body)
+    `(try (do ~@body) (finally nil)) ;; for some reason this try-finally is required
+                                     ;; otherwise it will deadlock during the tests
+                                     ;; sometimes.  I assume this is somehow
+                                     ;; preventing some kind of miss compilation somehow....????
+    ))

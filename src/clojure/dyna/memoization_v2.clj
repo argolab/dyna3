@@ -10,13 +10,9 @@
   (:require [dyna.user-defined-terms :refer [update-user-term! add-to-user-term! user-rexpr-combined-no-memo get-user-term]])
   (:require [dyna.assumptions :refer :all])
   (:require [dyna.context :as context])
-  (:require [dyna.rexpr-builtins :refer [meta-free-dummy-free-value *dollar-free-matches-ground-values*]])
+  (:require [dyna.rexpr-builtins :refer [meta-free-dummy-free-value]])
   (:require [dyna.prefix-trie :refer :all])
-  (:require [dyna.rexpr-aggregators-optimized :refer [*aggregator-op-contribute-value*
-                                                      *aggregator-op-additional-constraints*
-                                                      *aggregator-op-saturated*
-                                                      *aggregator-op-get-variable-value*
-                                                      *aggregator-op-should-eager-run-iterators*]])
+  (:require [dyna.rexpr-aggregators-optimized])
   (:require [dyna.rexpr-disjunction :refer [trie-diterator-instance]])
   (:require [clojure.set :refer [union difference]])
   (:import [dyna DynaUserError IDynaAgendaWork DynaTerm InvalidAssumption UnificationFailure DIterable DynaAgenda ClojureUnorderedVector ClojureHashMap])
@@ -55,15 +51,17 @@
                                          :var-map args-map]
   (rexpr-jit-info [this] {:jittable false}))
 ;; if this should expand the memoization-placeholder or just leave it as is.
-(def ^{:private true :dynamic true} *expand-memoization-placeholder* true)
+;(def ^{:private true :dynamic true} *expand-memoization-placeholder* true)
+(def-tlocal expand-memoization-placeholder)
 
 (def-base-rexpr memoized-access [:unchecked memoization-container
                                  :var-list variable-mapping]
   (rexpr-jit-info [this] {:jittable false}))
-(def ^{:private true :dynamic true} *lookup-memoized-values* true)
+#_(def ^{:private true :dynamic true} *lookup-memoized-values* true)
+(def-tlocal lookup-memoized-values)
 
-
-(def ^{:private true :dynamic true} *memoization-forward-placeholder-bindings* nil)
+#_(def ^{:private true :dynamic true} *memoization-forward-placeholder-bindings* nil)
+(def-tlocal memoization-forward-placeholder-bindings)
 (def-base-rexpr memoization-filled-in-values-placeholder [:var-list variable-mapping]
   (rexpr-jit-info [this]
                   (println "TODO: make the fill in values placeholder able to be jitted, this should be reading values from the context or something")
@@ -71,9 +69,9 @@
 
 (def-rewrite
   :match {:rexpr (memoization-filled-in-values-placeholder (:unchecked var-mapping))
-          :check (not (nil? *memoization-forward-placeholder-bindings*))}
+          :check (not (nil? (tlocal *memoization-forward-placeholder-bindings*)))}
   ;; this might not be the most efficient way to go about this?  Suppose it should go into the context?
-  (make-conjunct (vec (for [[var val] (zipseq var-mapping *memoization-forward-placeholder-bindings*)
+  (make-conjunct (vec (for [[var val] (zipseq var-mapping (tlocal *memoization-forward-placeholder-bindings*))
                             :when (not (nil? val))]
                         (make-unify var (make-constant val))))))
 
@@ -181,7 +179,7 @@
               (let [lookup-key (drop-last (second control-setting))
                     has-key (is-key-contained? has-computed lookup-key)]
                 (if-not has-key
-                  (if (*memoization-make-guesses-handler* this variables variable-values) ;; return true if this should make the guess
+                  (if ((tlocal *memoization-make-guesses-handler*) this variables variable-values) ;; return true if this should make the guess
                     (let [[old-dat new-dat] (swap-vals! data (fn [[a b c]]
                                                                (if-not a
                                                                  [a b c] ;; not valid, do not change
@@ -208,10 +206,10 @@
                       (ctx-set-value! lcontext var val))
                     ;(debug-repl "pre return")
                     (let [res (context/bind-context lcontext
-                                                    (binding [*memoization-make-guesses-handler* (fn [memo-table variable variable-values] false) ;; do not make guesses
-                                                              *aggregator-op-get-variable-value* (fn [variable]
-                                                                                                   (get-value (get variables-map variable variable)))]
-                                                      (simplify-fully-no-guess lrexpr)))]
+                                                    (tbinding [memoization-make-guesses-handler (fn [memo-table variable variable-values] false) ;; do not make guesses
+                                                               aggregator-op-get-variable-value (fn [variable]
+                                                                                                  (get-value (get variables-map variable variable)))]
+                                                              (simplify-fully-no-guess lrexpr)))]
                       (when-not (is-empty-rexpr? res)
                         (debug-repl "memo access res"))
                       res)))))
@@ -277,7 +275,7 @@
                  (ctx-set-value! cctx var val))
                ;(debug-repl "do refresh")
                (let [accumulator (volatile! nil) ;; this is a "flat" map from tuples to values (not a trie)
-                     rr (binding [*aggregator-op-contribute-value* (fn [value mult]
+                     rr (tbinding [aggregator-op-contribute-value (fn [value mult]
                                                                      (let [kvals (vec (map get-value argument-variables))]
                                                                        (when (some nil? kvals)
                                                                          (debug-repl "accum nil"))
@@ -287,11 +285,11 @@
                                                                                    ((:many-items aggregator-op) value mult)
                                                                                    ((:combine-mult aggregator-op) old value mult)))))
                                                                      (make-multiplicity 0))
-                                  *aggregator-op-additional-constraints*
+                                  aggregator-op-additional-constraints
                                   (if (:add-to-in-rexpr aggregator-op)
                                     (let [ati (:add-to-in-rexpr aggregator-op)]
                                       (fn [incoming-variable]
-                                        (if-not *simplify-with-inferences*
+                                        (if-not (tlocal *simplify-with-inferences*)
                                           (make-multiplicity 1)
                                           (let [kvals (vec (map get-value argument-variables))
                                                 cur-val (get @accumulator kvals)]
@@ -303,7 +301,7 @@
                                               (make-multiplicity 1))))))
                                     (fn [incoming-variable]
                                       (make-multiplicity 1)))
-                                  *aggregator-op-saturated* (if (:saturate aggregator-op)
+                                  aggregator-op-saturated (if (:saturate aggregator-op)
                                                               (let [sf (:saturate aggregator-op)]
                                                                 (fn []
                                                                   (let [kvals (vec (map get-value argument-variables))
@@ -313,7 +311,7 @@
                                                                     (when-not (nil? cur-val)
                                                                       (sf cur-val)))))
                                                               (fn [] false))
-                                  *aggregator-op-should-eager-run-iterators* true  ;; maybe this should only run it eagerly if it can fully ground all of the variables
+                                  aggregator-op-should-eager-run-iterators true  ;; maybe this should only run it eagerly if it can fully ground all of the variables
                                   ]
                           (context/bind-context cctx
                                                 (try (simplify-fully orig-rexpr)
@@ -462,7 +460,7 @@
             [valid has-computed memoized-values] @data]
         ;; Step 1: Identify all of the values in our memo table that need to get recomputed
         (doseq [pr placeholder-rexprs]
-          (binding [*memoization-forward-placeholder-bindings* (:key message)]
+          (tbinding [memoization-forward-placeholder-bindings (:key message)]
             (let [ctx (context/make-empty-context pr)
                   result (context/bind-context ctx (try (simplify-fully-no-guess pr)
                                                         (catch UnificationFailure e (make-multiplicity 0))))
@@ -539,21 +537,21 @@
 
 (def-rewrite
   :match {:rexpr (memoization-placeholder (:unchecked name) (:unchecked args-map))
-          :check *expand-memoization-placeholder*}
+          :check (tlocal *expand-memoization-placeholder*)}
   (let [term (get-user-term name)]
     (depend-on-assumption (:memoized-rexpr-assumption term))
     (remap-variables (:memoized-rexpr term) args-map)))
 
 (def-rewrite
   :match {:rexpr (memoized-access (:unchecked ^IMemoContainer container) (:unchecked variable-map))
-          :check *lookup-memoized-values*}
+          :check (tlocal *lookup-memoized-values*)}
   ;; inside of the JIT, the last argument could be something which will be generated using the local variables
   ;; this will prevent us from having to indirect through the *context* to access the values of variables
   (memo-rewrite-access container variable-map (map get-value variable-map)))
 
 (def-iterator
   :match {:rexpr (memoized-access (:unchecked ^IMemoContainer container) (:unchecked variable-map))
-          :check *lookup-memoized-values*}
+          :check (tlocal *lookup-memoized-values*)}
   (memo-get-iterator container variable-map (map get-value variable-map)))
 
 
@@ -576,7 +574,7 @@
         term-name (:name (:term-name info))]
     (fn [signature] ;; the signature should be an array of argument bindings.  The last value will be the result of
       (let [ctx (context/make-empty-context memo-controller-rexpr)
-            res (binding [*dollar-free-matches-ground-values* true] ;; this essentially tunrs $free into a no-op, which allows for foo(1,2,3) and foo(FREE,FREE,FREE) to both be matched by $free.  The reason
+            res (tbinding [dollar-free-matches-ground-values true] ;; this essentially tunrs $free into a no-op, which allows for foo(1,2,3) and foo(FREE,FREE,FREE) to both be matched by $free.  The reason
                   (context/bind-context-raw ctx
                                             (set-value! (make-variable 'Input) (DynaTerm. term-name (vec (map #(if (nil? %) meta-free-dummy-free-value %)
                                                                                                               (drop-last signature)))))
@@ -688,8 +686,8 @@
 (defn- convert-user-term-to-have-memos [rexpr mapf]
   ;; this takes an R-expr and adds one or more memo tables to the R-expr such that it will support memoization
   ;; I suppose that it will
-  (debug-binding
-   [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
+  (debug-tbinding
+   [current-simplify-stack (conj (tlocal *current-simplify-stack*) rexpr)]
    (if (is-aggregator-op-outer? rexpr)
      (if (= "only_one_contrib" (:name (:operator rexpr)))
        (make-aggregator-op-outer (:operator rexpr)
@@ -746,8 +744,8 @@
         orig-rexpr-assumpt-v (volatile! nil)
         [old2 new2] (update-user-term! term-name
                                        (fn [dat]
-                                         (let [[orig-rexpr-assumpt orig-rexpr] (binding [*expand-memoization-placeholder* false
-                                                                                         *lookup-memoized-values* false]
+                                         (let [[orig-rexpr-assumpt orig-rexpr] (tbinding [expand-memoization-placeholder false
+                                                                                          lookup-memoized-values false]
                                                                                  (compute-with-assumption
                                                                                   (simplify-top (user-rexpr-combined-no-memo dat))))
                                                controller-function (make-memoization-controller-function dat)
