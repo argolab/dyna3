@@ -250,12 +250,12 @@
                   :when (not (nil? djv))]
             (set-value! dv djv))
           child)
-      (let [new-vars (vec (map (fn [v]
-                                 (if (is-bound? v)
-                                   (make-constant (get-value v))
-                                   v))
-                               dj-vars))
-            ret (make-disjunct-op new-vars @ret-children @new-metadata)]
+      (let [;; new-vars (vec (map (fn [v]
+            ;;                      (if (is-bound? v)
+            ;;                        (make-constant (get-value v))
+            ;;                        v))
+            ;;                    dj-vars))
+            ret (make-disjunct-op dj-vars @ret-children @new-metadata)]
         ;(println @new-metadata)
                                         ;(debug-repl)
         ret))))

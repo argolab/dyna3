@@ -352,7 +352,7 @@
                                   [valid has-computed mv])
                                 (do ;; there are new values to insert
                                         ;(debug-repl "memo insert")
-                                  (dyna-debug
+                                  #_(dyna-debug
                                    (when (some #(some nil? %) (map first (keys new-values-freq)))
                                      (debug-repl "insert free")))
                                   (vreset! messages-to-send nil)
@@ -369,8 +369,6 @@
                                                 (if (contains? new-values kk)
                                                   (recur cmv (next kks))
                                                   (do
-                                                    (debug-delay-ntimes 100
-                                                                        (debug-repl "memo"))
                                                     (vswap! messages-to-send conj kk)
                                                     (recur (trie-delete-matched cmv kk) (next kks)))))))
                                         with-added (loop [cmv with-deleted
@@ -381,8 +379,6 @@
                                                          #_(when-not (= mult 1)
                                                              (debug-repl "mult?"))
                                                          ;; TODO: this needs to check that
-                                                         (debug-delay-ntimes 100
-                                                                             (debug-repl "memo2"))
                                                          (vswap! messages-to-send conj kk)
                                                          (recur (trie-update-collection cmv kk (fn [c]
 
@@ -794,7 +790,7 @@
                                            (vreset! orig-rexpr-assumpt-v orig-rexpr-assumpt)
                                            (assoc dat
                                                   :memoized-rexpr rexpr-with-memos))))]
-    (binding [*fast-fail-on-invalid-assumption* false]
+    (tbinding [fast-fail-on-invalid-assumption false]              ;binding [*fast-fail-on-invalid-assumption* false]
       (let [watcher (reify Watcher
                       (notify-message! [this watching message] nil)
                       (notify-invalidated! [this watching]

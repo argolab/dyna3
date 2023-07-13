@@ -8,12 +8,9 @@
 
 ;; this is the current context which is dynamically rebound depending on what is currently running
 ;; this means that we are not passing this value around, which simplifies the calling api a bit
-#_(def ^{:dynamic true :private true} *context*)
 
-;; global variable which sets the full-context variable on the context.  The
-;; full context tracks /all/ conjunctive constraints rather than just the easy
-;; constraints
-;(def ^{:dynamic true :private true} *use-full-context* false)
+;; (ContextHandler/get) is how to get a reference to the context variable now.  It will return
+
 
 (defn- make-variable-assignment-conjunct [value-map]
   (make-conjunct (into [] (for [[k v] value-map]

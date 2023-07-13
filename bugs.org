@@ -52,6 +52,10 @@
    of the trie in the case that there are no additional variables which are
    ground.
 
+3. the clojure ^:dynamic is very slower, as it indirects the reads through a
+   clojure hash map.  Ideally convert those to a java ThreadLocal which should
+   be able to use an array access and be efficient.  However, this will not play
+   nicely with the
 
 
 * further out enhancements

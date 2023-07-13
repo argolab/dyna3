@@ -6,9 +6,8 @@
   (:import [dyna InvalidAssumption IDynaAgendaWork]))
 
 ;; any assumption which the current expression depends
-(def ^:dynamic *current-watcher*)
-;(tlocal-def current-watcher)
-(def ^:dynamic *fast-fail-on-invalid-assumption* false)
+(tlocal-def current-watcher)
+(tlocal-def fast-fail-on-invalid-assumption)
 
 (declare depend-on-assumption
          make-assumption)
@@ -39,7 +38,7 @@
       (.put watchers watcher nil)
       (when-not (is-valid? this)
         (notify-invalidated! watcher this)
-        (when *fast-fail-on-invalid-assumption*
+        (when (tlocal fast-fail-on-invalid-assumption);*fast-fail-on-invalid-assumption*
           (throw (InvalidAssumption. "invalid assumption"))))))
   (send-message! [this message]
     (???))
@@ -79,7 +78,7 @@
       (if (is-valid? this)
         (.put watchers watcher nil)
         (do (notify-invalidated! watcher this)
-            (when *fast-fail-on-invalid-assumption*
+            (when (tlocal fast-fail-on-invalid-assumption);*fast-fail-on-invalid-assumption*
               (throw (InvalidAssumption. "invalid assumption")))))))
 
   (send-message! [this message]
@@ -145,33 +144,32 @@
                             ]
   ;; in this case, we are stating that the current computation would need to get
   ;; redone if the current assumption becomes invalid
-  ;(let [w (tlocal current-watcher)])
-  (when (bound? #'*current-watcher*);(nil? w)
-    (add-watcher! ass *current-watcher*)
-    ;; check the assumption after adding it might get invalidated inbetween
-    (when (not (is-valid? ass))
-      ;; there should be some exception to restart the computation or something
-      ;; it would allow for the runtime to check which of the expressions
-      (throw (InvalidAssumption. "attempting to use invalid assumption")))))
+  (let [w (tlocal current-watcher)]
+    (when-not (nil? w)
+      (add-watcher! ass w)
+      ;; check the assumption after adding it might get invalidated inbetween
+      (when (not (is-valid? ass))
+        ;; there should be some exception to restart the computation or something
+        ;; it would allow for the runtime to check which of the expressions
+        (throw (InvalidAssumption. "attempting to use invalid assumption"))))))
 
 (defmacro bind-assumption [assumpt & body]
-  #_`(tbinding
+  `(tbinding
    [current-watcher ~assumpt]
-   ~@body)
-  `(binding [*current-watcher* ~assumpt]
-    ~@body))
+   ~@body))
 
 (defmacro compute-with-assumption [& body]
   `(loop [assumpt# (make-assumption)]
      (let [[ok# res#]
-           #_(tbinding
-            [current-watcher assumpt#])
-           (binding [*current-watcher* assumpt#
-                     *fast-fail-on-invalid-assumption* true]
-             (try
-               [true (do ~@body)]
-               (catch ~InvalidAssumption err#
-                 [false false])))]
+           (tbinding
+            [current-watcher assumpt#
+             fast-fail-on-invalid-assumption true]
+            #_(binding [;*current-watcher* assumpt#
+                      *fast-fail-on-invalid-assumption* true])
+            (try
+              [true (do ~@body)]
+              (catch ~InvalidAssumption err#
+                [false false])))]
        (if ok#
          [assumpt# res#]
          (recur (make-assumption))))))

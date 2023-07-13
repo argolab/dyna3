@@ -83,10 +83,13 @@
            ")")
       (str "(AGGIN_" *aggregator-print-input-depth* "=" (rexpr-printer (:incoming r)) ")*" bod))))
 
+(defn- aggregator-op-contribute-value-default [value mult]
+  (make-aggregator-op-inner (make-constant value) [] (make-multiplicity mult)))
 ;; this might be something that the memoization is going to want to override,
 ;; which would allow for it to get the result of aggregation directly
 (def ^{:dynamic true} *aggregator-op-contribute-value*
-  (fn r
+  aggregator-op-contribute-value-default
+  #_(fn r
     ([value mult]
      ;; return a dummy expression in the case that there is nothing that is able
      ;; to take the value, this can hold the value until there is something else
@@ -94,11 +97,14 @@
     ;([value] (r value 1))
 
 
+(defn- aggregator-op-additional-constraints-default [incoming-variable]
+  (make-multiplicity 1))
 (def ^{:dynamic true} *aggregator-op-additional-constraints*
   ;; additional constraints that can be added to the R-expr in the case that it
   ;; would not be resolved, this can take into account the current value known
   ;; to the aggregator
-  (fn [incoming-variable]
+  aggregator-op-additional-constraints-default
+  #_(fn [incoming-variable]
     (make-multiplicity 1)))
 
 (def ^{:dynamic true} *aggregator-op-saturated*
@@ -111,7 +117,6 @@
   ;; the context we might need to override that in some cases---such as
   ;; memoization where the variables have been renamed, but we might not be
   ;; using the new names, or in the jit generated code
-
   get-value)
 
 (def ^{:dynamic true} *aggregator-op-should-eager-run-iterators*
