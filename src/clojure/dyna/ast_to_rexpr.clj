@@ -455,7 +455,7 @@ This is most likely not what you want."))))
                                                                       (eval clj-code))))
 
                                            "use_optimized_rexprs" (match-term arg1 ("optimized_rexprs" c)
-                                                                          (alter-var-root system/use-optimized-rexprs (if c true false)))
+                                                                              (alter-var-root system/use-optimized-rexprs (constantly (if c true false))))
 
                                            "set_recursion_limit" (match-term arg1 ("set_recursion_limit" l)
                                                                              (reset! (tlocal system/user-recursion-limit) (int l)))

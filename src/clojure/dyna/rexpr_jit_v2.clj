@@ -1416,7 +1416,7 @@
                                                                         :simplify-call-counter @*jit-simplify-call-counter*)))))))
                                                      rewrites)))]
     (doseq [mr matching-rewrites]
-      (vswap! *jit-simplify-rewrites-found* conj [*current-simplify-stack* mr]))
+      (vswap! *jit-simplify-rewrites-found* conj [(tlocal *current-simplify-stack*) mr]))
     (let [picked (filter *jit-simplify-rewrites-picked-to-run* matching-rewrites)]
       (if (empty? picked)
         nil
@@ -1433,9 +1433,9 @@
                 rexpr-in
                 (do (assert (= :rexpr (:type rexpr-in)))
                     (:rexpr-type rexpr-in)))]
-    (binding [*current-simplify-stack* (conj *current-simplify-stack* rexpr)]
-      (debug-binding
-       [*current-simplify-running* simplify-jit-internal-rexpr]
+    (tbinding [current-simplify-stack (conj (tlocal *current-simplify-stack*) rexpr)]
+      (debug-tbinding
+       [current-simplify-running simplify-jit-internal-rexpr]
        (let [jit-specific-rewrites (get @rexpr-rewrites-during-jit-compilation (type rexpr) nil)
              ret (if (nil? jit-specific-rewrites)
                    (simplify-jit-internal-rexpr-generic-rewrites rexpr)
@@ -1522,33 +1522,35 @@
               *jit-consider-expanding-placeholders* false ;; TODO: this should eventually be true
               *jit-call-simplify-on-placeholders* false
               *current-assignment-to-exposed-vars* local-name-to-context
-              *current-simplify-stack* ()
+              ;*current-simplify-stack* ()
               *local-variable-names-for-variable-values* (volatile! nil)
               *jit-generate-functions* (transient [])
               *jit-incremented-status-counter* (volatile! false)
               *rexpr-checked-already* (transient #{})]
-      (debug-binding
-       ;; restart these values, as we are running a nested version of simplify for ourselves
-       [*current-simplify-running* nil]
-       (let [prim-r (:prim-rexpr-placeholders jinfo)
-             result (simplify-jit-internal-rexpr-loop prim-r)]
-         (if (not= result prim-r)
-           ;; then there is something that we can generate, and we are going to want to run that generation and then evaluate it against the current R-expr
-           (let [gen-fn (generate-cljcode-fn result)
-                 fn-evaled (binding [*ns* dummy-namespace]
-                             (eval `(do
-                                      (ns dyna.rexpr-jit-v2)
-                                      (def-rewrite-direct ~(:generated-name jinfo) [:standard] ~gen-fn))))]
+      (tbinding
+       [current-simplify-stack ()]
+       (debug-tbinding
+        ;; restart these values, as we are running a nested version of simplify for ourselves
+        [current-simplify-running nil]
+        (let [prim-r (:prim-rexpr-placeholders jinfo)
+              result (simplify-jit-internal-rexpr-loop prim-r)]
+          (if (not= result prim-r)
+            ;; then there is something that we can generate, and we are going to want to run that generation and then evaluate it against the current R-expr
+            (let [gen-fn (generate-cljcode-fn result)
+                  fn-evaled (binding [*ns* dummy-namespace]
+                              (eval `(do
+                                       (ns dyna.rexpr-jit-v2)
+                                       (def-rewrite-direct ~(:generated-name jinfo) [:standard] ~gen-fn))))]
 
-             (debug-repl "pr1")
-             (let [rr (try (fn-evaled rexpr simplify-method)
-                           (catch UnificationFailure _ (make-multiplicity 0)))]
-               (debug-repl "pr2")
-               (assert (not= rexpr rr)) ;; otherwise there was no rewriting done, and the generated rewrite failed for some reason
-               rr))
-           (do
-             ;; then there was nothing that can be rewritten, so this should just return the same R-expr back
-             rexpr)))))))
+              (debug-repl "pr1")
+              (let [rr (try (fn-evaled rexpr simplify-method)
+                            (catch UnificationFailure _ (make-multiplicity 0)))]
+                (debug-repl "pr2")
+                (assert (not= rexpr rr)) ;; otherwise there was no rewriting done, and the generated rewrite failed for some reason
+                rr))
+            (do
+              ;; then there was nothing that can be rewritten, so this should just return the same R-expr back
+              rexpr))))))))
 
 (defn- maybe-create-rewrites-inference [context rexpr jinfo]
   (???))
@@ -1561,9 +1563,9 @@
   ;; create rewrites which correspond with simplify-fast
   ;; these rewrites can only look at the bindings to variable values
   ;; just like normal simplify, we are going to have that
-  (debug-binding
-   [*current-simplify-stack* (conj *current-simplify-stack* rexpr)
-    *current-simplify-running* simplify-jit-create-rewrites-fast]
+  (debug-tbinding
+   [current-simplify-stack (conj (tlocal *current-simplify-stack*) rexpr)
+    current-simplify-running simplify-jit-create-rewrites-fast]
    (let [ret ((get @rexpr-rewrites-func (type rexpr) simplify-identity) rexpr simplify-jit-create-rewrites-fast)]
      (if (or (nil? ret) (= ret rexpr))
        (let [jinfo (rexpr-jit-info rexpr)]
@@ -1598,7 +1600,7 @@
 (intern 'dyna.rexpr 'simplify-jit-create-rewrites
         (fn [rexpr]
             ;; this is called from the main rewrite function which will create new rewrites inside of the R-expr
-          (if-not system/*generate-new-jit-rewrites*
+          (if-not (tlocal system/*generate-new-jit-rewrites*)
             rexpr
             (do
               (assert (context/has-context))

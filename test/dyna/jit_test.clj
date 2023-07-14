@@ -7,7 +7,7 @@
     (:require [dyna.rexpr-jit-v2 :refer :all])
     (:require [dyna.base-protocols :refer :all])
     (:require [dyna.context :as context])
-    (:require [dyna.system :refer [*generate-new-jit-rewrites*]]))
+    (:require [dyna.system]))
 
 (deftest basic-jit1
   ;; test just creating the synthized R-expr
@@ -30,10 +30,10 @@
     (let [ctx (context/make-empty-context synth-rexpr)]
       (ctx-set-value! ctx (make-variable 'a) 3)
       (ctx-set-value! ctx (make-variable 'b) 2)
-      (binding [*generate-new-jit-rewrites* false]
+      (tbinding [generate-new-jit-rewrites false]
         (let [res (context/bind-context-raw ctx (simplify-fully synth-rexpr))]
           (is (identical? res synth-rexpr))))
-      (binding [*generate-new-jit-rewrites* true]
+      (tbinding [generate-new-jit-rewrites true]
         (let [res (context/bind-context-raw ctx (simplify-fully synth-rexpr))]
           (is (= (make-multiplicity 1) res))
           (is (= 35 (ctx-get-value ctx (make-variable 'd)))))))))
@@ -48,7 +48,7 @@
 
     (let [ctx (context/make-empty-context synth-rexpr)]
       (ctx-set-value! ctx (make-variable 'a) 3)
-      (binding [*generate-new-jit-rewrites* true]
+      (tbinding [generate-new-jit-rewrites true]
         (let [res (context/bind-context-raw ctx (simplify-fully synth-rexpr))]
           (is (= (make-multiplicity 1) res))
           (is (= 28 (ctx-get-value ctx (make-variable 'd)))))))))
@@ -76,7 +76,7 @@
         ctx (context/make-empty-context rr)
         ctx2 (context/make-empty-context rr2)
         ctx3 (context/make-empty-context rr3)]
-    (binding [*generate-new-jit-rewrites* true]
+    (tbinding [generate-new-jit-rewrites true]
       (let [res (context/bind-context-raw ctx (simplify-fully rr))]
         (is (is-add? res))
         (is (= (make-constant 6) (:v0 res))))
@@ -99,7 +99,7 @@
                             synth-rexpr])
         ctx (context/make-empty-context rr)
         ctx2 (context/make-empty-context rr2)]
-    (binding [*generate-new-jit-rewrites* true]
+    (tbinding [generate-new-jit-rewrites true]
       (let [res2 (context/bind-context-raw ctx2 (simplify-fully rr2))]
         ;; this needs to do inference constraints to identify a new constraint between a and cand then that constraint should fail as a result
         (is (is-empty-rexpr? res2))))))

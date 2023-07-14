@@ -184,6 +184,8 @@
                                         ;:all-constraints  if everything contained in the trie is a constraint, then we could remove the aggregator, even in the case that we still have a disjunct.  Though not 100% sure if that would be all that helpful, it would essentially just be rewriting the R-expr such that the result passes through the aggregator and then we can remove the outer and inner aggregators in that case
                                  ;; all-constraints would also require that there are no wildcards and the max number of branches are 1.
                                  ;; this might be redudant, as if it has rexprs-exposed-vars is an empty set, then it should be able to run the aggregators on all branches as long as there are no wildcards.  It would just have to combine all of the values that it sees along a given branch
+
+                                 :current-var-vals (vec (map get-value dj-vars))
                                  })
         dj-var-values (map get-value dj-vars)
         ;; track the different values which have been seen when added to the trie to identify things which are constant
@@ -265,13 +267,18 @@
           :check (not (tlocal *simplify-looking-for-fast-fail-only*))}
   :run-at :standard
   :run-in-jit false
-  (let [new-dj-vars (map #(let [v (get-value %)] (if (nil? v) % (make-constant v))) dj-vars)]
-    ;; the internal steps of rewriting might require many passes to get to the result, so this might not actually work out this well.
-    ;; how this figures out that there were no changes, or that the changes are unnecessary to process is going to require additional checking or something.  Not entirely sure what to do about that....
-    ;; how this might figure out that some of these operations will find that it could work through it to get that
-    #_(when (not= new-dj-vars dj-vars) ;; if none of the exposed variables are now bound, then we are not going to call simplify, as the internals are going to be the same
-)
-    (disjunct-op-rewrite-internals (vec new-dj-vars) rexprs simplify)))
+  (disjunct-op-rewrite-internals dj-vars rexprs simplify)
+
+  ;; this does work to save rewrites, as there might be operations internally
+  ;; which still need to get processed.  I suppose that if all of the internals
+  ;; were mult values, then we could skip the rewriting work, but because we do
+  ;; not guarantee that we have completed rewriting, there might still be other
+  ;; rewrites which are still pending
+  #_(if (not= (:current-var-vals metadata) (map get-value dj-vars))
+
+    (do
+      (println "save disjunct rewrite" metadata)
+      nil)))
 
 (def-rewrite
   :match {:rexpr (disjunct-op (:any-list dj-vars) (:unchecked ^PrefixTrie rexprs) metadata)
