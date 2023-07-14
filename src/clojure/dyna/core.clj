@@ -98,7 +98,7 @@
                                   ("$compiler_expression" ("make_system_term" ("/" "$command_line_args" 0))))))
             (when system/status-counters
               (StatusCounters/program_start))
-            (binding [system/query-output (fn [[query-text line-number] result]
+            (tbinding [system/query-output (fn [[query-text line-number] result]
                                             (if (Boolean/parseBoolean (System/getProperty "dyna.print_raw_query_results" "false"))
                                               (println query-text " " run-filef ":" line-number "\n" result)
                                               (pretty-print-query-result query-text result)))]

@@ -111,6 +111,9 @@ while [ $# -gt 0 ]; do
         -agentlib*|-D*|-XX*)
             jvm_args+="$1 "
             ;;
+        -J*)
+            jvm_args+="${1#-J} "
+            ;;
         --time)
             jvm_args+="-Ddyna.time_running=true "
             ;;

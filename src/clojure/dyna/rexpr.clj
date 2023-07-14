@@ -1443,10 +1443,10 @@
                res (context/bind-context ctx
                                          (simplify-fully rexpr))]
            [ctx res]))]
-    (system/query-output query-id {:context ctx
-                                   :context-value-map (get (ctx-get-inner-values ctx) 4)
-                                   :rexpr res
-                                   :rexpr-original rexpr})))
+    ((tlocal system/query-output) query-id {:context ctx
+                                     :context-value-map (get (ctx-get-inner-values ctx) 4)
+                                     :rexpr res
+                                     :rexpr-original rexpr})))
 
 
 (defn find-iterators [rexpr]
@@ -1973,7 +1973,7 @@
   :run-at :construction
   (let [n [(:name name) (:arity name)] ;; this is how the name for built-in R-exprs are represented.  There is no info about the file
         s (or (get @system/system-defined-user-term n)
-              (get @system/globally-defined-user-term n))]
+              (get @(tlocal system/globally-defined-user-term) n))]
     (when (and s
                (not (and (is-user-call? s)
                          (= (:name s) name))))

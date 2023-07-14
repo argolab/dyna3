@@ -37,7 +37,7 @@
 ;;              func (make-function-depth i)]
 ;;          (eval (make-cr-function func))))
 
-(eval `(do ~@(for [i (range 1 10)
+(eval `(do ~@(for [i (range 1 5)
                    func (make-function-depth i)]
                (make-cr-function func))))
 
@@ -461,7 +461,10 @@
         stash-names (into {} (for [[k _] (partition 2 bnds)
                                    :let [k2 (symbol (munge (name k)))]]
                                (do
-                                 (assert (contains? tlocal-vars k2))
+                                 (when-not (contains? tlocal-vars k2)
+                                   (println "variable " k2 " not found")
+                                   (println tlocal-vars)
+                                   (assert false))
                                  [k2 (gensym (str "stash-" k2))])))]
     `(let* [^ThreadVar ~thread-var (ThreadVar/get)
             ~@(apply concat (for [[k s] stash-names] ;; cache all of the old values

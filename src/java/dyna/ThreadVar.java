@@ -3,6 +3,8 @@ package dyna;
 import clojure.lang.IFn;
 import clojure.lang.AFn;
 import clojure.lang.RT;
+import clojure.lang.Atom;
+import clojure.lang.PersistentHashSet;
 
 
 /**
@@ -32,8 +34,6 @@ public class ThreadVar {
     // assumption.clj
     public Object current_watcher = null;
     public boolean fast_fail_on_invalid_assumption = false;
-
-
 
     // rexpr.clj
     public Rexpr current_top_level_rexpr = null;
@@ -72,5 +72,28 @@ public class ThreadVar {
     public IFn aggregator_op_get_variable_value = RT.var("dyna.base-protocols", "get-value");
 
     public boolean aggregator_op_should_eager_run_iterators = false;
+
+
+    // system.clj
+    public boolean auto_run_agenda_before_query = Boolean.parseBoolean(System.getProperty("dyna.auto_run_agenda", "true"));
+    //public boolean use_optimized_rexprs = Boolean.parseBoolean(System.getProperty("dyna.optimized_rexprs", "true"));
+
+    public boolean generate_new_jit_rewrites = false;
+
+    public Atom globally_defined_user_term = new Atom(RT.map());
+    public Atom user_defined_terms = new Atom(RT.map());
+    public Atom user_exported_terms = new Atom(RT.map());
+    public Atom imported_files = new Atom(PersistentHashSet.EMPTY);
+    public DynaAgenda work_agenda = new DynaAgenda();
+    public Atom user_recursion_limit = new Atom(default_recursion_limit);
+    public static final int default_recursion_limit = Integer.valueOf(System.getProperty("dyna.recursion_limit", "20"));
+    public IFn query_output = RT.var("clojure.core", "println");
+    public IFn parser_external_value = new AFn() {
+            public Object invoke(Object index) {
+                throw new DynaUserError("No external value handler set");
+            }
+        };
+    public Atom dynabase_metadata = new Atom(RT.map());
+    public Object dyna_active_system = null;
 
 }

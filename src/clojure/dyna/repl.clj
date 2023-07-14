@@ -10,7 +10,7 @@
   (:require [dyna.context :as context])
   (:require [dyna.rexpr-constructors :refer [make-multiplicity is-unify? is-conjunct? is-multiplicity?]])
   (:require [dyna.iterators :refer [run-iterator]])
-  (:require [dyna.utils :refer [debug-repl]])
+  (:require [dyna.utils :refer [debug-repl tlocal tbinding]])
   (:require [dyna.rexpr-pretty-printer :refer [print-rexpr *print-variable-name*]])
   (:require [clojure.string :refer [trim join split]])
   (:require [clojure.java.io :refer [file]])
@@ -181,7 +181,7 @@ print fib(100).
 ;; https://github.com/jline/jline3/blob/master/console/src/test/java/org/jline/example/Console.java
 ;; https://github.com/jline/jline3/blob/master/demo/src/main/java/org/jline/demo/Repl.java
 (defn- repl-core []
-  (let [active-system (volatile! system/*dyna-active-system*)
+  (let [active-system (volatile! (tlocal system/*dyna-active-system*))
         terminal (-> (TerminalBuilder/builder)
                      (.name "dyna")
                      (.build))
@@ -251,10 +251,10 @@ print fib(100).
                   (case (first (split (trim input) #" "))
                     "run" (let [fname (second (split (trim input) #" " 2))]
                             (if (nil? @active-system)
-                              (binding [system/query-output query-output-fn]
+                              (tbinding [system/query-output query-output-fn]
                                 (import-file-url (.toURL (file fname))))
                               (system/run-under-system @active-system
-                                                       (binding [system/query-output query-output-fn]
+                                                       (tbinding [system/query-output query-output-fn]
                                                          (import-file-url (.toURL (file fname)))))))
                     "reset" (do (vreset! active-system (system/make-new-dyna-system))
                                 (println "System state has been reset.  All user defined functors have been deleted."))
@@ -263,7 +263,7 @@ print fib(100).
                     "debug-clojure-repl" (debug-repl)
                     "debug-print-raw" (def print-raw-rexprs true)
                     "clear-agenda" (do
-                                     (.clear_agenda system/work-agenda)
+                                     (.clear_agenda (tlocal system/work-agenda))
                                      (println "Agenda cleared\nWARNING: this can cause the system to return incorrect results as some updates will not have been processed"))
                     "help" (repl-help))
 
@@ -276,10 +276,10 @@ print fib(100).
                       (vreset! buffer-query-results true)
                       (vreset! query-buffer [])
                       (let [rexpr-result (if (nil? @active-system)
-                                           (binding [system/query-output query-output-fn]
+                                           (tbinding [system/query-output query-output-fn]
                                              (*repl-evaluate-string* input))
                                            (system/run-under-system @active-system
-                                                                    (binding [system/query-output query-output-fn]
+                                                                    (tbinding [system/query-output query-output-fn]
                                                                       (*repl-evaluate-string* input))))]
                         (if (= (make-multiplicity 1) rexpr-result)
                           (if (and (empty? @query-buffer) @buffer-query-results)

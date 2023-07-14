@@ -14,7 +14,7 @@
 ;; (def base-user-defs (atom {}))
 
 (defmacro def-user-term [name arity rexpr]
-  ;; define a user level term from internal
+  ;; define a user level term from internal expression.  This is used to define things such as builtins like addition etc
   (if (not (string? name))
     `(do ~@(for [x name]
              `(def-user-term ~x ~arity ~rexpr)))
@@ -81,7 +81,7 @@
 
 
 (defn update-user-term! [name function]
-  (let [[old new](swap-vals! system/user-defined-terms
+  (let [[old new](swap-vals! (tlocal system/user-defined-terms)
                              (fn [old]
                                (let [v (get old name nil)]
                                  (assoc old name (let [r (function (if-not (nil? v) v (empty-user-defined-term name)))]
@@ -110,22 +110,22 @@
      (when-not (is-aggregator? rexpr)
        (debug-repl "adding without aggregator")))
     (let [[old-defs new-defs]
-          (swap-vals! system/user-defined-terms (fn [old]
-                                                  (let [v (get old object-name)
-                                                        nv (if (nil? v)
-                                                             (let [e (empty-user-defined-term object-name)]
-                                                               (assoc e :rexprs (conj (:rexprs e) value)))
-                                                             (do
-                                                               ;;(invalidate! (:def-assumption v))
-                                                               (assoc v
-                                                                      :rexprs (conj (:rexprs v) value)
-                                                                      :def-assumption (make-assumption))))
-                                                        nv2 (if (not (dnil? dynabase))
-                                                              (assoc nv
-                                                                     :dynabases (conj (:dynabases nv #{}) dynabase)
-                                                                     :dynabases-assumptions (make-assumption))
-                                                              nv)]
-                                                    (assoc old object-name nv2))))
+          (swap-vals! (tlocal system/user-defined-terms) (fn [old]
+                                                    (let [v (get old object-name)
+                                                          nv (if (nil? v)
+                                                               (let [e (empty-user-defined-term object-name)]
+                                                                 (assoc e :rexprs (conj (:rexprs e) value)))
+                                                               (do
+                                                                 ;;(invalidate! (:def-assumption v))
+                                                                 (assoc v
+                                                                        :rexprs (conj (:rexprs v) value)
+                                                                        :def-assumption (make-assumption))))
+                                                          nv2 (if (not (dnil? dynabase))
+                                                                (assoc nv
+                                                                       :dynabases (conj (:dynabases nv #{}) dynabase)
+                                                                       :dynabases-assumptions (make-assumption))
+                                                                nv)]
+                                                      (assoc old object-name nv2))))
           assumpt (get-in old-defs [object-name :def-assumption])
           assumpt-db (get-in old-defs [object-name :dynabases-assumptions])]
       ;; invalidate after the swap so that if something goes to the object, it will find the new value already in place
@@ -140,11 +140,11 @@
     (if-not (nil? sys)
       {:builtin-def true
        :rexpr sys}
-      (let [gterm (get @system/globally-defined-user-term sys-name)]
+      (let [gterm (get @(tlocal system/globally-defined-user-term) sys-name)]
         (if (and (not (nil? gterm)) (not= (:name gterm) name))
           (do ;(debug-repl)
             (recur (:name gterm)))
-          (let [u (get @system/user-defined-terms name)
+          (let [u (get @(tlocal system/user-defined-terms) name)
                 another-file (:imported-from-another-file u)]
             (if another-file
               (recur another-file)
@@ -156,10 +156,10 @@
                   (get ;; if the term is not found, then we are going to create an
                    ;; empty term.  This will have mult 0, but assumptions
                    ;; which allow it to be overriden later
-                   (swap! system/user-defined-terms (fn [x]
-                                                      (if (contains? x name)
-                                                        x
-                                                        (assoc x name (empty-user-defined-term name)))))
+                   (swap! (tlocal system/user-defined-terms) (fn [x]
+                                                        (if (contains? x name)
+                                                          x
+                                                          (assoc x name (empty-user-defined-term name)))))
                    name))
                 u))))))))
 ;(intern 'dyna.rexpr-constructors 'get-user-term get-user-term)
@@ -216,7 +216,7 @@
 
 (defn optimize-user-term [term-rep]
   (let [unopt-rexpr (combine-user-rexprs-bodies term-rep)
-        [assumpt optimized] (binding [system/user-recursion-limit (min system/user-recursion-limit 5)]
+        [assumpt optimized] (tbinding [system/user-recursion-limit (min (tlocal system/user-recursion-limit) 5)]
                               (compute-with-assumption
                                (simplify-top unopt-rexpr)))])
   (debug-repl "optimize user term")
@@ -244,7 +244,7 @@
 
 
 (def-rewrite
-  :match {:rexpr (user-call (:unchecked name) (:unchecked var-map) (#(< % @system/user-recursion-limit) call-depth) (:unchecked parent-call-arguments))
+  :match {:rexpr (user-call (:unchecked name) (:unchecked var-map) (#(< % @(tlocal system/user-recursion-limit)) call-depth) (:unchecked parent-call-arguments))
           :check (not (tlocal *simplify-looking-for-fast-fail-only*))}
   (let [ut (get-user-term name)]
     #_(when (nil? ut)
@@ -331,8 +331,8 @@
 (swap! debug-useful-variables assoc
        'get-term (fn []
                    (fn
-                     ([name] (first (filter #(= (str name) (:name (:term-name %))) (vals @system/user-defined-terms))))
+                     ([name] (first (filter #(= (str name) (:name (:term-name %))) (vals @(tlocal system/user-defined-terms)))))
                      ([name arity] (first (filter #(and
                                                     (= (str name) (:name (:term-name %)))
                                                     (= arity (:arity (:term-name %))))
-                                                  (vals @system/user-defined-terms)))))))
+                                                  (vals @(tlocal system/user-defined-terms))))))))

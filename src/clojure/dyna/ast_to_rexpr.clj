@@ -339,7 +339,7 @@ This is most likely not what you want."))))
                                                         (let [imported-names (if (= (.arity arg1) 2)
                                                                                (.list_to_vec ^DynaTerm (get arg1 0))
                                                                                ;; then this should lookup the exported terms
-                                                                               (get @system/user-exported-terms file))]
+                                                                               (get @(tlocal system/user-exported-terms) file))]
                                                           (doseq [imported-term imported-names]
                                                             (match-term imported-term ("/" name arity)
                                                                         (update-user-term! {:name name
@@ -365,7 +365,7 @@ This is most likely not what you want."))))
                                                       (when-not (nil? *compiler-expression-dynabase*)
                                                         (throw (DynaUserError. "`:- export` must be at the top level in the file, not inside of a Dynabase.")))
                                                       (match-term arg1 ("export" ("/" lname larity))
-                                                                  (swap! system/user-exported-terms
+                                                                  (swap! (tlocal system/user-exported-terms)
                                                                          (fn [o]
                                                                            (assoc o source-file (conj (get o source-file #{})
                                                                                                       (DynaTerm. "/" [lname larity])))))))
@@ -417,7 +417,7 @@ This is most likely not what you want."))))
                                                                             (when-not (nil? *compiler-expression-dynabase*)
                                                                               (throw (DynaUserError. "make_system_term is not supported on Dynabase methods.")))
                                                                             (when (is-multiplicity? rexpr) (debug-repl))
-                                                                            (swap! system/globally-defined-user-term
+                                                                            (swap! (tlocal system/globally-defined-user-term)
                                                                                    assoc [name arity] rexpr)))
 
                                            "make_global_term" (match-term arg1 ("make_global_term" ("/" name arity))
@@ -455,10 +455,10 @@ This is most likely not what you want."))))
                                                                       (eval clj-code))))
 
                                            "use_optimized_rexprs" (match-term arg1 ("optimized_rexprs" c)
-                                                                          (alter-var-root system/*use-optimized-rexprs* (if c true false)))
+                                                                          (alter-var-root system/use-optimized-rexprs (if c true false)))
 
                                            "set_recursion_limit" (match-term arg1 ("set_recursion_limit" l)
-                                                                             (reset! system/user-recursion-limit (int l)))
+                                                                             (reset! (tlocal system/user-recursion-limit) (int l)))
 
                                            (let [arity (.arity arg1)
                                                  call-name {:name (str "$pragma_" (.name arg1))
@@ -556,7 +556,7 @@ This is most likely not what you want."))))
                                                                                (make-proj-many (vals project-variables-map)
                                                                                                body-rexpr))
                                                 rexpr-opt (optimize-rexpr rexpr)]
-                                            (when (get @system/globally-defined-user-term [functor-name functor-arity])
+                                            (when (get @(tlocal system/globally-defined-user-term) [functor-name functor-arity])
                                               (throw (DynaUserError. (str "The term " functor-name "/" functor-arity " is a system defined term, unable to redefine"))))
                                             (cond (and (= "$memo" functor-name) (= 1 functor-arity))
                                                   (handle-dollar-memo-rexpr rexpr-opt source-file dynabase)
@@ -847,7 +847,7 @@ This is most likely not what you want."))))
             ["$external_value" 1] (let [[value-index] (.arguments ast)]
                                     (make-unify
                                      out-variable
-                                     (make-constant (system/parser-external-value value-index))))
+                                     (make-constant ((tlocal system/parser-external-value) value-index))))
 
             ["$with_key" 2] (let [[expression-value with-key-expression] (.arguments ast)
                                   has-dynabase (not (and (is-constant? (get variable-name-mapping "$self"))
@@ -1154,7 +1154,7 @@ This is most likely not what you want."))))
 
 (defn import-file-url [url]
   (let [do-import (atom false)]
-    (swap! system/imported-files
+    (swap! (tlocal system/imported-files)
            (fn [o]
              (if (contains? o url)
                (do (reset! do-import false)

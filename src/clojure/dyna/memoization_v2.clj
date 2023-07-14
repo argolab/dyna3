@@ -980,7 +980,7 @@
 
 
 (swap! debug-useful-variables assoc
-       'work-agenda (fn [] system/work-agenda))
+       'work-agenda (fn [] (tlocal system/work-agenda)))
 
 (defn print-memo-table [call-name]
   (let [term (get-user-term call-name)]

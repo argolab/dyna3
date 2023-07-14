@@ -133,7 +133,7 @@
 (def-rewrite
   :match {:rexpr (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable)
                              (#(= % true) body-is-conjunctive) (:rexpr R))
-          :check system/*use-optimized-rexprs*}
+          :check system/use-optimized-rexprs}
   :run-at [:construction :inference]
   (let [inner (make-aggregator-op-inner incoming-variable
                                                         []
@@ -143,7 +143,7 @@
 ;; if there is a project nested inside of the aggregator inner expression, then we are going pull the projection out and add it to the aggregator
 (def-rewrite
   :match {:rexpr (aggregator-op-inner (:any incoming) (:variable-list projected-vars) (proj (:variable hid-var) (:rexpr R)))
-          :check (and system/*use-optimized-rexprs* ;; this check should not be necessary here....
+          :check (and system/use-optimized-rexprs ;; this check should not be necessary here....
                       (not (some #{hid-var} projected-vars)))}
   :run-at :construction
   (make-aggregator-op-inner incoming (conj projected-vars hid-var) R))
@@ -167,14 +167,14 @@
 ;; we want to lift the disjunction out of the aggregation, as we can handle the disjunctions before there are
 (def-rewrite
   :match {:rexpr (aggregator-op-inner (:any incoming) (:any-list projected-vars) (disjunct (:rexpr-list Rs)))
-          :check system/*use-optimized-rexprs*}
+          :check system/use-optimized-rexprs}
   :run-at :construction
   (make-disjunct (vec (map #(make-aggregator-op-inner incoming projected-vars %) Rs))))
 
 ;; lift the optimized disjunct out of the aggregation inner
 (def-rewrite
   :match {:rexpr (aggregator-op-inner (:any incoming) (:any-list projected-vars) (disjunct-op (:any-list disjunction-variables) (:unchecked trie-Rs) _))
-          :check system/*use-optimized-rexprs*}
+          :check system/use-optimized-rexprs}
   :run-at :construction
   (let [incoming-idx (indexof disjunction-variables #{incoming})
         pjv (into (if (is-variable? incoming) #{incoming} #{}) projected-vars)
