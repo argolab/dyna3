@@ -1,16 +1,21 @@
 (ns dyna.rexpr-jit-v2
   (:require [dyna.utils :refer :all])
+  (:require [aprint.core :refer [aprint]])
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.base-protocols :refer :all])
   (:require [dyna.rexpr-disjunction]) ;; make sure is loaded first
-  (:require [dyna.rexpr-aggregators-optimized])
-  (:require [dyna.rexpr-constructors :refer [is-disjunct-op? get-user-term is-aggregator-op-outer? is-aggregator-op-inner?]])
+  (:require [dyna.rexpr-aggregators-optimized :refer [convert-basic-aggregator-to-op-aggregator]])
+  (:require [dyna.rexpr-constructors :refer [is-disjunct-op? get-user-term is-aggregator-op-outer? is-aggregator-op-inner? make-no-simp-aggregator-op-inner]])
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
   (:require [dyna.rexpr-pretty-printer :refer [rexpr-printer]])
   (:require [clojure.walk :refer [macroexpand-all]])
+  (:require [clojure.set :refer [union]])
   (:import [dyna.rexpr proj-rexpr simple-function-call-rexpr conjunct-rexpr])
-  (:import [dyna RexprValue RexprValueVariable Rexpr DynaJITRuntimeCheckFailed StatusCounters UnificationFailure]))
+  (:import [dyna.rexpr_aggregators_optimized aggregator-op-outer-rexpr aggregator-op-inner-rexpr])
+  (:import [dyna.rexpr_aggregators Aggregator])
+  (:import [dyna RexprValue RexprValueVariable Rexpr DynaJITRuntimeCheckFailed StatusCounters UnificationFailure])
+  (:import [dyna ContextHandle ThreadVar RContext]))
 
 ;; this is going to want to cache the R-expr when there are no arguments which are "variables"
 ;; so something like multiplicy can be just a constant value
@@ -139,8 +144,18 @@
                                              (if (not= v var)
                                                [(cons :body path) v])))
                                   (if child-uses
-                                    {:var {:hidden-var var}})))
+                                    {(list :var) {:hidden-var var}})))
         (is-aggregator? rexpr) (???)
+        (is-aggregator-op-inner? rexpr) (let [body-path (get-variables-and-path (:body rexpr))
+                                              proj-out (:projected rexpr)
+                                              child-uses (apply union (map exposed-variables (filter is-jit-placeholder? (vals body-path))))]
+                                          (when-not (empty? proj-out)
+                                            (debug-repl "agg inner vpath for proj")
+                                            (???))
+                                          (merge (into {} (for [[path v] body-path]
+                                                            [(cons :body path) v]))
+                                                 (when (contains? child-uses (:incoming rexpr))
+                                                   {(list :incoming) {:hidden-var (:incoming rexpr)}})))
         :else
         (let [litems (rexpr-map-function-with-access-path rexpr
                                                           (fn fr [fname ftype val]
@@ -160,6 +175,8 @@
                                                                           [(list fname `(nth ~i)) v])
                                                               :var-map (???) ;; this is going to have to use the key for the access path...
                                                               ;:hidden-var [[(list fname) {:hidden-var val}]] ;; unsure what do do with this....???
+                                                              :unchecked [] ;; there are no "vars" in this
+                                                              :hidden-var
                                                               (do
                                                                 (debug-repl "unsure type required mapping")
                                                                 (???)))))]
@@ -191,12 +208,28 @@
         (cond (is-proj? rexpr) (let [new-var (gensym 'projvar)]
                                  `(let [~new-var (make-variable (Object.))]
                                     (make-no-simp-proj ~new-var ~(primitive-rexpr-cljcode (assoc varmap (:var rexpr) new-var) (:body rexpr)))))
+              (is-aggregator-op-inner? rexpr) (let [new-incoming (gensym 'aggin)
+                                                    new-projs (vec (for [_ (:projected rexpr)]
+                                                                     (gensym 'aggproj)))
+                                                    new-varmap (merge varmap
+                                                                      {(:incoming rexpr) new-incoming}
+                                                                      (zipmap (:projected rexpr) new-projs))
+                                                    body (primitive-rexpr-cljcode new-varmap (:body rexpr))
+                                                    ret
+                                                    `(let [~new-incoming (make-variable (Object.))
+                                                           ~@(apply concat (for [v new-projs]
+                                                                             [v `(make-variable (Object.))]))]
+                                                       (make-no-simp-aggregator-op-inner ~new-incoming [~@new-projs] ~body))]
+                                                ret)
+
               :else (let [rname (rexpr-name rexpr)]
                       `(~(symbol "dyna.rexpr-constructors" (str "make-no-simp-" rname))
                         ~@(map #(primitive-rexpr-cljcode varmap %) (get-arguments rexpr)))))
         (is-constant? rexpr) rexpr
         (is-variable? rexpr) (strict-get varmap rexpr)
         (vector? rexpr) (into [] (map #(primitive-rexpr-cljcode varmap %) rexpr))
+        (instance? Aggregator rexpr)
+        `(get @dyna.rexpr-aggregators/aggregators ~(:name rexpr)) ;; this is a object which is reference, hence we can not embed it in the code directlty, and instead will use this to look up the aggregator
         :else (do
                 (debug-repl "unknown mapping to constructor")
                 (???))))
@@ -216,14 +249,40 @@
                                (dyna-assert (contains? (exposed-variables bb) n))
                                (make-no-simp-proj n bb))))
 
+                         (is-aggregator-op-inner? v)
+                         (let [incoming (:incoming v)
+                               proj-out (:projected v)
+                               new-args (loop [a args
+                                               vs (cons incoming proj-out)]
+                                          (if (empty? vs)
+                                            a
+                                            (let [vv (first vs)]
+                                              (if (or (instance? jit-local-variable-rexpr vv)
+                                                      (instance? jit-hidden-variable-rexpr vv))
+                                                (recur a (rest vs))
+                                                (let [lvar (jit-local-variable-rexpr. (gensym 'aggprojvar))]
+                                                  (recur (assoc a vv lvar)
+                                                         (rest vs)))))))
+                               body (rf :rexpr (:body v) new-args)
+                               ret (make-no-simp-aggregator-op-inner (get new-args incoming incoming) (vec (map #(get new-args % %) proj-out)) body)
+                               ]
+                           ret)
+
                          :else (rewrite-all-args v #(rf %1 %2 args)))
 
                    (= typ :rexpr-list) (into [] (map #(rf :rexpr % args) v))
 
+                   (= typ :unchecked) (let []
+                                        (assert (and (not (rexpr? v))
+                                                     (not (instance? RexprValue v))))
+                                        v)
+
                    (or (instance? jit-exposed-variable-rexpr v)
                        (instance? jit-local-variable-rexpr v)
                        (instance? jit-hidden-variable-rexpr v)
-                       (is-constant? v)) v ;; no change
+                       (is-constant? v)
+                       ) v ;; no change
+
                    (instance? RexprValue v) (strict-get args v)
 
                    :else (do
@@ -318,9 +377,15 @@
                   @vv))]
     (let [convert-fn (if @is-new
                        (do (binding [*ns* dummy-namespace]
-                             (eval `(do
-                                      (ns dyna.rexpr-jit-v2)
-                                      ~(:make-rexpr-type rtype))))
+                             (try
+                               (eval `(do
+                                        (ns dyna.rexpr-jit-v2)
+                                        ~(:make-rexpr-type rtype)))
+                               (catch RuntimeException err
+                                 (do
+                                   (println "failed generate code")
+                                   (aprint (:make-rexpr-type rtype))
+                                   (throw err)))))
                            (let [f (binding [*ns* dummy-namespace]
                                      (eval `(do
                                               (ns dyna.rexpr-jit-v2)
@@ -333,24 +398,33 @@
 
 
 
-(defn convert-to-jitted-rexpr [rexpr]
+(defn- convert-to-jitted-rexpr-fn [rexpr]
   ;; there are some R-expr types which we do not want to JIT, so those are going to be things that we want to replace with a placeholder in the expression
+  (if-not (tlocal system/generate-new-jit-states)
+    rexpr ;; I suppose that we can just return the R-expr unmodified in the case that there is nothing that we are going to do here
+    )
   (let [pl (volatile! {})
         rp (fn rr [rexpr]
              (let [jinfo (rexpr-jit-info rexpr)]
                (if-not (:jittable jinfo true)
-                 (let [id (count @pl)
-                       exposed (exposed-variables rexpr)]
-                   ;; should the nested expressions also become JITted?  In the
-                   ;; case of an aggregator, we might want to pass through the
-                   ;; aggregation to handle its children?  Though those will be
-                   ;; their own independent compilation units
-                   (make-jit-placeholder id (into {} (for [e exposed] [e e]))))
+                 (cond
+                   (is-aggregator? rexpr) (rr (convert-basic-aggregator-to-op-aggregator rexpr))
+
+                   :else
+                   (let [id (count @pl)
+                         exposed (exposed-variables rexpr)]
+                     ;; should the nested expressions also become JITted?  In the
+                     ;; case of an aggregator, we might want to pass through the
+                     ;; aggregation to handle its children?  Though those will be
+                     ;; their own independent compilation units
+                     (make-jit-placeholder id (into {} (for [e exposed] [e e])))))
                  (rewrite-rexpr-children-no-simp rexpr rr))))
         nr (rp rexpr)
         synthed (synthize-rexpr nr)]
     (debug-repl "TODO")
     ))
+
+(intern 'dyna.rexpr-constructors 'convert-to-jitted-rexpr convert-to-jitted-rexpr-fn)
 
 (defn- get-matchers-for-value [val]
   (into [] (map first (filter (fn [[name func]] (func val)) @rexpr-matchers))))
@@ -537,15 +611,17 @@
 (defn- generate-cljcode-fn [final-rexpr]
   `(fn [~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))}) ~'simplify]
      ~(when system/status-counters `(StatusCounters/match_attempt))
-     (try
-       (do ~((generate-cljcode (persistent! *jit-generate-functions*))
-             (fn []
-               (generate-cljcode-to-materalize-rexpr final-rexpr)
-               ;; TODO: the inner expression needs to return an R-expr which corresponds with the state of the JITted code after it has performed many steps
-               ;; either this should already be put into the JITted code here, or it should have already been generated somewhere else
-               ;`(???)
-               )))
-       (catch DynaJITRuntimeCheckFailed ~'_ nil))))
+     (let [^RContext ~'**context** (ContextHandle/get)
+           ^ThreadVar ~'**threadvar** (ThreadVar/get)]
+       (try
+         (do ~((generate-cljcode (persistent! *jit-generate-functions*))
+               (fn []
+                 (generate-cljcode-to-materalize-rexpr final-rexpr)
+                 ;; TODO: the inner expression needs to return an R-expr which corresponds with the state of the JITted code after it has performed many steps
+                 ;; either this should already be put into the JITted code here, or it should have already been generated somewhere else
+                                        ;`(???)
+                 )))
+         (catch DynaJITRuntimeCheckFailed ~'_ nil)))))
 
 #_(def ^{:private true :dynamic true} *jit-cached-expression-results* nil)
 
@@ -982,7 +1058,7 @@
            (let [local-name (gensym 'local-cache)
                  cval (get-current-value varj)]
              (add-to-generation! (fn [inner]
-                                   `(let* [~local-name (get-value ~(:cljcode-expr varj))]
+                                   `(let* [~local-name (get-value-in-context ~(:cljcode-expr varj) ~'**context**)]
                                       ~(inner))))
              (assert (is-bound? cval))
              (vswap! *local-variable-names-for-variable-values* assoc (:matched-variable varj) {:var-name local-name
@@ -1632,6 +1708,20 @@
 
         :else
         (???)))
+
+(def-rewrite
+  :match (aggregator-op-outer (:unchecked operator) (:any result-variable) (:rexpr Rbody))
+  :run-at :jit-compiler
+  (let []
+    (debug-repl "jit in agg op")
+    (???)))
+
+(def-rewrite
+  :match (aggregator-op-inner (:any incoming) (:any-list projected-vars) (:rexpr R))
+  :run-at :jit-compiler
+  (let []
+    (debug-repl "jit in agg op inner")
+    (???)))
 
 
 (def-rewrite

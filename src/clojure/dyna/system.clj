@@ -35,6 +35,7 @@
 
 #_(def ^:dynamic *generate-new-jit-rewrites* false)
 (def-tlocal generate-new-jit-rewrites)
+(def-tlocal generate-new-jit-states)
 
 ;; terms which are included by the system.  These will get automattically
 ;; replaced once the objects are created in the first place these should not be

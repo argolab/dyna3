@@ -917,6 +917,7 @@
                                     (if (contains? (exposed-variables rexpr) incoming)
                                       [(conj proj-out incoming) rexpr]
                                       [proj-out rexpr])))))
+  ;; aggregators need to be converted to the aggregator-optimized format first before they can be JIT compiled
   (rexpr-jit-info [this] {:jittable false}))
 
 (defmethod rexpr-printer aggregator-rexpr [r]

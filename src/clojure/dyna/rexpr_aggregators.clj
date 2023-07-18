@@ -28,6 +28,9 @@
 
 (def aggregators (atom {}))
 
+(defmethod print-dup Aggregator [^Aggregator a]
+  `(get @aggregators ~(:name a)))
+
 (defn is-aggregator-defined? [^String name]
   ;; this method is called by dyna.ParserUtils
   (contains? @aggregators name))

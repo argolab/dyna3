@@ -18,7 +18,7 @@ import clojure.lang.PersistentHashSet;
  *  through the ContextHandle class
  */
 @SuppressWarnings("unchecked")
-public class ThreadVar {
+public final class ThreadVar {
 
     private ThreadVar() {}
 
@@ -79,6 +79,7 @@ public class ThreadVar {
     //public boolean use_optimized_rexprs = Boolean.parseBoolean(System.getProperty("dyna.optimized_rexprs", "true"));
 
     public boolean generate_new_jit_rewrites = false;
+    public boolean generate_new_jit_states = false;
 
     public Atom globally_defined_user_term = new Atom(RT.map());
     public Atom user_defined_terms = new Atom(RT.map());

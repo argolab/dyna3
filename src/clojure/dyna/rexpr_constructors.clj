@@ -37,6 +37,9 @@
          get-user-term
          )
 
+(declare
+ convert-to-jitted-rexpr)
+
 
 (def modification-lock (Object.))
 

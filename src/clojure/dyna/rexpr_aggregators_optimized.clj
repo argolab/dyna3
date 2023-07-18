@@ -130,12 +130,24 @@
   false)
 (def-tlocal aggregator-op-should-eager-run-iterators)
 
+(defn convert-basic-aggregator-to-op-aggregator [rexpr]
+  (assert (and (is-aggregator? rexpr)
+               (:body-is-conjunctive rexpr)
+               system/use-optimized-rexprs))
+  (make-aggregator-op-outer (get @aggregators (:operator rexpr))
+                            (:result rexpr)
+                            (make-aggregator-op-inner (:incoming rexpr)
+                                                      []
+                                                      (:body rexpr))))
+
 (def-rewrite
   :match {:rexpr (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable)
                              (#(= % true) body-is-conjunctive) (:rexpr R))
           :check system/use-optimized-rexprs}
   :run-at [:construction :inference]
-  (let [inner (make-aggregator-op-inner incoming-variable
+  :run-in-jit false
+  (convert-basic-aggregator-to-op-aggregator rexpr)
+  #_(let [inner (make-aggregator-op-inner incoming-variable
                                                         []
                                                         R)]
     (make-aggregator-op-outer (get @aggregators operator) result-variable inner)))

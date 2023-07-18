@@ -7,7 +7,7 @@
     (:require [dyna.rexpr-jit-v2 :refer :all])
     (:require [dyna.base-protocols :refer :all])
     (:require [dyna.context :as context])
-    (:require [dyna.system]))
+    (:require [dyna.system :as system]))
 
 (deftest basic-jit1
   ;; test just creating the synthized R-expr
@@ -101,8 +101,37 @@
         ctx2 (context/make-empty-context rr2)]
     (tbinding [generate-new-jit-rewrites true]
       (let [res2 (context/bind-context-raw ctx2 (simplify-fully rr2))]
-        ;; this needs to do inference constraints to identify a new constraint between a and cand then that constraint should fail as a result
+        ;; this needs to do inference constraints to identify a new constraint between a and c and then that constraint should fail as a result
         (is (is-empty-rexpr? res2))))))
+
+(deftest basic-jit6
+  (let [rexpr (make-aggregator "=" (make-variable 'result) (make-variable 'incoming) true (make-unify (make-variable 'incoming) (make-variable 'X)))
+        [synth-rexpr jit-type] (synthize-rexpr rexpr)
+        rr (make-conjunct [(make-unify (make-variable 'X) (make-constant 1))
+                           synth-rexpr])
+        ctx (context/make-empty-context rr)]
+    (tbinding [generate-new-jit-rewrites true]
+      (let [res2 (context/bind-context-raw ctx (simplify-fully rr))]
+        (is (= 1 (ctx-get-value ctx (make-variable 'result))))))))
+
+#_(deftest jit-memoization1
+  (let [system (system/make-new-dyna-system)]
+    (system/run-under-system
+     system
+     (tbinding
+      [generate-new-
+       generate-new-jit-rewrites true]
+      (eval-string "
+fib(N) := fib(N-1)+fib(N-2) for N > 1.
+fib(1) := 1.
+fib(0) := 0.
+
+$priority(fib[N]) = N.  % will start by compiling the priority function, and then will attempt to compile the fib function itself
+$memo(fib[N:$ground]) = \"unk\".  % and the $memo function as well.
+
+print fib(100).
+")))))
+
 
 #_(deftest basic-jit6
   ;; test constructing an R-expr with holes.  This will mean that it should

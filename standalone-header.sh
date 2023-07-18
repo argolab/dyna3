@@ -102,11 +102,11 @@ while [ $# -gt 0 ]; do
             ;;
         --help)
             help
-            exit 1
+            exit 0
             ;;
         --version)
             echo "Version: $version"
-            exit 1
+            exit 0
             ;;
         -agentlib*|-D*|-XX*)
             jvm_args+="$1 "
