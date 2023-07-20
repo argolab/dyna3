@@ -31,6 +31,7 @@ public final class DynaTerm implements ILookup {
 
     public DynaTerm(String name, Object dynabase, Object from_file, Object arguments) {
         assert name != null;
+        assert dynabase != null;
         assert clojure_seqable.invoke(arguments) == Boolean.TRUE;
         this.name = name; // .intern(); // it would be nice to intern all of the names.  Then we can just use pointer equality between these different values
         this.dynabase = dynabase;
@@ -99,7 +100,7 @@ public final class DynaTerm implements ILookup {
                 // .get does not work with a list
                 h = h * 31 + ((java.lang.Number)clojure_hash.invoke(clojure_nth.invoke(arguments, i))).intValue();
             }
-            if(dynabase != null_term)
+            if(dynabase != this) // the $nil term will have that it is its own dynabase
                 h ^= dynabase.hashCode();
             hashcode_cache = hash_scramble(h);
         }

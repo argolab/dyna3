@@ -22,7 +22,7 @@ clean:
 	rm -rf target/ dyna-standalone-* python_build/
 
 test:
-	_JAVA_OPTIONS='-Ddyna.debug=false -Ddyna.trace_rexpr_construction=false -Ddyna.debug_repl=false -Xss8m' $(LEIN) test
+	_JAVA_OPTIONS='-Ddyna.debug=false -Ddyna.trace_rexpr_construction=false -Ddyna.debug_repl=false -Xss8m -ea' $(LEIN) test
 
 test-debug:
 	$(LEIN) test

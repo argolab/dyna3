@@ -264,7 +264,7 @@
                                                   (recur (assoc a vv lvar)
                                                          (rest vs)))))))
                                body (rf :rexpr (:body v) new-args)
-                               ret (make-no-simp-aggregator-op-inner (get new-args incoming incoming) (vec (map #(get new-args % %) proj-out)) body)
+                               ret (make-no-simp-aggregator-op-inner (:operator v) (get new-args incoming incoming) (vec (map #(get new-args % %) proj-out)) body)
                                ]
                            ret)
 
@@ -445,7 +445,7 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defmacro ^:private bad-gen [] (throw (RuntimeException. "BAD code generation.  Attempted to use some code in the generated output which should have never been used")))
+(defmacro ^:private bad-gen [& args] (throw (RuntimeException. "BAD code generation.  Attempted to use some code in the generated output which should have never been used")))
 
 (def ^{:private true :dynamic true} *jit-generating-rewrite-for-rexpr* nil
   ;; set to the root R-expr which we are creating a rewrite for
@@ -489,7 +489,7 @@
 
 (def ^{:private true :dynamic true} *rewrite-ns*
   ;; the namespace that the current rewrite was originally constructed in
-  )
+  (find-ns 'dyna.rexpr-jit-v2))
 
 (def ^{:private true :dynamic true} *locally-bound-variables* {}
   ;; the variable names are going to be given new generated names, so we need to track some mapping here
@@ -501,10 +501,6 @@
   ;; in the rewrites that we generate, so anytime that an R-expr is rewritten as mult-1, we will track it as "already checked"
   )
 
-#_(def ^{:private true :dynamic true} *precondition-checks-performed* nil
-  ;; this will be a (transient []) of conditions which need to get checked before we can apply the rewrite
-  ;; these will get generated before
-  )
 
 (def ^{:private true :dynamic true} *preconditions-known-true* #{})
 
@@ -515,6 +511,15 @@
 (def ^{:private true :dynamic true} *jit-generate-functions* nil)
 
 (def ^{:private true :dynamic true} *jit-incremented-status-counter* nil)
+
+(def ^{:private true :dynamic true} *jit-currently-rewriting* nil)
+(def ^{:private true :dynamic true} *jit-rexpr-rewrite-metadata*)
+
+(defn jit-metadata []
+  (let [r (get @*jit-rexpr-rewrite-metadata* *jit-currently-rewriting*)]
+    (if (nil? r)
+      (get (vswap! *jit-rexpr-rewrite-metadata* assoc *jit-currently-rewriting* (volatile! {})) *jit-currently-rewriting*)
+      r)))
 
 (defn- generate-cljcode [generate-functions]
   (if (empty? generate-functions)
@@ -808,13 +813,24 @@
                                      :else
                                      (do (debug-repl "symbol ??")
                                          (???))))))
+        (rexpr? expr) (let []
+                        {:type :rexpr
+                         :rexpr-type expr})
+
+        (instance? RexprValue expr) (let []
+                                      {:type :rexpr-value
+                                       :constant-value expr
+                                       :cljcode-expr `(bad-gen "attempting to use value type that was passed in as a constant")})
+
         (keyword? expr) (let []
-                          (???)
                           {:type :value
                            :constant-value expr
                            :invoke (fn [[kw & body]]
                                      (let [b (map jit-evaluate-cljform body)
                                            s (first b)]
+                                       (debug-repl "keyword invoked")
+                                       (???)
+
                                        (if (= :rexpr (:type s))
                                          (do
                                            ;; this is accessing a field on an R-expr.  It should just replace this lookup with directly accessing the value
@@ -833,7 +849,9 @@
                                  :cljcode-expr (vec (map :cljcode-expr vs))}
                                 (when constant
                                   {:constant-value (vec (map :constant-value vs))})))
-        (map? expr) (let [all-constant (volatile! true)
+
+        (instance? clojure.lang.APersistentMap expr)
+        (let [all-constant (volatile! true)
                           ;; the map can only be a map of values to values (I think the cases where it is a map or R-exprs will simply not be supported by the JIT)
                           m (into {} (for [[k v] expr
                                            :let [kj (jit-evaluate-cljform k)
@@ -1232,7 +1250,7 @@
 
                                  (rexpr? arg)
                                  {:type :rexpr
-                                  :cljcode-expr `(bad-gen)
+                                  :cljcode-expr `(bad-gen "should not generate the R-expr into the JIT code")
                                   :rexpr-type arg}
 
                                  :else
@@ -1400,7 +1418,7 @@
   (let [kw-args (:kw-args rewrite)]
     (cond (contains? kw-args :check)
           (binding [*locally-bound-variables* (merge {'rexpr {:type :rexpr
-                                                              :cljcode-expr `(bad-gen)
+                                                              :cljcode-expr `(bad-gen "should not generate the R-expr into the JIT code")
                                                               :rexpr-type rexpr}}
                                                      (:matching-vars rewrite))
                     *rewrite-ns* (:namespace rewrite)]
@@ -1419,7 +1437,7 @@
 
           (contains? kw-args :assigns-variable)
           (binding [*locally-bound-variables* (merge {'rexpr {:type :rexpr
-                                                              :cljcode-expr `(bad-gen)
+                                                              :cljcode-expr `(bad-gen "should not generate the R-expr into the JIT code")
                                                               :rexpr-type rexpr}}
                                                      (:matching-vars rewrite))
                     *rewrite-ns* (:namespace rewrite)]
@@ -1436,7 +1454,7 @@
 
           (contains? kw-args :infers)
           (binding [*locally-bound-variables* (merge {'rexpr {:type :rexpr
-                                                              :cljcode-expr `(bad-gen)
+                                                              :cljcode-expr `(bad-gen "should not generate the R-expr into the JIT code")
                                                               :rexpr-type rexpr}}
                                                      (:matching-vars rewrite))
                     *rewrite-ns* (:namespace rewrite)]
@@ -1509,18 +1527,24 @@
                 rexpr-in
                 (do (assert (= :rexpr (:type rexpr-in)))
                     (:rexpr-type rexpr-in)))]
-    (tbinding [current-simplify-stack (conj (tlocal *current-simplify-stack*) rexpr)]
-      (debug-tbinding
-       [current-simplify-running simplify-jit-internal-rexpr]
-       (let [jit-specific-rewrites (get @rexpr-rewrites-during-jit-compilation (type rexpr) nil)
-             ret (if (nil? jit-specific-rewrites)
-                   (simplify-jit-internal-rexpr-generic-rewrites rexpr)
-                   (first (remove #(or (nil? %) (= % rexpr))
-                                  (for [f jit-specific-rewrites]
-                                    (f rexpr simplify-jit-internal-rexpr)))))]
-         (if (nil? ret)
-           rexpr
-           ret))))))
+    (binding [*jit-currently-rewriting* rexpr]
+      (tbinding
+       [current-simplify-stack (conj (tlocal *current-simplify-stack*) rexpr)]
+       (debug-tbinding
+        [current-simplify-running simplify-jit-internal-rexpr]
+        (let [jit-specific-rewrites (get @rexpr-rewrites-during-jit-compilation (type rexpr) nil)
+              ret (if (nil? jit-specific-rewrites)
+                    (simplify-jit-internal-rexpr-generic-rewrites rexpr)
+                    (first (remove #(or (nil? %) (= % rexpr))
+                                   (for [f jit-specific-rewrites]
+                                     (f rexpr simplify-jit-internal-rexpr)))))]
+          (if (nil? ret)
+            rexpr
+            (do
+              (when (not= ret rexpr)
+                ;; continue to track the metadata for the R-expr as it changes
+                (vswap! *jit-rexpr-rewrite-metadata* assoc ret (get *jit-rexpr-rewrite-metadata* rexpr)))
+              ret))))))))
 
 
 
@@ -1602,7 +1626,8 @@
               *local-variable-names-for-variable-values* (volatile! nil)
               *jit-generate-functions* (transient [])
               *jit-incremented-status-counter* (volatile! false)
-              *rexpr-checked-already* (transient #{})]
+              *rexpr-checked-already* (transient #{})
+              *jit-rexpr-rewrite-metadata* (volatile! {})]
       (tbinding
        [current-simplify-stack ()]
        (debug-tbinding
@@ -1709,19 +1734,44 @@
         :else
         (???)))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def ^{:private true :dynamic true} *jit-aggregator-info*)
+
+(defn- aggregator-out-var []
+  (if (:out-var *jit-aggregator-info*)
+    (:out-var *jit-aggregator-info*)
+    (let [out-var (gensym 'aggout)]
+      (vswap! *jit-aggregator-info* assoc :out-var out-var)
+      out-var)))
+
+
 (def-rewrite
   :match (aggregator-op-outer (:unchecked operator) (:any result-variable) (:rexpr Rbody))
   :run-at :jit-compiler
-  (let []
-    (debug-repl "jit in agg op")
-    (???)))
+  (let [metadata (jit-metadata)
+        body (binding [*jit-aggregator-info* metadata]
+               (simplify Rbody))]
+    (if (and (= body Rbody) (nil? (:out-var metadata)))
+      nil ;; then nothing was rewritten
+      (do
+        (debug-repl "jit in agg op")
+        (???)))))
 
 (def-rewrite
-  :match (aggregator-op-inner (:any incoming) (:any-list projected-vars) (:rexpr R))
+  :match (aggregator-op-inner operator (:any incoming) (:any-list projected-vars) (:rexpr R))
   :run-at :jit-compiler
-  (let []
-    (debug-repl "jit in agg op inner")
-    (???)))
+  (let [body (simplify R)]
+    (debug-repl "agg in 1")
+    (if (and (= body R) (not (is-bound-jit? incoming)))
+      nil ;; then there was nothing rewritten/bound, so we can just let stuff continue
+      (do
+        (debug-repl "handle jit agg op inner")
+        (???)))))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
 (def-rewrite

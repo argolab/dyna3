@@ -458,3 +458,8 @@ r = is_defined(foo).
 
 assert r == false.
 ")
+
+
+(str-test bad-ast-print "
+print $ast'{ a = {:- output a/2}. }.
+")

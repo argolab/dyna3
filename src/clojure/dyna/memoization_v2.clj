@@ -321,8 +321,13 @@
             ;; this is a new trie which will contain all of the new R-expr values which are represented
             ;; how this will encode the different values will mean that
             accum-vals-wrapped (update-vals accumulated-agg-values (fn [x]
+                                                                     ;; TODO: this needs to know which operator is used?
+                                                                     ;; this will mean that memoization will need to track
+                                                                     ;; this information from when it is constructed?
+                                                                     ;; or it will have to look at the origional R-expr and figure it out from there
+                                                                     (println "TODO: memoization needs to know which operator to add to the aggregator")
                                                                      (ClojureUnorderedVector/create
-                                                                      [(make-aggregator-op-inner (make-constant x) [] (make-multiplicity 1))])))
+                                                                      [(make-aggregator-op-inner nil (make-constant x) [] (make-multiplicity 1))])))
             new-values (if (is-empty-rexpr? ret-rexpr)
                          accum-vals-wrapped
                          (update accum-vals-wrapped key (fn [x] (ClojureUnorderedVector/concat [x [ret-rexpr]]))))
@@ -696,7 +701,8 @@
                                                          (fn [rr]
                                                            (assert (and (is-aggregator-op-inner? rr)
                                                                         (empty? (:projected rr))))
-                                                           (let [zz (make-aggregator-op-inner (:incoming rr)
+                                                           (let [zz (make-aggregator-op-inner (:operator rr)
+                                                                                              (:incoming rr)
                                                                                               (:projected rr)
                                                                                               (convert-user-term-to-have-memos (:body rr) mapf))]
                                                              (when-not (= (exposed-variables rr) (exposed-variables zz))

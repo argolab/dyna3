@@ -534,7 +534,7 @@
 
 
 (defn make-structure [name args]
-  (DynaTerm. name nil nil args))
+  (DynaTerm. name args))
 ;(intern 'dyna.rexpr-constructors 'make-structure make-structure)
 (expose-globally make-structure)
 
@@ -1197,7 +1197,12 @@
                               (make-conjunct (vec (for [[k# v#] map-val#]
                                                     (make-unify k# (make-constant v#))))))))
     (:assigns-variable kw-args) (do
-                                  `(make-unify ~(:assigns-variable kw-args) (make-constant ~body)))
+                                  `(let [v# ~body]
+                                     (if (context/has-context)
+                                       (do
+                                         (set-value! ~(:assigns-variable kw-args) v#)
+                                         (make-multiplicity 1))
+                                       (make-no-simp-unify ~(:assigns-variable kw-args) (make-constant v#)))))
     (:check kw-args) (do
                        `(if ~(:check kw-args)
                             (make-multiplicity 1)
@@ -1532,10 +1537,10 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def-rewrite
-  :match (unify (:any A) (:any B))
+  :match {:rexpr (unify (:any A) (:any B))
+          :check (= A B)} ;; if the variables are equal to eachother, then it should always work out
   :run-at :construction
-  (if (= A B) ;; these two structures are equal to each other, so we can just remove the expression
-    (make-multiplicity 1)))
+  (make-multiplicity 1))
 
 (def-rewrite
   ;; the matched variable should have what value is the result of the matched expression.
@@ -1548,7 +1553,8 @@
 (def-rewrite
   :match (unify (:ground A) (:free B))
   :run-at [:construction :standard :inference]
-  (make-unify B A))
+  :assigns-variable B
+  (get-value A))
 
 (comment
   (def-rewrite
@@ -1573,7 +1579,9 @@
 (def-rewrite
   :match (unify (:free A) (:ground B))
   :run-at [:standard :construction :inference] ; this will want to run at construction and when it encounters the value so that we can use it as early as possible
-  (when (context/has-context)
+  :assigns-variable A
+  (get-value B)
+  #_(when (context/has-context)
     (assert (not (is-bound? A))) ;; otherwise the setting the value into the context should fail
     (set-value! A (get-value B))
     (make-multiplicity 1)))
@@ -1594,12 +1602,14 @@
 (def-rewrite
   :match (unify-structure (:free out) (:unchecked file-name) (:ground dynabase) (:unchecked name-str) (:ground-var-list arguments))
   :run-at [:construction :standard :inference]
+  :assigns-variable out
   (let [dbval (get-value dynabase)
         arg-vals (map get-value arguments)
         sterm (DynaTerm. name-str dbval file-name arg-vals)]
     ;; (when (is-ground? out)
     ;;     (debug-repl "uf1"))
-    (let [res (make-unify out (make-constant sterm))]
+    sterm
+    #_(let [res (make-unify out (make-constant sterm))]
       res)))
 
 (def-rewrite

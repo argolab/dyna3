@@ -23,7 +23,8 @@
   (is-constraint? [this] true)
   (all-conjunctive-rexprs [this] (all-conjunctive-rexprs bodies)))
 
-(def-base-rexpr aggregator-op-inner [:hidden-var incoming
+(def-base-rexpr aggregator-op-inner [:unchecked operator
+                                     :hidden-var incoming
                                      :var-list projected ;; all of these variables are hidden
                                      :rexpr body]
   (exposed-variables [this]
@@ -39,7 +40,7 @@
                              this
                              (debug-tbinding
                               [current-simplify-stack (conj (tlocal *current-simplify-stack*) this)]
-                              (make-aggregator-op-inner incoming projected
+                              (make-aggregator-op-inner operator incoming projected
                                                         (remap-variables body
                                                                          (apply dissoc variable-map incoming projected))))))]
                      ret))
@@ -52,7 +53,8 @@
                                                                                   projected)]
                                                                           [v (make-variable (gensym 'agg-op-hidden))]))
                                               new-map (merge variable-map new-hidden-names)]
-                                          (make-aggregator-op-inner (get new-map incoming incoming)
+                                          (make-aggregator-op-inner operator
+                                                                    (get new-map incoming incoming)
                                                                     (vec (map new-map projected))
                                                                     (remap-variables-handle-hidden body new-map)))]
                                     ret)))
@@ -84,7 +86,8 @@
       (str "(AGGIN_" *aggregator-print-input-depth* "=" (rexpr-printer (:incoming r)) ")*" bod))))
 
 (defn- aggregator-op-contribute-value-default [value mult]
-  (make-aggregator-op-inner (make-constant value) [] (make-multiplicity mult)))
+  (println "TODO: operator needed for default value")
+  (make-aggregator-op-inner nil (make-constant value) [] (make-multiplicity mult)))
 ;; this might be something that the memoization is going to want to override,
 ;; which would allow for it to get the result of aggregation directly
 #_(def ^{:dynamic true} *aggregator-op-contribute-value*
@@ -134,11 +137,14 @@
   (assert (and (is-aggregator? rexpr)
                (:body-is-conjunctive rexpr)
                system/use-optimized-rexprs))
-  (make-aggregator-op-outer (get @aggregators (:operator rexpr))
-                            (:result rexpr)
-                            (make-aggregator-op-inner (:incoming rexpr)
-                                                      []
-                                                      (:body rexpr))))
+  (let [operator (get @aggregators (:operator rexpr))]
+    (make-aggregator-op-outer
+     operator
+     (:result rexpr)
+     (make-aggregator-op-inner operator
+                               (:incoming rexpr)
+                               []
+                               (:body rexpr)))))
 
 (def-rewrite
   :match {:rexpr (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable)
@@ -154,21 +160,22 @@
 
 ;; if there is a project nested inside of the aggregator inner expression, then we are going pull the projection out and add it to the aggregator
 (def-rewrite
-  :match {:rexpr (aggregator-op-inner (:any incoming) (:variable-list projected-vars) (proj (:variable hid-var) (:rexpr R)))
+  :match {:rexpr (aggregator-op-inner operator (:any incoming) (:variable-list projected-vars) (proj (:variable hid-var) (:rexpr R)))
           :check (and system/use-optimized-rexprs ;; this check should not be necessary here....
                       (not (some #{hid-var} projected-vars)))}
   :run-at :construction
-  (make-aggregator-op-inner incoming (conj projected-vars hid-var) R))
+  (make-aggregator-op-inner operator incoming (conj projected-vars hid-var) R))
 
 ;; if there is a project nested inside of a conjunction, then we are going to pull that conjunct out
 (def-rewrite
-  :match {:rexpr (aggregator-op-inner (:any incoming) (:variable-list projected-vars) (conjunct (:rexpr-list Rs)))}
+  :match {:rexpr (aggregator-op-inner operator (:any incoming) (:variable-list projected-vars) (conjunct (:rexpr-list Rs)))}
   :run-at :construction
   (let [exposed (exposed-variables rexpr)
         pvs (into #{incoming} projected-vars)
         pr (first (filter #(and (is-proj? %) (not (pvs (:var %))) (not (exposed (:var %)))) Rs))]
     (if pr
-      (make-aggregator-op-inner incoming
+      (make-aggregator-op-inner operator
+                                incoming
                                 (conj projected-vars (:var pr))
                                 (make-conjunct (vec (for [r Rs]
                                                       (if (identical? r pr)
@@ -178,14 +185,14 @@
 
 ;; we want to lift the disjunction out of the aggregation, as we can handle the disjunctions before there are
 (def-rewrite
-  :match {:rexpr (aggregator-op-inner (:any incoming) (:any-list projected-vars) (disjunct (:rexpr-list Rs)))
+  :match {:rexpr (aggregator-op-inner operator (:any incoming) (:any-list projected-vars) (disjunct (:rexpr-list Rs)))
           :check system/use-optimized-rexprs}
   :run-at :construction
-  (make-disjunct (vec (map #(make-aggregator-op-inner incoming projected-vars %) Rs))))
+  (make-disjunct (vec (map #(make-aggregator-op-inner operator incoming projected-vars %) Rs))))
 
 ;; lift the optimized disjunct out of the aggregation inner
 (def-rewrite
-  :match {:rexpr (aggregator-op-inner (:any incoming) (:any-list projected-vars) (disjunct-op (:any-list disjunction-variables) (:unchecked trie-Rs) _))
+  :match {:rexpr (aggregator-op-inner operator (:any incoming) (:any-list projected-vars) (disjunct-op (:any-list disjunction-variables) (:unchecked trie-Rs) _))
           :check system/use-optimized-rexprs}
   :run-at :construction
   (let [incoming-idx (indexof disjunction-variables #{incoming})
@@ -210,7 +217,7 @@
                            :when (and (not (nil? bnd)) (not= incoming var))]
                        (make-no-simp-unify var (make-constant bnd))))
             new-children (vec (for [c children]
-                                (make-aggregator-op-inner income-var projected-vars (make-conjunct (conj pvb c)))))]
+                                (make-aggregator-op-inner operator income-var projected-vars (make-conjunct (conj pvb c)))))]
         ;(vswap! num-children + (count new-children))
         (vswap! resulting-trie trie/trie-update-collection trie-binding
                 (fn [col]
@@ -219,12 +226,12 @@
       ret)))
 
 (def-rewrite
-  :match (aggregator-op-inner (:any incoming) (:any-list projected-vars) (is-empty-rexpr? _))
+  :match (aggregator-op-inner operator (:any incoming) (:any-list projected-vars) (is-empty-rexpr? _))
   :run-at :construction
   (make-multiplicity 0))
 
 (def-rewrite
-  :match {:rexpr (aggregator-op-inner (:any incoming) (:any-list projected-vars) (:rexpr R))
+  :match {:rexpr (aggregator-op-inner operator (:any incoming) (:any-list projected-vars) (:rexpr R))
           :check (not (or (is-constant? incoming) (some #{incoming} (exposed-variables R))))}
   :is-debug-check-rewrite true
   :run-at :construction
@@ -245,13 +252,13 @@
                         [k n2])))]
       [n (bit-or (bit-shift-left @contains-wildcard 1) (if (contains? n nil) 1 0))])))
 
-(defn- convert-to-trie-agg [cnt trie]
+(defn- convert-to-trie-agg [operator cnt trie]
   (if (= cnt 0)
-    [(ClojureUnorderedVector/create [(make-aggregator-op-inner (make-constant trie) [] (make-multiplicity 1))]) 0]
+    [(ClojureUnorderedVector/create [(make-aggregator-op-inner operator (make-constant trie) [] (make-multiplicity 1))]) 0]
     (let [contains-wildcard (volatile! 0)
           n (into ClojureHashMap/EMPTY
                   (for [[k v] trie
-                        :let [[n2 wildcard] (convert-to-trie-agg (- cnt 1) v)]]
+                        :let [[n2 wildcard] (convert-to-trie-agg operator (- cnt 1) v)]]
                     (do (vswap! contains-wildcard bit-or wildcard)
                         [k n2])))]
       [n (bit-or (bit-shift-left @contains-wildcard 1) (if (contains? n nil) 1 0))])))
@@ -366,9 +373,9 @@
             (do
               ;; there are both R-exprs and values in the accumulator, so we are going to have to combine everything and then
               (let [accum-vals (if (empty? exposed-vars)
-                                 (make-aggregator-op-inner (make-constant (get @accumulator nil)) [] (make-multiplicity 1))
+                                 (make-aggregator-op-inner operator (make-constant (get @accumulator nil)) [] (make-multiplicity 1))
                                  (make-no-simp-disjunct-op exposed-vars
-                                                           (let [[trie-root trie-wildcard] (convert-to-trie-agg (count exposed-vars) @accumulator)]
+                                                           (let [[trie-root trie-wildcard] (convert-to-trie-agg operator (count exposed-vars) @accumulator)]
                                                              (trie/make-PrefixTrie (count exposed-vars) trie-wildcard trie-root))
                                                            nil))
                     ;; this will merge the tries due to rewrites on the disjunction construction
@@ -392,7 +399,7 @@
 ;; incoming-variables is also going to be lifted out.  Which means that this is
 ;; not able to just perform "sideways" passing of the information
 (def-rewrite
-  :match (aggregator-op-inner (:any incoming-variable) (:any-list projected-vars) (:rexpr Rbody))
+  :match (aggregator-op-inner operator (:any incoming-variable) (:any-list projected-vars) (:rexpr Rbody))
   :run-at [:standard :inference]
   (let [ctx (context/make-nested-context-aggregator-op-inner Rbody projected-vars incoming-variable)]
     #_(when (some is-bound? projected-vars)
@@ -461,7 +468,7 @@
                           other-constraints ((tlocal *aggregator-op-additional-constraints*) new-incoming)
                           ;; zzz (when (and *aggregator-op-should-eager-run-iterators* (not= parent-is-bound (map is-bound? exposed)))
                           ;;       (debug-repl "agg egg run"))
-                          rc (make-aggregator-op-inner new-incoming new-projected
+                          rc (make-aggregator-op-inner operator new-incoming new-projected
                                                        (if (not= (make-multiplicity 1) other-constraints)
                                                          (make-conjunct [new-body other-constraints])
                                                          new-body))]
@@ -521,7 +528,7 @@
 
 
 (def-iterator
-  :match (aggregator-op-inner (:any incoming-variable) (:any-list projected-vars) (:rexpr Rbody))
+  :match (aggregator-op-inner operator (:any incoming-variable) (:any-list projected-vars) (:rexpr Rbody))
   (let [iters (find-iterators Rbody)
         pv (ensure-set (conj projected-vars incoming-variable))]
     (remove nil? (for [i iters
