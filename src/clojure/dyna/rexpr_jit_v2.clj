@@ -174,9 +174,10 @@
                                                               :var-list (for [[i v] (zipseq (range) val)]
                                                                           [(list fname `(nth ~i)) v])
                                                               :var-map (???) ;; this is going to have to use the key for the access path...
-                                                              ;:hidden-var [[(list fname) {:hidden-var val}]] ;; unsure what do do with this....???
+                                                              :hidden-var [[(list fname) {:hidden-var val}]] ;; unsure what do do with this....???
                                                               :unchecked [] ;; there are no "vars" in this
-                                                              :hidden-var
+                                                              :file-name []
+                                                              :str []
                                                               (do
                                                                 (debug-repl "unsure type required mapping")
                                                                 (???)))))]
@@ -203,36 +204,42 @@
         ]
     [(into {} vm) (persistent! gen-code)]))
 
-(defn- primitive-rexpr-cljcode [varmap rexpr]
-  (cond (rexpr? rexpr)
-        (cond (is-proj? rexpr) (let [new-var (gensym 'projvar)]
-                                 `(let [~new-var (make-variable (Object.))]
-                                    (make-no-simp-proj ~new-var ~(primitive-rexpr-cljcode (assoc varmap (:var rexpr) new-var) (:body rexpr)))))
-              (is-aggregator-op-inner? rexpr) (let [new-incoming (gensym 'aggin)
-                                                    new-projs (vec (for [_ (:projected rexpr)]
-                                                                     (gensym 'aggproj)))
-                                                    new-varmap (merge varmap
-                                                                      {(:incoming rexpr) new-incoming}
-                                                                      (zipmap (:projected rexpr) new-projs))
-                                                    body (primitive-rexpr-cljcode new-varmap (:body rexpr))
-                                                    ret
-                                                    `(let [~new-incoming (make-variable (Object.))
-                                                           ~@(apply concat (for [v new-projs]
-                                                                             [v `(make-variable (Object.))]))]
-                                                       (make-no-simp-aggregator-op-inner ~new-incoming [~@new-projs] ~body))]
-                                                ret)
+(defn- primitive-rexpr-cljcode
+  ([varmap rexpr]
+   (primitive-rexpr-cljcode varmap rexpr :rexpr))
+  ([varmap rexpr typ]
+   (cond (rexpr? rexpr)
+         (cond (is-proj? rexpr) (let [new-var (gensym 'projvar)]
+                                  `(let [~new-var (make-variable (Object.))]
+                                     (make-no-simp-proj ~new-var ~(primitive-rexpr-cljcode (assoc varmap (:var rexpr) new-var) (:body rexpr)))))
+               (is-aggregator-op-inner? rexpr) (let [new-incoming (gensym 'aggin)
+                                                     new-projs (vec (for [_ (:projected rexpr)]
+                                                                      (gensym 'aggproj)))
+                                                     new-varmap (merge varmap
+                                                                       {(:incoming rexpr) new-incoming}
+                                                                       (zipmap (:projected rexpr) new-projs))
+                                                     body (primitive-rexpr-cljcode new-varmap (:body rexpr))
+                                                     ret
+                                                     `(let [~new-incoming (make-variable (Object.))
+                                                            ~@(apply concat (for [v new-projs]
+                                                                              [v `(make-variable (Object.))]))]
+                                                        (make-no-simp-aggregator-op-inner ~new-incoming [~@new-projs] ~body))]
+                                                 ret)
 
-              :else (let [rname (rexpr-name rexpr)]
-                      `(~(symbol "dyna.rexpr-constructors" (str "make-no-simp-" rname))
-                        ~@(map #(primitive-rexpr-cljcode varmap %) (get-arguments rexpr)))))
-        (is-constant? rexpr) rexpr
-        (is-variable? rexpr) (strict-get varmap rexpr)
-        (vector? rexpr) (into [] (map #(primitive-rexpr-cljcode varmap %) rexpr))
-        (instance? Aggregator rexpr)
-        `(get @dyna.rexpr-aggregators/aggregators ~(:name rexpr)) ;; this is a object which is reference, hence we can not embed it in the code directlty, and instead will use this to look up the aggregator
-        :else (do
-                (debug-repl "unknown mapping to constructor")
-                (???))))
+               :else (let [rname (rexpr-name rexpr)
+                           sig (@rexpr-containers-signature rname)]
+                       `(~(symbol "dyna.rexpr-constructors" (str "make-no-simp-" rname))
+                         ~@(map #(primitive-rexpr-cljcode varmap %1 (first %2)) (get-arguments rexpr) sig))))
+         (is-constant? rexpr) rexpr
+         (is-variable? rexpr) (strict-get varmap rexpr)
+         (= typ :rexpr-list) (into [] (map #(primitive-rexpr-cljcode varmap % :rexpr) rexpr))
+         (= typ :var-list) (into [] (map #(primitive-rexpr-cljcode varmap % :var) rexpr))
+         (instance? Aggregator rexpr) `(get @dyna.rexpr-aggregators/aggregators ~(:name rexpr)) ;; this is a object which is reference, hence we can not embed it in the code directlty, and instead will use this to look up the aggregator
+         (nil? rexpr) nil
+         (#{:str :file-name} typ) rexpr
+         :else (do
+                 (debug-repl "unknown mapping to constructor")
+                 (???)))))
 
 (defn- primitive-rexpr-with-placeholders [rexpr new-arg-names]
   (let [rf (fn rf [typ v args]
@@ -271,11 +278,12 @@
                          :else (rewrite-all-args v #(rf %1 %2 args)))
 
                    (= typ :rexpr-list) (into [] (map #(rf :rexpr % args) v))
+                   (= typ :var-list) (into [] (map #(rf :var % args) v))
 
-                   (= typ :unchecked) (let []
-                                        (assert (and (not (rexpr? v))
-                                                     (not (instance? RexprValue v))))
-                                        v)
+                   (#{:str :unchecked :file-name} typ) (let []
+                                                         (assert (and (not (rexpr? v))
+                                                                      (not (instance? RexprValue v))))
+                                                         v)
 
                    (or (instance? jit-exposed-variable-rexpr v)
                        (instance? jit-local-variable-rexpr v)
@@ -286,7 +294,7 @@
                    (instance? RexprValue v) (strict-get args v)
 
                    :else (do
-                           (debug-repl "qwerwqer")
+                           (debug-repl "unknown placeholder expression qwerwqer")
                            (???))))]
     (rf :rexpr rexpr (into {} (for [[k v] new-arg-names]
                                 [k (jit-exposed-variable-rexpr. v)])))))
@@ -1252,6 +1260,12 @@
                                  {:type :rexpr
                                   :cljcode-expr `(bad-gen "should not generate the R-expr into the JIT code")
                                   :rexpr-type arg}
+
+                                 (= t :value)
+                                 {:type :value
+                                  :current-value arg
+                                  ;; the value should already be embedded in the R-expr in this case, so there is no need to retrieve the value
+                                  :cljcode-expr `(bad-gen)}
 
                                  :else
                                  (let []

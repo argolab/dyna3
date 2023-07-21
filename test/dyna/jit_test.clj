@@ -1,7 +1,7 @@
 (ns dyna.jit-test
     (:require [clojure.test :refer :all])
     (:require [dyna.core])
-    (:require [dyna.rexpr :refer [simplify simplify-fully]])
+    (:require [dyna.rexpr :refer [simplify simplify-fully null-term]])
     (:require [dyna.utils :refer :all])
     (:require [dyna.rexpr-constructors :refer :all])
     (:require [dyna.rexpr-jit-v2 :refer :all])
@@ -105,6 +105,30 @@
         (is (is-empty-rexpr? res2))))))
 
 (deftest basic-jit6
+  (let [rexpr (make-proj (make-variable 'X)
+                         (make-conjunct [(make-unify-structure (make-variable 'X)
+                                                               nil
+                                                               (make-constant null-term)
+                                                               "f"
+                                                               [(make-variable 'A) (make-variable 'B)])
+                                         (make-unify-structure (make-variable 'X)
+                                                               nil
+                                                               (make-constant null-term)
+                                                               "f"
+                                                               [(make-variable 'C) (make-variable 'D)])
+                                         ]))
+        [synth-rexpr jit-type] (synthize-rexpr rexpr)
+        rr (make-conjunct [(make-unify (make-variable 'A) (make-constant 7))
+                           synth-rexpr])
+        ctx (context/make-empty-context rr)]
+    (tbinding
+     [generate-new-jit-rewrites true]
+     (let [res (context/bind-context-raw ctx (simplify-fully rr))]
+       (debug-repl)
+       (is (= 7 (ctx-get-value ctx (make-variable 'C))))))
+    ))
+
+(deftest basic-jit7
   (let [rexpr (make-aggregator "=" (make-variable 'result) (make-variable 'incoming) true (make-unify (make-variable 'incoming) (make-variable 'X)))
         [synth-rexpr jit-type] (synthize-rexpr rexpr)
         rr (make-conjunct [(make-unify (make-variable 'X) (make-constant 1))

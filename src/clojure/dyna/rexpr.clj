@@ -538,17 +538,25 @@
 ;(intern 'dyna.rexpr-constructors 'make-structure make-structure)
 (expose-globally make-structure)
 
-(def ^:const null-term (DynaTerm/null_term))
+(def ^:const null-term DynaTerm/null_term)
 
 (defmethod print-dup DynaTerm [^DynaTerm term ^java.io.Writer w]
-  (.write w "(dyna.DynaTerm. ")
-  (print-dup (.name term) w)
-  (.write w " ")
-  (print-dup (.dynabase term) w)
-  (.write w " ")
-  (print-dup (.from_file term) w)
-  (.write w " ")
-  (print-dup (vec (.arguments term)) w)
+  (if (= (.dynabase term) term) ;; this only happens on the root $nil term when there is no dynabase
+    (.write w "dyna.DynaTerm/null_term")
+    (do
+      (.write w "(dyna.DynaTerm. ")
+      (print-dup (.name term) w)
+      (.write w " ")
+      (print-dup (.dynabase term) w)
+      (.write w " ")
+      (print-dup (.from_file term) w)
+      (.write w " ")
+      (print-dup (vec (.arguments term)) w)
+      (.write w ")"))))
+
+(defmethod print-dup java.net.URL [^java.net.URL url ^java.io.Writer w]
+  (.write w "(java.net.URL. ")
+  (print-dup (.toExternalForm url) w)
   (.write w ")"))
 
 
@@ -1544,11 +1552,16 @@
 
 (def-rewrite
   ;; the matched variable should have what value is the result of the matched expression.
-  :match (unify (:ground A) (:ground B))
+  :match {:rexpr (unify (:ground A) (:ground B))
+          :check (= (get-value A) (get-value B))}
   :run-at [:standard :construction :inference]
-  (if (= (get-value A) (get-value B))
-    (make-multiplicity 1)
-    (make-multiplicity 0)))
+  (make-multiplicity 1))
+
+(def-rewrite
+  :match {:rexpr (unify (:ground A) (:ground B))
+          :check (not= (get-value A) (get-value B))}
+  :run-at [:standard :construction :inference]
+  (make-multiplicity 0))
 
 (def-rewrite
   :match (unify (:ground A) (:free B))
