@@ -688,10 +688,15 @@
   [variable] (instance? RexprValueVariable variable))
 (expose-globally is-variable?)
 
+(defn is-rexpr-value?
+  {:inline (fn [x] `(instance? RexprValue ~x))}
+  [v] (instance? RexprValue v))
+(expose-globally is-rexpr-value?)
+
 (defn rexpr?
   {:inline (fn [x] `(instance? Rexpr ~x))}
   [rexpr] (instance? Rexpr rexpr))
-
+(expose-globally rexpr?)
 
 ;; these are checks which are something that we might want to allow ourselves to turn off
 (defn check-argument-mult [x] (or (and (int? x) (>= x 0)) (= ##Inf x)))
@@ -1523,11 +1528,12 @@
 (def-rewrite-matcher :ground-var-list [var-list]
   (every? is-bound? var-list))
 
+
 (def-rewrite-matcher :any [v]
-                     (or (is-variable? v) (is-constant? v)))
+  (is-rexpr-value? v))
 
 (def-rewrite-matcher :any-list [any-list]
-  (every? #(or (is-variable? %) (is-constant? %)) any-list))
+  (every? is-rexpr-value? any-list))
 
 ;; just match anything
 (def-rewrite-matcher :unchecked [x] true)

@@ -11,7 +11,7 @@
   (:require [dyna.rexpr-pretty-printer :refer [rexpr-printer]])
   (:require [clojure.walk :refer [macroexpand-all]])
   (:require [clojure.set :refer [union]])
-  (:import [dyna.rexpr proj-rexpr simple-function-call-rexpr conjunct-rexpr])
+  (:import [dyna.rexpr proj-rexpr simple-function-call-rexpr conjunct-rexpr ])
   (:import [dyna.rexpr_aggregators_optimized aggregator-op-outer-rexpr aggregator-op-inner-rexpr])
   (:import [dyna.rexpr_aggregators Aggregator])
   (:import [dyna RexprValue RexprValueVariable Rexpr DynaJITRuntimeCheckFailed StatusCounters UnificationFailure])
@@ -520,6 +520,7 @@
 
 (def ^{:private true :dynamic true} *jit-incremented-status-counter* nil)
 
+(def ^{:private true :dynamic true} *jit-computing-match-of-rewrite* nil)
 (def ^{:private true :dynamic true} *jit-currently-rewriting* nil)
 (def ^{:private true :dynamic true} *jit-rexpr-rewrite-metadata*)
 
@@ -690,7 +691,7 @@
 (defn- concat-code [& args]
   (let [a (remove #(or (nil? %) (boolean? %) (string? %) (number? %)) (drop-last args))
         l (last args)]
-    (if (#{:rexpr :rexpr-value :value} (:type l))
+    (if (#{:rexpr :rexpr-value :value :rexpr-value-list :rexpr-list} (:type l))
       (assoc l :cljcode-expr `(let* [] ~@a ~(:cljcode-expr l)))
       `(let* [] ~@a ~l))))
 
@@ -712,6 +713,8 @@
 (defn- has-current-value? [value]
   (or (contains? value :constant-value) (contains? value :current-value)))
 
+(def ^{:private true :dynamic true}  *jit-evaluate-cljform-current* ())
+
 (defn- jit-evaluate-cljform [expr]
   (comment
     {:value-expr nil ;; some expression which is clojure code which can be evaluated to get this value
@@ -720,14 +723,19 @@
      })
 
   (comment
-    {:type (one of :rexpr, :rexpr-value, :value, {:seq-of ..., :map true})  ;; :rexpr means it is an R-expr type, rexpr-values means it is something like constant or variable.  Value is a value like `5`
+    {:type (one of :rexpr, :rexpr-value, :value, :rexpr-value-list, :rexpr-list)  ;; :rexpr means it is an R-expr type, rexpr-values means it is something like constant or variable.  Value is a value like `5`
            ;; can also be {:seq-of :rexpr} or whatever the type is
      :constant-value nil  ;; the value of this expression
      :cljcode-expr  nil   ;; code which can be placed in the generated program to return this value
      })
-  (cond (nil? expr) {:type :value ;; R-exprs and Rexpr-values are not allowed to take on the valid nil, so this must mean that it is of the value type
-                     :constant-value nil}
-        (symbol? expr) (let [local-symbol (get *locally-bound-variables* expr)]
+  (binding [*jit-evaluate-cljform-current* (cons expr *jit-evaluate-cljform-current*)]
+    (cond (nil? expr) {:type :value ;; R-exprs and Rexpr-values are not allowed to take on the valid nil, so this must mean that it is of the value type
+                       :constant-value nil}
+
+          (and (map? expr)
+               (#{:rexpr :rexpr-value :value :rexpr-value-list :rexpr-list} (:type expr))) expr ;; this is already something that was evaluated by the JIT, so we are just going to pass it through
+
+          (symbol? expr) (let [local-symbol (get *locally-bound-variables* expr)]
                            (if-not (nil? local-symbol)
                              local-symbol
                              (let [var (or (ns-resolve *rewrite-ns* expr)
@@ -745,10 +753,10 @@
                                                                    :invoke (fn [[_ rexpr]]
                                                                              (let [rj (jit-evaluate-cljform rexpr)]
                                                                                (assert (= :rexpr (:type rj)))
-                                                                               ;(debug-repl "call some recursive version of simplify")
+                                        ;(debug-repl "call some recursive version of simplify")
                                                                                (println "TODO: something for simplify-construct")
                                                                                rj
-                                                                               ;(???)
+                                        ;(???)
                                                                                ))}
 
                                      (= 'simplify-fast expr) (???)
@@ -759,9 +767,9 @@
                                        (debug-repl "unknown local var")
                                        (???)
                                        #_{:type :function
-                                        :invoke (fn [[e & o]]
-                                                  {:type :value
-                                                   :cljcode-expr `(~e ~(map jit-evaluate-cljform))})})
+                                          :invoke (fn [[e & o]]
+                                                    {:type :value
+                                                     :cljcode-expr `(~e ~(map jit-evaluate-cljform))})})
 
                                      (contains? m :dyna-jit-inline)
                                      {:type :function
@@ -792,8 +800,16 @@
                                                                           (get-current-value g))
                                                                  :rexpr-value (cond (contains? g :matched-variable) (:matched-variable g)
                                                                                     (contains? g :constant-value) (:constant-value g)
-                                                                                    :else (???))))]
-                                                    (debug-repl "make r-expr")
+                                                                                    :else (???))
+                                                                 :rexpr-list (let [v (debug-repl "rl")
+                                                                                   z (vec (map :rexpr-type (:current-value g)))]
+
+                                                                               z)
+                                                                 :rexpr-value-list (do
+                                                                                     (debug-repl)
+                                                                                     (???))
+                                                                 ))]
+                                                    ;(debug-repl "make r-expr")
                                                     {:type :rexpr
                                                      :rexpr-type (apply (resolve sn) argg)}))}
                                        {:type :function
@@ -821,78 +837,83 @@
                                      :else
                                      (do (debug-repl "symbol ??")
                                          (???))))))
-        (rexpr? expr) (let []
-                        {:type :rexpr
-                         :rexpr-type expr})
+          (rexpr? expr) (let []
+                          {:type :rexpr
+                           :rexpr-type expr})
 
-        (instance? RexprValue expr) (let []
-                                      {:type :rexpr-value
-                                       :constant-value expr
-                                       :cljcode-expr `(bad-gen "attempting to use value type that was passed in as a constant")})
+          (instance? RexprValue expr) (let []
+                                        {:type :rexpr-value
+                                         :constant-value expr
+                                         :cljcode-expr `(bad-gen "attempting to use value type that was passed in as a constant")})
 
-        (keyword? expr) (let []
-                          {:type :value
-                           :constant-value expr
-                           :invoke (fn [[kw & body]]
-                                     (let [b (map jit-evaluate-cljform body)
-                                           s (first b)]
-                                       (debug-repl "keyword invoked")
-                                       (???)
+          (keyword? expr) (let []
+                            {:type :value
+                             :constant-value expr
+                             :invoke (fn [[kw & body]]
+                                       (let [b (map jit-evaluate-cljform body)
+                                             s (first b)]
+                                         (debug-repl "keyword invoked")
+                                         (???)
 
-                                       (if (= :rexpr (:type s))
-                                         (do
-                                           ;; this is accessing a field on an R-expr.  It should just replace this lookup with directly accessing the value
+                                         (if (= :rexpr (:type s))
+                                           (do
+                                             ;; this is accessing a field on an R-expr.  It should just replace this lookup with directly accessing the value
+                                             )
+                                           (do
+                                             (assert (= :value (:type s)))
+                                             ;; this is just accessing a field on a map, which we will just emit directly
+                                             )
                                            )
-                                         (do
-                                           (assert (= :value (:type s)))
-                                           ;; this is just accessing a field on a map, which we will just emit directly
-                                           )
-                                         )
-                                       (???)))})
-        (vector? expr) (let [vs (map jit-evaluate-cljform expr)
-                             types (into #{} (map :type vs))
-                             constant (every? #(contains? % :constant-value) vs)]
-                         (assert (= 1 (count types)))
-                         (merge {:type {:seq-of (first types)}
-                                 :cljcode-expr (vec (map :cljcode-expr vs))}
-                                (when constant
-                                  {:constant-value (vec (map :constant-value vs))})))
+                                         (???)))})
+          (vector? expr) (let [vs (map jit-evaluate-cljform expr)
+                               types (into #{} (map :type vs))
+                               constant (every? #(contains? % :constant-value) vs)]
+                           (assert (= 1 (count types)))
+                           (if (= (first types) :rexpr)
+                             {:type :rexpr-list
+                              :current-value (vec vs)}
+                             (merge {:type (case (first types)
+                                             :rexpr-value :rexpr-value-list
+                                             :value :value)
+                                     :cljcode-expr (vec (map #(:cljcode-expr % `(bad-gen)) vs))}
+                                    (when constant
+                                      {:constant-value (vec (map :constant-value vs))}))))
 
-        (instance? clojure.lang.APersistentMap expr)
-        (let [all-constant (volatile! true)
-                          ;; the map can only be a map of values to values (I think the cases where it is a map or R-exprs will simply not be supported by the JIT)
-                          m (into {} (for [[k v] expr
-                                           :let [kj (jit-evaluate-cljform k)
-                                                 vj (jit-evaluate-cljform v)]]
-                                       (do (when (or (not (contains? kj :constant-value))
-                                                     (not (contains? vj :constant-value)))
-                                             (vreset! all-constant false))
-                                           (assert (= (:type kj) :value)) ;; TODO: might want to allow other types to go here
-                                           (assert (= (:type vj) :value))
-                                           [(:cljcode-expr kj) (:cljcode-expr vj)])))]
-                      (if @all-constant
-                        {:cljcode-expr m :constant-value m :type :value}
-                        {:cljcode-expr m :type :value}))
+          (instance? clojure.lang.APersistentMap expr)
+          (let [all-constant (volatile! true)
+                ;; the map can only be a map of values to values (I think the cases where it is a map or R-exprs will simply not be supported by the JIT)
+                m (into {} (for [[k v] expr
+                                 :let [kj (jit-evaluate-cljform k)
+                                       vj (jit-evaluate-cljform v)]]
+                             (do (when (or (not (contains? kj :constant-value))
+                                           (not (contains? vj :constant-value)))
+                                   (vreset! all-constant false))
+                                 (assert (= (:type kj) :value)) ;; TODO: might want to allow other types to go here
+                                 (assert (= (:type vj) :value))
+                                 [(:cljcode-expr kj) (:cljcode-expr vj)])))]
+            (if @all-constant
+              {:cljcode-expr m :constant-value m :type :value}
+              {:cljcode-expr m :type :value}))
 
-        (or (boolean? expr) (number? expr) (string? expr) (and (seqable? expr) (empty? expr)))
-        {:cljcode-expr expr :type :value :constant-value expr}
+          (or (boolean? expr) (number? expr) (string? expr) (and (seqable? expr) (empty? expr)))
+          {:cljcode-expr expr :type :value :constant-value expr}
 
 
-        (seqable? expr) ;; vector has already been checked, so this is going to only be list-like things
-        (let [f (jit-evaluate-cljform (first expr))
-              r ((:invoke f) expr)]
-          (dyna-assert (#{:rexpr :rexpr-value :value :function :void} (:type r)))
-          r)
+          (seqable? expr) ;; vector has already been checked, so this is going to only be list-like things
+          (let [f (jit-evaluate-cljform (first expr))
+                r ((:invoke f) expr)]
+            (dyna-assert (#{:rexpr :rexpr-value :value :function :void :rexpr-list :rexpr-value-list} (:type r)))
+            r)
 
-        (fn? expr)
-        {:type :function
-         :invoke (fn [[f & body]]
-                   {:type :value
-                    :cljcode-expr `(~f ~@(map #(-> jit-evaluate-cljform :cljcode-expr) body))})}
+          (fn? expr)
+          {:type :function
+           :invoke (fn [[f & body]]
+                     {:type :value
+                      :cljcode-expr `(~f ~@(map #(-> jit-evaluate-cljform :cljcode-expr) body))})}
 
-        :else
-        (do (debug-repl "unknown expression type")
-            (???))))
+          :else
+          (do (debug-repl "unknown expression type")
+              (???)))))
 
 
 
@@ -1140,6 +1161,57 @@
    (???)))
 
 (set-jit-method
+ #'count
+ (fn [[_ arg]]
+   (let [varj (jit-evaluate-cljform arg)]
+     (if (and (#{:rexpr-value-list :rexpr-list} (:type varj))
+              (contains? varj :current-value))
+       (let [c (count (:current-value varj))]
+         {:type :value
+          :current-value c
+          :constant-value c
+          :cljcode-expr c})
+       (do
+         (debug-repl "count method")
+         (???))))))
+
+(set-jit-method
+ #'map
+ (fn [[_ func & args]]
+   (let [funj (jit-evaluate-cljform func)
+         varjs (doall (map jit-evaluate-cljform args))]
+     (assert (and (not (empty? varjs))
+                  (:invoke funj)
+                  (every? #(and (contains? % :current-value)
+                                (#{:rexpr-value-list :rexpr-list} (:type %)))
+                          varjs)))
+     (let [new-vals (doall (for [group-vals (apply map list (map :current-value varjs))]
+                             ((:invoke funj) (cons func group-vals))))
+           types (into #{} (map :type new-vals))]
+       (assert (= 1 (count types)))
+       {:type (case (first types)
+                :rexpr :rexpr-list
+                :value :value
+                :rexpr-value :rexpr-value-list)
+        :current-value (if (= :value (first types))
+                         (map :current-value new-vals)
+                         new-vals)
+        :cljcode-expr `(list ~@(map #(:cljcode-expr % `(bad-gen)) new-vals))}
+       ))))
+
+(set-jit-method
+ #'vec
+ (fn [[_ col]]
+   (let [varj (jit-evaluate-cljform col)]
+     (case (:type varj)
+       :rexpr-list varj  ;; these will just pass through unchecked, as they are giong to end up handled by something else
+       :rexpr-value-list varj
+       :value (merge {:type :value}
+                     (when (contains? :current-value varj)
+                       {:current-value (vec (:current-value varj))})
+                     :cljcode-expr `(vec ~(:cljcode-expr varj)))))))
+
+(set-jit-method
  [#'context/make-empty-context
   #'context/make-nested-context-disjunct
   #'context/make-nested-context-proj
@@ -1201,7 +1273,15 @@
   {:rexpr (fn [arg]
             (rexpr? arg))
    :rexpr-list (fn [arg]
-                 (every? rexpr? arg))})
+                 (every? rexpr? arg))
+   :any (fn [arg]
+          (assert (is-rexpr-value? arg))
+          true)
+   :any-list (fn [arg]
+               (assert (every? is-rexpr-value? arg))
+               true)
+   :unchecked (fn [arg] true) ;; does nothing during its check
+   })
 
 
 (def ^{:private true} cached-eval (memoize (fn [f]
@@ -1227,7 +1307,7 @@
                         :file-name :value
                         :hidden-var :rexpr-value
                         :rexpr-list (???)
-                        :var-list (???)
+                        :var-list :rexpr-value-list
                         :var-map (???)
                         (do (debug-repl)
                             (???)))
@@ -1265,7 +1345,34 @@
                                  {:type :value
                                   :current-value arg
                                   ;; the value should already be embedded in the R-expr in this case, so there is no need to retrieve the value
+                                  :constant-value arg  ;; these should be constant values which are embed already
                                   :cljcode-expr `(bad-gen)}
+
+                                 (= t :rexpr-value-list)
+                                 {:type :rexpr-value-list
+                                  :cljcode-expr `(bad-gen) ;; we can not directly generate this representation?  Though the individual variables should still be accessable?
+                                  :matched-variable arg
+                                  :current-value (vec (for [z arg]
+                                                        (cond (instance? jit-exposed-variable-rexpr z)
+                                                              {:type :rexpr-value
+                                                               :current-value (*current-assignment-to-exposed-vars* (:exposed-name z))
+                                                               :cljcode-expr `(. ~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))})
+                                                                                 (:exposed-name z))
+                                                               :matched-variable z}
+
+                                                              (instance? jit-local-variable-rexpr z)
+                                                              (if (contains? @*local-variable-names-for-variable-values* z)
+                                                                (let [x (@*local-variable-names-for-variable-values* z)]
+                                                                  {:type :rexpr-value
+                                                                   :matched-variable z
+                                                                   :current-value (strict-get x :current-value)
+                                                                   :cljcode-expr `(bad-gen)})
+                                                                {:type :rexpr-value
+                                                                 :matched-variable arg})
+
+                                                              :else (let []
+                                                                      (debug-repl "TODO")
+                                                                      (???)))))}
 
                                  :else
                                  (let []
@@ -1384,7 +1491,9 @@
                          (for [_ (match-sub-expression match-expr arg arg-sig)
                                _ (rec (rest match-expr-seq) (rest arg-seq) (rest rsignature-seq))]
                            true))))
-                   (rest matcher) args rsignature))))
+                   (rest matcher) args rsignature)
+                  () ;; no match
+                  )))
             (match-context [matcher]
               (if (vector? matcher) ;; if we have to match multiple things at the same time from the context
                 ((fn r [s]
@@ -1416,6 +1525,7 @@
                     (vswap! runtime-checks conj (add-precondition-to-check! (:cljcode-expr success)))
                     (list true)))))
             (match-top [matcher rexpr]
+              (assert (every? #{:rexpr :context :check} (keys matcher))) ;; this is checked in rexpr.clj, but check again here as it could otherwise become forgotten
               (for [_ (match-rexpr (:rexpr matcher) rexpr)
                     :let [__ (vreset! already-matched-rexprs #{rexpr})]
                     _ (if (contains? matcher :context)
@@ -1490,9 +1600,19 @@
           (???)
 
           :else
-          (do
-            (debug-repl "perform generic rewrite")
-            (???)))
+          (binding [*locally-bound-variables* (merge {'rexpr {:type :rexpr
+                                                              :cljcode-expr `(bad-gen "should not generate the R-expr into the JIT code")
+                                                              :rexpr-type rexpr}}
+                                                     (:matching-vars rewrite))
+                    *rewrite-ns* (:namespace rewrite)]
+            (doseq [c (:runtime-checks rewrite)
+                    :when (not (nil? c))]
+              (add-to-generation! c))
+            (let [b (:rewrite rewrite)
+                  r (jit-evaluate-cljform b)]
+              (assert (= :rexpr (:type r)))
+              (debug-repl "perform generic rewrite")
+              (:rexpr-type r))))
     #_(if (contains? :assigns-variable kw-args)
       (do
         ;; this is an assignment rewrite
@@ -1511,7 +1631,8 @@
                                                          ;; (println (type rexpr) run-at)
                                                          #_(when (some #{:inference} (if-not (seqable? run-at) [run-at] run-at))
                                                            (debug-repl "inf"))
-                                                         (binding [*rewrite-ns* (:namespace rr)]
+                                                         (binding [*jit-computing-match-of-rewrite* rr
+                                                                   *rewrite-ns* (:namespace rr)]
                                                            (let [results (compute-match rexpr (:matcher rr))]
                                                              (when-not (empty? results)
                                                                (when (not= (count results) 1)
@@ -1585,7 +1706,7 @@
                                            (:simplify-call-counter rr)))
                                       possible-rewrites)]
         (when (> (count picked-rr-order) 1)
-          (debug-repl "multiple possible"))
+          (println "multiple possible"))
         (if (empty? picked-rr-order)
           r
           (let [picked-cc (second (first picked-rr-order))
@@ -1731,22 +1852,26 @@
 (def-rewrite
   :match (proj V R)
   :run-at :jit-compiler
-  (cond (instance? jit-local-variable-rexpr V)
-        (let [r (simplify R)]
-          (when-not (= R r)
-            (if (is-bound-jit? V)
-              r
-              (do (dyna-assert (contains? (exposed-variables r) V))
-                (make-proj V r)))))
+  (let [conjuncts (all-conjunctive-rexprs R)
+        conjuncts-existsing *local-conjunctive-rexprs-for-infernece*]
+    (binding [*local-conjunctive-rexprs-for-infernece* (lazy-cat conjuncts-existsing
+                                                                 conjuncts)]
+      (cond (instance? jit-local-variable-rexpr V)
+            (let [r (simplify R)]
+              (when-not (= R r)
+                (if (is-bound-jit? V)
+                  r
+                  (do (dyna-assert (contains? (exposed-variables r) V))
+                      (make-proj V r)))))
 
-        (instance? jit-hidden-variable-rexpr V)
-        (let [r (simplify R)]
-          (when-not (= R r)
-            (debug-repl "proj hidden var result")
-            (???)))
+            (instance? jit-hidden-variable-rexpr V)
+            (let [r (simplify R)]
+              (when-not (= R r)
+                (debug-repl "proj hidden var result")
+                (???)))
 
-        :else
-        (???)))
+            :else
+            (???)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

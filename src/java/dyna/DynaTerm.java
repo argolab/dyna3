@@ -4,6 +4,7 @@ import clojure.java.api.Clojure;
 import clojure.lang.IFn;
 import clojure.lang.ILookup;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Pattern;
 
 
 /**
@@ -72,10 +73,17 @@ public final class DynaTerm implements ILookup {
             // $nil (and $null) is a term which would cause it to print as $nil[], but we also have it defined as a term which just returns its value
             return name;
         }
+
         // there is no way to tell the difference between $nil and [] as those are the same expression.
         // I suppose that we could make the end of a list represented as something else?  Like use `[]` as the name of the list term or something
         // in which case it would
-        b.append(name);
+        if(no_quote_term.matcher(name).find()) {
+            b.append(name);
+        } else {
+            b.append("'");
+            b.append(name);
+            b.append("'");
+        }
         b.append("["); // going to use the square bracket to print these as that is the syntax for writing this without &x(1,2,3) == x[1,2,3]
         for(int i = 0; i < count; i++) {
             if(i != 0) b.append(", ");
@@ -168,6 +176,8 @@ public final class DynaTerm implements ILookup {
     static private final Object arity_keyword;
 
     static public final DynaTerm null_term;
+
+    static private final Pattern no_quote_term = Pattern.compile("^\\$?[a-z][a-zA-Z0-9_]*$");
 
     static {
         // this should get the underlying value, otherwise there is still some indirect through the variable for these values
