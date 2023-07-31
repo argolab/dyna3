@@ -571,6 +571,8 @@
   (get-value-in-context [this ctx] (ctx-get-value ctx this))
   (set-value! [this value]
     (ctx-set-value! (context/get-context) this value))
+  (set-value-in-context! [this ctx value]
+    (ctx-set-value! ctx this value))
   (is-bound? [this] (boolean (context/need-context (ctx-is-bound? (context/get-context) this))))
   (is-bound-in-context? [this context] (ctx-is-bound? context this))
   (all-variables [this] #{this})
@@ -605,6 +607,9 @@
   (get-value [this] value)
   (get-value-in-context [this ctx] value)
   (set-value! [this v]
+    (if (not= v value)
+      (throw (UnificationFailure. "can not assign value to constant"))))
+  (set-value-in-context! [this ctx v]
     (if (not= v value)
       (throw (UnificationFailure. "can not assign value to constant"))))
   (is-bound? [this] true)
@@ -2064,7 +2069,7 @@
     (doseq [[vdef vcur] vmap
             :let [val (get-value vcur)]
             :when (not (nil? val))]
-      (ctx-set-value! nctx vdef val))
+      (set-value-in-context! vdef nctx val))
     (let [nr (context/bind-context nctx
                            (simplify deferred-rexpr))]
       (remap-variables nr vmap))))

@@ -5,7 +5,12 @@
   (:require [dyna.base-protocols :refer :all])
   (:require [dyna.rexpr-disjunction]) ;; make sure is loaded first
   (:require [dyna.rexpr-aggregators-optimized :refer [convert-basic-aggregator-to-op-aggregator]])
-  (:require [dyna.rexpr-constructors :refer [is-disjunct-op? get-user-term is-aggregator-op-outer? is-aggregator-op-inner? make-no-simp-aggregator-op-inner]])
+  (:require [dyna.rexpr-constructors :refer [is-disjunct-op?
+                                             get-user-term
+                                             is-aggregator-op-outer?
+                                             is-aggregator-op-inner?
+                                             make-no-simp-aggregator-op-inner
+                                             make-no-simp-aggregator-op-outer]])
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
   (:require [dyna.rexpr-pretty-printer :refer [rexpr-printer]])
@@ -42,6 +47,7 @@
   (get-value [this] (???))
   (get-value-in-context [this ctx] (???))
   (set-value! [this value] (???))
+  (set-value-in-context! [this ctx value] (???))
   (is-bound? [this] (is-bound-jit? this))
   (is-bound-in-context? [this ctx] (???))
   (all-variables [this] #{this})
@@ -61,6 +67,7 @@
   (get-value [this] (???))
   (get-value-in-context [this ctx] (???))
   (set-value! [this value] (???))
+  (set-value-in-context! [this ctx value] (???))
   (is-bound? [this] (???))
   (is-bound-in-context? [this ctx] (???))
   (all-variables [this] #{this})
@@ -78,6 +85,7 @@
   (get-value [this] (???))
   (get-value-in-context [this ctx] (???))
   (set-value! [this value] (???))
+  (set-value-in-context! [this ctx value] (???))
   (is-bound? [this] (???))
   (is-bound-in-context? [this ctx])
   (all-variables [this] #{this})
@@ -541,6 +549,7 @@
   (cond (fn? value)
         (when-not (nil? *jit-generate-functions*)
           (conj! *jit-generate-functions* value))
+
         (= :void (:type value)) nil
 
         :else
@@ -741,7 +750,8 @@
                              (let [var (or (ns-resolve *rewrite-ns* expr)
                                            (get @evaluate-symbol-meta expr))
                                    m (meta var)]
-                               (cond (= 'rexpr expr) (???) ;; this needs to return the current R-expr.  But the R-expr should correspond with the R-expr of the rewrite, not the entire expression
+                               (cond (= 'rexpr expr) {:type :rexpr
+                                                      :rexpr-type *jit-currently-rewriting*} ;; return the R-expr currently getting matched
                                      (= 'simplify expr) {:type :function
                                                          :invoke (fn [[_ rexpr]]
                                                                    (let [rj (jit-evaluate-cljform rexpr)]
@@ -753,14 +763,23 @@
                                                                    :invoke (fn [[_ rexpr]]
                                                                              (let [rj (jit-evaluate-cljform rexpr)]
                                                                                (assert (= :rexpr (:type rj)))
-                                        ;(debug-repl "call some recursive version of simplify")
-                                                                               (println "TODO: something for simplify-construct")
-                                                                               rj
-                                        ;(???)
-                                                                               ))}
+                                                                               ;(debug-repl "call some recursive version of simplify")
+                                                                               ;(println "TODO: something for simplify-construct")
+                                                                               ;; simplify construct will become a NOOP in the JIT, as these rewrites
+                                                                               ;; still have to get scheduled at a global level
+                                                                               ;; hence, the act of calling this method is just not going to do anything
+                                                                               rj))}
 
                                      (= 'simplify-fast expr) (???)
                                      (= 'simplify-inference expr) (???)
+
+                                     (= '. expr) {:type :function
+                                                  :invoke (fn [[_ self method & args]]
+                                                            (let [s (jit-evaluate-cljform self)
+                                                                  a (doall (map jit-evaluate-cljform args))
+                                                                  clj `(. ~(:cljcode-expr s) ~(ensure-simple-symbol method) ~@(map :cljcode-expr a))]
+                                                              {:type :value
+                                                               :cljcode-expr clj}))}
 
                                      (nil? var)
                                      (do
@@ -842,9 +861,28 @@
                            :rexpr-type expr})
 
           (instance? RexprValue expr) (let []
-                                        {:type :rexpr-value
-                                         :constant-value expr
-                                         :cljcode-expr `(bad-gen "attempting to use value type that was passed in as a constant")})
+                                        (cond (is-constant? expr)
+                                              {:type :rexpr-value
+                                               :constant-value expr
+                                               :current-value expr
+                                               :cljcode-expr `(make-constant ~(get-value expr))}
+
+                                              (instance? jit-exposed-variable-rexpr expr)
+                                              {:type :rexpr-value
+                                               :current-value (*current-assignment-to-exposed-vars* (:exposed-name expr))
+                                               :cljcode-expr `(. ~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))})
+                                                                 ~(:exposed-name expr))
+                                               :matched-variable expr}
+
+                                              (instance? jit-local-variable-rexpr expr)
+                                              (if (contains? @*local-variable-names-for-variable-values* expr)
+                                                (let [x (@*local-variable-names-for-variable-values* expr)]
+                                                  {:type :rexpr-value
+                                                   :matched-variable expr
+                                                   :current-value (strict-get x :current-value)
+                                                   :cljcode-expr `(make-constant ~(strict-get x :var-name))})
+                                                {:type :rexpr-value
+                                                 :matched-variable expr})))
 
           (keyword? expr) (let []
                             {:type :value
@@ -898,10 +936,21 @@
           (or (boolean? expr) (number? expr) (string? expr) (and (seqable? expr) (empty? expr)))
           {:cljcode-expr expr :type :value :constant-value expr}
 
+          (instance? Aggregator expr) {:type :value
+                                       :constant-value expr
+                                       :current-value expr
+                                       :cljcode-expr (with-meta (symbol "dyna.rexpr-aggregators" (str "defined-aggregator-" (:name expr)))
+                                                       {:tag "dyna.rexpr_aggregators.Aggregator"})}
 
           (seqable? expr) ;; vector has already been checked, so this is going to only be list-like things
           (let [f (jit-evaluate-cljform (first expr))
-                r ((:invoke f) expr)]
+                r ((:invoke f (fn [[_ & args]]
+                                ;; the default invoke which will just generate some code here for the function call
+                                (let [s (strict-get f :cljcode-expr)
+                                      a (doall (map #(strict-get (jit-evaluate-cljform %) :cljcode-expr) args))]
+                                  {:type :value
+                                   :cljcode-expr `(~s ~@a)})))
+                   expr)]
             (dyna-assert (#{:rexpr :rexpr-value :value :function :void :rexpr-list :rexpr-value-list} (:type r)))
             r)
 
@@ -993,9 +1042,9 @@
   (cond (is-constant? v) true
         (contains? @*local-variable-names-for-variable-values* v) true
         (instance? jit-local-variable-rexpr v) false ;; if this is bound, it will be contained in the local-variable-names map
-        (instance? jit-exposed-variable-rexpr v) (let []
-                                                   (debug-repl "is bound for exposed var")
-                                                   (???))
+        (instance? jit-exposed-variable-rexpr v) (let [w (jit-evaluate-cljform `(is-bound? ~v))]
+                                                   (add-precondition-on-same-value! w)
+                                                   (get-current-value w))
         :else (???)))
 
 ;; for expressions which can be evaluated when there is a current value, but otherwise we are not going to know
@@ -1138,7 +1187,7 @@
      (add-to-generation! (fn [inner]
                            `(let* [~local-value-name ~(:cljcode-expr valj)]
                               ~(when (instance? jit-exposed-variable-rexpr (:matched-variable varj))
-                                 `(set-value! ~(:cljcode-expr varj) ~local-value-name))
+                                 `(set-value-in-context! ~(:cljcode-expr varj) ~'**context** ~local-value-name))
                               ~(inner))))
      ;; if the value is set to the context, then it will have that this needs
      (vswap! *local-variable-names-for-variable-values* assoc (:matched-variable varj) {:var-name local-value-name
@@ -1628,9 +1677,6 @@
   (let [rewrites (get @rexpr-rewrites-source (type rexpr) [])
         matching-rewrites (into [] (remove nil? (map (fn [rr]
                                                        (let [run-at (:run-at (:kw-args rr) [:standard])]
-                                                         ;; (println (type rexpr) run-at)
-                                                         #_(when (some #{:inference} (if-not (seqable? run-at) [run-at] run-at))
-                                                           (debug-repl "inf"))
                                                          (binding [*jit-computing-match-of-rewrite* rr
                                                                    *rewrite-ns* (:namespace rr)]
                                                            (let [results (compute-match rexpr (:matcher rr))]
@@ -1701,7 +1747,10 @@
                                         (+ (* 1000 (count simplify-stack)) ;; prefer things at the top of the stack
                                            (if (contains? (:kw-args rr) :check) -200000 0) ;; checks should go earlier
                                            (if (contains? (:kw-args rr) :assigns-variable) -100000 0) ;; then assignments of variables
-                                           (if (= :inference (:run-at (:kw-args rr))) 5000 0) ;; inference should run late-ish
+                                           (case (:run-at (:kw-args rr))
+                                             :construction -5000 ;; if this only runs at construction, it should go quickly first
+                                             :inference 5000 ;; if this is more expensive inference, therefore run it later
+                                             0) ;; otherwise just run it normal
                                            (* 10 (count (:runtime-checks rr))) ;; fewer preconditions should make it a bit more general
                                            (:simplify-call-counter rr)))
                                       possible-rewrites)]
@@ -1735,6 +1784,8 @@
       (if (not= r nr)
         (recur nr)
         nr))))
+
+(defn- simplify-jit-recursive-call [rexpr] )
 
 
 
@@ -1773,6 +1824,7 @@
           (if (not= result prim-r)
             ;; then there is something that we can generate, and we are going to want to run that generation and then evaluate it against the current R-expr
             (let [gen-fn (generate-cljcode-fn result)
+                  __ (debug-repl "pr0")
                   fn-evaled (binding [*ns* dummy-namespace]
                               (eval `(do
                                        (ns dyna.rexpr-jit-v2)
@@ -1882,31 +1934,63 @@
     (:out-var *jit-aggregator-info*)
     (let [out-var (gensym 'aggout)]
       (vswap! *jit-aggregator-info* assoc :out-var out-var)
+      (add-to-generation! (fn [inner]
+                            `(let* [~out-var (volatile! nil)]
+                               ~(inner))))
       out-var)))
+
+(def-base-rexpr aggregator-op-partial-result [:var partial-var
+                                              :rexpr remains])
 
 
 (def-rewrite
   :match (aggregator-op-outer (:unchecked operator) (:any result-variable) (:rexpr Rbody))
   :run-at :jit-compiler
-  (let [metadata (jit-metadata)
-        body (binding [*jit-aggregator-info* metadata]
-               (simplify Rbody))]
-    (if (and (= body Rbody) (nil? (:out-var metadata)))
-      nil ;; then nothing was rewritten
-      (do
-        (debug-repl "jit in agg op")
-        (???)))))
+  (let [metadata (jit-metadata)]
+    (when-not (contains? @metadata :group-vars)
+      (vswap! metadata assoc :group-vars (vec (remove is-bound-jit? (exposed-variables Rbody)))))
+    (let [body (binding [*jit-aggregator-info* metadata]
+                 (simplify Rbody))]
+      (if (and (= body Rbody) (nil? (:out-var metadata)))
+        nil ;; then nothing was rewritten
+        (do
+          (if (and (is-empty-rexpr? body) (empty? (:group-vars @metadata)))
+            (if (contains? @metadata :out-var)
+              (do
+                (jit-evaluate-cljform `(set-value! ~result-variable ((. ~operator lower-value) (deref ~{:type :value
+                                                                                                        :cljcode-expr (:out-var @metadata)}))))
+                (make-multiplicity 1))
+              (make-multiplicity 0))
+            (do
+              ;; this is going to have some other partial evaluated expression here.  but this is going to have to figure out if there is
+              ;; some way in which this might
+              (debug-repl "jit in agg op")
+              (???))))))))
 
 (def-rewrite
   :match (aggregator-op-inner operator (:any incoming) (:any-list projected-vars) (:rexpr R))
   :run-at :jit-compiler
   (let [body (simplify R)]
-    (debug-repl "agg in 1")
     (if (and (= body R) (not (is-bound-jit? incoming)))
       nil ;; then there was nothing rewritten/bound, so we can just let stuff continue
-      (do
-        (debug-repl "handle jit agg op inner")
-        (???)))))
+      (if (is-empty-rexpr? body)
+        body
+        (if (is-multiplicity? body)
+          (let [out-var (aggregator-out-var)
+                incoming-val (jit-evaluate-cljform `(get-value ~incoming))
+                combine-fn (jit-evaluate-cljform `(. ~operator combine-ignore-nil))]
+            (assert (= body (make-multiplicity 1))) ;; TODO handle other mults here, this is going to have to contribute more than once
+            (if (empty? (:group-vars @*jit-aggregator-info*))
+              (add-to-generation! `(vswap! ~out-var ~(:cljcode-expr combine-fn) ~(:cljcode-expr incoming-val)))
+              (add-to-generation! `(vswap! ~out-var update-in [~@(map :cljcode-expr (map jit-evaluate-cljform (:group-vars @*jit-aggregator-info*)))]
+                                           ~(:cljcode-expr combine-fn) ~(:cljcode-expr incoming-val)))
+              )  ;; TODO this needs to handle the different values for this
+            (debug-repl "handle jit agg op inner")
+            (make-multiplicity 0) ;; this has already been handled, so we can remove it from the R-expr
+            )
+          (let [ret (make-no-simp-aggregator-op-inner operator incoming projected-vars body)]
+            (debug-repl "more to do in aggregator")
+            ret))))))
 
 
 

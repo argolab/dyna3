@@ -24,12 +24,16 @@
                        ^clojure.lang.IFn add-to-in-rexpr
                        ^clojure.lang.IFn add-to-out-rexpr
                        ^clojure.lang.IFn saturate
+                       ^clojure.lang.IFn combine-ignore-nil
                        ])
 
 (def aggregators (atom {}))
 
-(defmethod print-dup Aggregator [^Aggregator a]
-  `(get @aggregators ~(:name a)))
+;; (defmethod print-dup Aggregator [^Aggregator a]
+;;   (with-meta (symbol "dyna.rexpr-aggregators" (str "defined-aggregator-" (:name a))) {:tag Aggregator}))
+
+(defmethod print-dup Aggregator [^Aggregator a ^java.io.Writer w]
+  (.write w (str " dyna.rexpr-aggregators/defined-aggregator-" (:name a) " ")))
 
 (defn is-aggregator-defined? [^String name]
   ;; this method is called by dyna.ParserUtils
@@ -54,14 +58,18 @@
                   (assoc args3 :many-items (fn [val mult]
                                              (cmb ident val mult))))
                 args3)
-        args5 (assoc args4 :name name)]
-    ;(assert (subset? (keys kw-args) #{:combine :identity :}))
-
+        args5 (assoc args4 :name name)
+        combine-fn (:combine args5)
+        agg (map->Aggregator (merge {:allows-with-key false
+                                     :lower-value identity
+                                     :combine-ignore-nil (fn [a b]
+                                                           (if (nil? a) b
+                                                               (combine-fn a b)))}
+                                    args5))]
     ;; this should construct the other functions if they don't already exist, so that could mean that there are some defaults for everything
     ;; when the aggregator is created, it can have whatever oeprations are
-    (swap! aggregators assoc name (map->Aggregator (merge {:allows-with-key false
-                                                           :lower-value identity}
-                                                          args5)))))
+    (swap! aggregators assoc name agg)
+    (intern 'dyna.rexpr-aggregators (symbol (str "defined-aggregator-" name)) agg)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
