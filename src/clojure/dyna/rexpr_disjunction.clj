@@ -74,6 +74,9 @@
   (remap-variables-func [this remap-function]
                         (???) ;; TODO
                         )
+
+  (rexpr-jit-info [this] {:jittable false} ;; this will get converted into a primitive disjunct which we can compile
+                  )
   )
 
 (defn- remap-variables-disjunct-op [this variable-renaming-map remap-fn]

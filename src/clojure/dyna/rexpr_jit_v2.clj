@@ -14,6 +14,7 @@
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
   (:require [dyna.rexpr-pretty-printer :refer [rexpr-printer]])
+  (:require [dyna.prefix-trie :as trie])
   (:require [clojure.walk :refer [macroexpand-all]])
   (:require [clojure.set :refer [union]])
   (:import [dyna.rexpr proj-rexpr simple-function-call-rexpr conjunct-rexpr ])
@@ -128,8 +129,15 @@
 (defn- convert-to-primitive-rexpr [rexpr]
   (cond
     (is-jit-placeholder? rexpr) rexpr  ;; this is already a placeholder, so this just gets returned
-    (or (is-disjunct? rexpr) (is-disjunct-op? rexpr)) (???) ;; not handling disjuncts in the JIT atm.  These can be a disjunct over other compiled units
-    (is-user-call? rexpr) (???) ;; this is not going to be supported.  A user call can return "arbitrary code" which is not something that the JIT should ever handle
+    (is-disjunct? rexpr) (let []
+                           ;; this is already a primitive, so we can just continue to
+                           (debug-repl "prim disjunct")
+                           (???))
+    (or (is-disjunct-op? rexpr) (is-user-call? rexpr))
+    (let []
+      ;(debug-repl)
+      (throw (IllegalArgumentException. (str "Can not covert " (rexpr-name rexpr) " to primitive for JIT, should have been a hole"))))
+
     :else (rewrite-rexpr-children-no-simp (primitive-rexpr rexpr) convert-to-primitive-rexpr)))
 
 (defn- get-placeholder-rexprs [rexpr]
@@ -418,27 +426,45 @@
   ;; there are some R-expr types which we do not want to JIT, so those are going to be things that we want to replace with a placeholder in the expression
   (if-not (tlocal system/generate-new-jit-states)
     rexpr ;; I suppose that we can just return the R-expr unmodified in the case that there is nothing that we are going to do here
-    )
-  (let [pl (volatile! {})
-        rp (fn rr [rexpr]
-             (let [jinfo (rexpr-jit-info rexpr)]
-               (if-not (:jittable jinfo true)
-                 (cond
-                   (is-aggregator? rexpr) (rr (convert-basic-aggregator-to-op-aggregator rexpr))
+    (let [pl (volatile! {})
+          rp (fn rr [rexpr]
+               (let [jinfo (rexpr-jit-info rexpr)]
+                 (if-not (:jittable jinfo true)
+                   (cond
+                     (is-aggregator? rexpr) (rr (convert-basic-aggregator-to-op-aggregator rexpr))
 
-                   :else
-                   (let [id (count @pl)
-                         exposed (exposed-variables rexpr)]
-                     ;; should the nested expressions also become JITted?  In the
-                     ;; case of an aggregator, we might want to pass through the
-                     ;; aggregation to handle its children?  Though those will be
-                     ;; their own independent compilation units
-                     (make-jit-placeholder id (into {} (for [e exposed] [e e])))))
-                 (rewrite-rexpr-children-no-simp rexpr rr))))
-        nr (rp rexpr)
-        synthed (synthize-rexpr nr)]
-    (debug-repl "TODO")
-    ))
+                     (is-disjunct-op? rexpr) (let [trie (:rexprs rexpr)
+                                                   vars (:disjunction-variables rexpr)
+                                                   elems (take 11 (trie/trie-get-values trie nil))
+                                                   all-ground (every? (fn [z] (every? #(not (nil? %)) z)) (map first elems))]
+                                               (if (or (> (count elems) 8) all-ground)
+                                                 (let []
+                                                   ;; then there are 8 or more disjuncts contained in the trie, so we are not going to compile this
+                                                   ;; and instead leave it as a hash table
+                                                   (???))
+                                                 (let [;; there are 8 or less elements in the trie, so we are going to convert it to a the basic disjunct
+                                                       ;; and then add that into the compilation
+                                                       new-disjuncts (vec (for [[vals rx] elems
+                                                                                :let [vals-r (vec (for [[val var] (zipseq vals vars)
+                                                                                                        :when (not (nil? val))]
+                                                                                                    (make-no-simp-unify var (make-constant val))))]]
+                                                                            (make-conjunct (conj vals-r (rr rx)))))
+                                                       ret (make-no-simp-disjunct new-disjuncts)]
+                                                   ret)))
+
+                     :else
+                     (let [id (count @pl)
+                           exposed (exposed-variables rexpr)]
+                       ;; should the nested expressions also become JITted?  In the
+                       ;; case of an aggregator, we might want to pass through the
+                       ;; aggregation to handle its children?  Though those will be
+                       ;; their own independent compilation units
+                       (make-jit-placeholder id (into {} (for [e exposed] [e e])))))
+                   (rewrite-rexpr-children-no-simp rexpr rr))))
+          nr (rp rexpr)
+          synthed (synthize-rexpr nr)]
+      (debug-repl "TODO")
+      )))
 
 (intern 'dyna.rexpr-constructors 'convert-to-jitted-rexpr convert-to-jitted-rexpr-fn)
 

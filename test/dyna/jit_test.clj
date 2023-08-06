@@ -138,6 +138,25 @@
       (let [res2 (context/bind-context-raw ctx (simplify-fully rr))]
         (is (= 1 (ctx-get-value ctx (make-variable 'result))))))))
 
+(deftest basic-jit8
+  (let [rexpr (make-aggregator "=" (make-variable 'result) (make-variable 'incoming) true
+                               (make-disjunct [(make-conjunct [(make-unify (make-variable 'X) (make-variable 'incoming))
+                                                               (make-lessthan (make-variable 'X) (make-constant 10) (make-constant true))])
+                                               (make-conjunct [(make-times (make-variable 'X) (make-constant 3) (make-variable 'incoming))
+                                                               (make-lessthan (make-variable 'X) (make-constant 5) (make-constant true))])]))
+                                        ;[synth-rexpr jit-type] (synthize-rexpr rexpr)
+
+        synth-rexpr (tbinding [system/generate-new-jit-states true]
+                              (convert-to-jitted-rexpr rexpr))
+        ]
+    (doseq [[x y] [[0 0] [2 8] [7 7] [12 nil]]]
+      (let [rr (make-conjunct [(make-unify (make-variable 'X) (make-constant x))
+                               synth-rexpr])
+            ctx (context/make-empty-context rr)]
+        (tbinding [generate-new-jit-rewrites true]
+          (let [res2 (context/bind-context-raw ctx (simplify-fully rr))]
+            (is (= y (ctx-get-value ctx (make-variable 'result))))))))))
+
 #_(deftest jit-memoization1
   (let [system (system/make-new-dyna-system)]
     (system/run-under-system
