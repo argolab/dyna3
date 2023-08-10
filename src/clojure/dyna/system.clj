@@ -31,6 +31,7 @@
 
 (def ^{:redef true} use-optimized-rexprs
   (Boolean/parseBoolean (System/getProperty "dyna.optimized_rexprs" "true")))
+(def-tlocal use-optimized-disjunct)
 ;(def-tlocal use-optimized-rexprs)
 
 #_(def ^:dynamic *generate-new-jit-rewrites* false)

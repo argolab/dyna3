@@ -64,6 +64,7 @@
   [locals namespace form]
   (binding [*locals* locals
             *ns* namespace]
+    (println form)
     (eval
      `(let ~(vec (mapcat #(list % `(*locals* '~%)) (keys locals)))
         ~form))))

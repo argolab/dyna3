@@ -132,7 +132,7 @@
 ;; if there already exists tries in the disjunct, then it will construct the more optimized disjunct
 (def-rewrite
   :match {:rexpr (disjunct (:rexpr-list children))
-          :check system/use-optimized-rexprs}
+          :check (and system/use-optimized-rexprs (tlocal use-optimized-disjunct))}
   :run-at :construction
   :run-in-jit false
   (let [dj-vars (vec (exposed-variables rexpr))]

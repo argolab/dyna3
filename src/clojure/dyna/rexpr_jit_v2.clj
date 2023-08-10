@@ -17,7 +17,7 @@
   (:require [dyna.prefix-trie :as trie])
   (:require [clojure.walk :refer [macroexpand-all]])
   (:require [clojure.set :refer [union]])
-  (:import [dyna.rexpr proj-rexpr simple-function-call-rexpr conjunct-rexpr ])
+  (:import [dyna.rexpr proj-rexpr simple-function-call-rexpr conjunct-rexpr disjunct-rexpr])
   (:import [dyna.rexpr_aggregators_optimized aggregator-op-outer-rexpr aggregator-op-inner-rexpr])
   (:import [dyna.rexpr_aggregators Aggregator])
   (:import [dyna RexprValue RexprValueVariable Rexpr DynaJITRuntimeCheckFailed StatusCounters UnificationFailure])
@@ -56,6 +56,7 @@
     (???))
   Object
   (toString [this] (str "(jit-local-variable " local-var-symbol ")")))
+
 
 (defmethod print-method jit-local-variable-rexpr [^jit-local-variable-rexpr this ^java.io.Writer w]
   (.write w (.toString this)))
@@ -127,15 +128,17 @@
                           )))
 
 (defn- convert-to-primitive-rexpr [rexpr]
+  ;; Not 100% sure if this method is really needed anymore, it seems like is essentially doing nothing
   (cond
     (is-jit-placeholder? rexpr) rexpr  ;; this is already a placeholder, so this just gets returned
-    (is-disjunct? rexpr) (let []
+    (is-disjunct? rexpr) (let [;evars (exposed-variables rexpr)
+                               ]
                            ;; this is already a primitive, so we can just continue to
-                           (debug-repl "prim disjunct")
-                           (???))
+                           ;(debug-repl "prim disjunct")
+                           (rewrite-rexpr-children-no-simp rexpr convert-to-primitive-rexpr))
     (or (is-disjunct-op? rexpr) (is-user-call? rexpr))
     (let []
-      ;(debug-repl)
+      (debug-repl "bad rexpr")
       (throw (IllegalArgumentException. (str "Can not covert " (rexpr-name rexpr) " to primitive for JIT, should have been a hole"))))
 
     :else (rewrite-rexpr-children-no-simp (primitive-rexpr rexpr) convert-to-primitive-rexpr)))
@@ -462,9 +465,9 @@
                        (make-jit-placeholder id (into {} (for [e exposed] [e e])))))
                    (rewrite-rexpr-children-no-simp rexpr rr))))
           nr (rp rexpr)
-          synthed (synthize-rexpr nr)]
-      (debug-repl "TODO")
-      )))
+          [synthed _] (synthize-rexpr nr)]
+      ;(debug-repl "TODO")
+      synthed)))
 
 (intern 'dyna.rexpr-constructors 'convert-to-jitted-rexpr convert-to-jitted-rexpr-fn)
 
@@ -583,10 +586,11 @@
                         (:cljcode-expr value)
                         value)]
           (dyna-assert (not (nil? cljcode)))
-          (add-to-generation! (fn [inner]
-                                `(do
-                                   ~cljcode
-                                   ~(inner)))))))
+          (when-not (nil? cljcode)
+            (add-to-generation! (fn [inner]
+                                  `(do
+                                     ~cljcode
+                                     ~(inner))))))))
 
 (defn- generate-cljcode-to-materalize-rexpr [rexpr & {:keys [simplify-result] :or {simplify-result false}}]
   ;; this is going to have to figure out which variables are referencing some value
@@ -691,18 +695,18 @@
          (throw (DynaJITRuntimeCheckFailed.))))))
 
 (defmacro ^{:private true} jit-precondition-to-check [condition]
-  ;; this should cache the preconditions during generation of the program instead of when it is inserted into the program
-  ;; this will ensure that the chain of generation will
   `(when-not ~condition
      (throw (DynaJITRuntimeCheckFailed.))))
 
-(defn- add-precondition-to-check! [condition]
+(defn- gen-precondition-to-check [condition]
   (assert (not (map? condition)))
   `(jit-precondition-to-check ~condition))
 
+#_(defn- add-precondition-to-check! [condition]
+  (???))
 
 
-(defn- add-precondition-on-same-value! [value]
+(defn- gen-precondition-on-same-value [value]
   (case (:type value)
     :rexpr (let []
              ;; The R-expr itself should mostly be constant.
@@ -719,16 +723,19 @@
                    (???))
     :value (when-not (contains? value :constant-value)
              (assert (contains? value :current-value)) ;; otherwise we can not have that this will be the same as what it is currently, so it needs to know the currentl value
-             (add-precondition-to-check! `(= ~(:current-value value) ~(:cljcode-expr value))))
+             (gen-precondition-to-check `(= ~(:current-value value) ~(:cljcode-expr value))))
 
-    (???)))
+    (???))
 
-(defn- concat-code [& args]
-  (let [a (remove #(or (nil? %) (boolean? %) (string? %) (number? %)) (drop-last args))
-        l (last args)]
-    (if (#{:rexpr :rexpr-value :value :rexpr-value-list :rexpr-list} (:type l))
-      (assoc l :cljcode-expr `(let* [] ~@a ~(:cljcode-expr l)))
-      `(let* [] ~@a ~l))))
+  (defn- concat-code [& args]
+    (let [a (remove #(or (nil? %) (boolean? %) (string? %) (number? %)) (drop-last args))
+          l (last args)]
+      (if (#{:rexpr :rexpr-value :value :rexpr-value-list :rexpr-list} (:type l))
+        (assoc l :cljcode-expr `(let* [] ~@a ~(:cljcode-expr l)))
+        `(let* [] ~@a ~l)))))
+
+(defn- add-precondition-on-same-value! [value]
+  (add-to-generation! (gen-precondition-on-same-value value)))
 
 (def ^:private evaluate-symbol-meta (atom {}))  ;; symbols like 'do, are compiler builtins and not variables, so we can't easily associate meta with them
 
@@ -1051,10 +1058,10 @@
                                  cval (get-current-value condv)]
                              (if cval
                                (concat-code
-                                (add-precondition-to-check! (:cljcode-expr condv))
+                                (gen-precondition-to-check (:cljcode-expr condv))
                                 (jit-evaluate-cljform true-b))
                                (concat-code
-                                (add-precondition-to-check! `(not ~(:cljcode-expr condv)))
+                                (gen-precondition-to-check `(not ~(:cljcode-expr condv)))
                                 (jit-evaluate-cljform false-b)))))})
 
 (defn- set-jit-method [v f]
@@ -1184,7 +1191,8 @@
                                       ~(inner))))
              (assert (is-bound? cval))
              (vswap! *local-variable-names-for-variable-values* assoc (:matched-variable varj) {:var-name local-name
-                                                                                                :current-value (get-value cval)})
+                                                                                                :current-value (get-value cval)
+                                                                                                :bound-from-outer-context true})
              {:type :value
               :current-value (get-value cval)
               :cljcode-expr local-name})
@@ -1333,14 +1341,14 @@
              (contains? f :current-value)
              (case m
                and (if (:current-value f)
-                     (do (add-precondition-to-check! (:cljcode-expr f))
+                     (do (gen-precondition-to-check (:cljcode-expr f))
                          (jit-evaluate-cljform `(and ~@(rest args))))
-                     (do (add-precondition-to-check! `(not ~(:cljcode-expr f)))
+                     (do (gen-precondition-to-check `(not ~(:cljcode-expr f)))
                          f))
                or (if (:current-value f)
-                    (do (add-precondition-to-check! (:cljcode-expr f))
+                    (do (gen-precondition-to-check (:cljcode-expr f))
                         f)
-                    (do (add-precondition-to-check! `(not ~(:cljcode-expr f)))
+                    (do (gen-precondition-to-check `(not ~(:cljcode-expr f)))
                         (jit-evaluate-cljform `(or ~@(rest args))))))
              :else (???))))))
 
@@ -1381,7 +1389,9 @@
                         :boolean :value
                         :file-name :value
                         :hidden-var :rexpr-value
-                        :rexpr-list (???)
+                        :rexpr-list (do
+                                      ;(debug-repl)
+                                      (???))
                         :var-list :rexpr-value-list
                         :var-map (???)
                         (do (debug-repl)
@@ -1462,7 +1472,7 @@
                                             (if (= scv mcv)
                                               (do (when-not (or (= (:cljcode-expr mv) (:cljcode-expr curval))
                                                                 (and (contains? mv :constant-value) (contains? curval :constant-value)))
-                                                    (vswap! runtime-checks conj (add-precondition-to-check! `(= (:cljcode-expr mv) (:cljcode-expr curval)))))
+                                                    (vswap! runtime-checks conj (gen-precondition-to-check `(= (:cljcode-expr mv) (:cljcode-expr curval)))))
                                                   (list true))
                                               nil ;; does not match
                                               ))
@@ -1494,15 +1504,15 @@
                                 (do
                                   (when-not (or (= (:cljcode-expr mv) (:cljcode-expr curval))
                                                 (and (contains? mv :constant-value) (contains? curval :constant-value)))
-                                    (vswap! runtime-checks conj (add-precondition-to-check! `(= (:cljcode-expr mv) (:cljcode-expr curval)))))
-                                  (vswap! runtime-checks conj (add-precondition-on-same-value! match-success))
+                                    (vswap! runtime-checks conj (gen-precondition-to-check `(= (:cljcode-expr mv) (:cljcode-expr curval)))))
+                                  (vswap! runtime-checks conj (gen-precondition-on-same-value match-success))
                                   ;; this is already bound, so we do not need to set the currently bound values
                                   (list true))
                                 nil ;; failed to match the existing value
                                 ))
                             (do
                               (when-not (contains? match-success :constant-value)
-                                (vswap! runtime-checks conj (add-precondition-to-check! (:cljcode-expr match-success))))
+                                (vswap! runtime-checks conj (gen-precondition-to-check (:cljcode-expr match-success))))
                               (when-not (= '_ (cdar matcher))
                                 (vswap! currently-bound-variables assoc (cdar matcher) curval))
                               (list true)))
@@ -1524,7 +1534,7 @@
                         (if success
                           (do
                             (when-not (contains? curval :constant-value)
-                              (vswap! runtime-checks conj (add-precondition-to-check! `(~f ~(:cljcode-expr curval)))))
+                              (vswap! runtime-checks conj (gen-precondition-to-check `(~f ~(:cljcode-expr curval)))))
                             (when-not (= '_ (cdar matcher))
                               (vswap! currently-bound-variables assoc (cdar matcher) curval))
                             (list true))
@@ -1540,7 +1550,7 @@
                         (if success
                           (do
                             (when-not (contains? curval :constant-value)
-                              (vswap! runtime-checks conj (add-precondition-to-check! `(~f (:cljcode-expr curval)))))
+                              (vswap! runtime-checks conj (gen-precondition-to-check `(~f (:cljcode-expr curval)))))
                             (when-not (= '_ (cdar matcher))
                               (vswap! currently-bound-variables assoc (cdar matcher) curval))
                             (list true))
@@ -1597,7 +1607,7 @@
                               (jit-evaluate-cljform matcher))]
                 (when (get-current-value success)
                   (when-not (:constant-value success)
-                    (vswap! runtime-checks conj (add-precondition-to-check! (:cljcode-expr success)))
+                    (vswap! runtime-checks conj (gen-precondition-to-check (:cljcode-expr success)))
                     (list true)))))
             (match-top [matcher rexpr]
               (assert (every? #{:rexpr :context :check} (keys matcher))) ;; this is checked in rexpr.clj, but check again here as it could otherwise become forgotten
@@ -1767,7 +1777,7 @@
                               @*jit-simplify-rewrites-found*))]
     (if (empty? possible-rewrites)
       (do
-        (debug-repl "no possible rewrites")
+        (debug-repl "no possible rewrites" false)
         r) ;; then we are "done" and we just return this R-expr unrewritten
       (loop [picked-rr-order (sort-by (fn [[simplify-stack rr]]
                                         (+ (* 1000 (count simplify-stack)) ;; prefer things at the top of the stack
@@ -1794,7 +1804,7 @@
                              *local-conjunctive-rexprs-for-infernece* top-conjuncts]
                      (let [nr (simplify-jit-internal-rexpr r)]
                        (add-return-rexpr-checkpoint! nr)
-                       (debug-repl "result of doing rewrite")
+                       (debug-repl "result of doing rewrite" false)
                        nr
                        ))]
             (if (not= nr r)
@@ -1841,7 +1851,8 @@
               *rexpr-checked-already* (transient #{})
               *jit-rexpr-rewrite-metadata* (volatile! {})]
       (tbinding
-       [current-simplify-stack ()]
+       [current-simplify-stack ()
+        use-optimized-disjunct false]
        (debug-tbinding
         ;; restart these values, as we are running a nested version of simplify for ourselves
         [current-simplify-running nil]
@@ -1850,16 +1861,16 @@
           (if (not= result prim-r)
             ;; then there is something that we can generate, and we are going to want to run that generation and then evaluate it against the current R-expr
             (let [gen-fn (generate-cljcode-fn result)
-                  __ (debug-repl "pr0")
+                  __ (debug-repl "pr0" false)
                   fn-evaled (binding [*ns* dummy-namespace]
                               (eval `(do
                                        (ns dyna.rexpr-jit-v2)
                                        (def-rewrite-direct ~(:generated-name jinfo) [:standard] ~gen-fn))))]
 
-              (debug-repl "pr1")
+              (debug-repl "pr1" false)
               (let [rr (try (fn-evaled rexpr simplify-method)
                             (catch UnificationFailure _ (make-multiplicity 0)))]
-                (debug-repl "pr2")
+                (debug-repl "pr2" false)
                 (assert (not= rexpr rr)) ;; otherwise there was no rewriting done, and the generated rewrite failed for some reason
                 rr))
             (do
@@ -1966,18 +1977,33 @@
       out-var)))
 
 (def-base-rexpr aggregator-op-partial-result [:var partial-var
+                                              :var-list group-vars
                                               :rexpr remains])
 
 
 (def-rewrite
-  :match (aggregator-op-outer (:unchecked operator) (:any result-variable) (:rexpr Rbody))
+  :match (aggregator-op-outer (:unchecked operator) (:any result-variable) (:rexpr Rbody1))
   :run-at :jit-compiler
-  (let [metadata (jit-metadata)]
+  (let [metadata (jit-metadata)
+        Rbody2 (if (is-aggregator-op-partial-result? Rbody1)
+                   (:remains Rbody1)
+                   Rbody1)]
+    (when (is-aggregator-op-partial-result? Rbody1)
+      (when-not (contains? @metadata :group-vars)
+        (vswap! metadata assoc :group-vars (:group-vars Rbody1)))
+      (when-not (contains? @metadata :out-var)
+        (let [out-var (gensym 'aggout)
+              prev-vals (jit-evaluate-cljform `(get-value ~(:partial-var Rbody1)))]
+          (add-to-generation! (fn [inner]
+                                `(let* [~out-var (volatile! ~(:cljcode-expr prev-vals))]
+                                   ~(inner))))
+          (vswap! metadata assoc :out-var out-var))))
     (when-not (contains? @metadata :group-vars)
-      (vswap! metadata assoc :group-vars (vec (remove is-bound-jit? (exposed-variables Rbody)))))
-    (let [body (binding [*jit-aggregator-info* metadata]
-                 (simplify Rbody))]
-      (if (and (= body Rbody) (nil? (:out-var metadata)))
+      (vswap! metadata assoc :group-vars (vec (remove is-bound-jit? (exposed-variables Rbody2)))))
+    (let [group-vars (:group-vars @metadata)
+          body (binding [*jit-aggregator-info* metadata]
+                 (simplify Rbody2))]
+      (if (and (= body Rbody2) (nil? (:out-var metadata)))
         nil ;; then nothing was rewritten
         (do
           (if (and (is-empty-rexpr? body) (empty? (:group-vars @metadata)))
@@ -1988,10 +2014,22 @@
                 (make-multiplicity 1))
               (make-multiplicity 0))
             (do
-              ;; this is going to have some other partial evaluated expression here.  but this is going to have to figure out if there is
-              ;; some way in which this might
-              (debug-repl "jit in agg op")
-              (???))))))))
+              ;; this is some partially evaluated expression, which will then have to figure out if there is something which could
+              ;; allow for it
+              (debug-repl "jit in agg op" false)
+              (if-not (contains? @metadata :out-var)
+                (make-no-simp-aggregator-op-outer operator result-variable body)
+                (let [outvar (:out-var @metadata)
+                      agg-val-var (gensym 'aggcurval)]
+                  (add-to-generation! (fn [inner]
+                                        `(let* [~agg-val-var (deref ~outvar)]
+                                           ~(inner))))
+
+                  (let [ret (make-no-simp-aggregator-op-partial-result (jit-local-variable-rexpr. agg-val-var)
+                                                                       group-vars
+                                                                       body)]
+                    (debug-repl "partial agg" false)
+                    ret))))))))))
 
 (def-rewrite
   :match (aggregator-op-inner operator (:any incoming) (:any-list projected-vars) (:rexpr R))
@@ -2011,14 +2049,47 @@
               (add-to-generation! `(vswap! ~out-var update-in [~@(map :cljcode-expr (map jit-evaluate-cljform (:group-vars @*jit-aggregator-info*)))]
                                            ~(:cljcode-expr combine-fn) ~(:cljcode-expr incoming-val)))
               )  ;; TODO this needs to handle the different values for this
-            (debug-repl "handle jit agg op inner")
+            ;(debug-repl "handle jit agg op inner")
             (make-multiplicity 0) ;; this has already been handled, so we can remove it from the R-expr
             )
           (let [ret (make-no-simp-aggregator-op-inner operator incoming projected-vars body)]
-            (debug-repl "more to do in aggregator")
+            ;(debug-repl "more to do in aggregator")
             ret))))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(def-rewrite
+  :match (disjunct (:rexpr-list children))
+  :run-at :jit-compiler
+  (let [metadata (jit-metadata)
+        ex-child (map exposed-variables children)
+        exposed (apply union ex-child)
+        handle-disjunct (remove is-bound-jit? exposed) ;; anything that is bound externally does not need to be handled by the disjunct
+        ret-children (transient [])
+        parent-variable-name-bindings *local-variable-names-for-variable-values*
+        changed (volatile! false)
+        ]
+    (doseq [c children]
+      (let [new-binding (volatile! @parent-variable-name-bindings)]
+        (let [r (binding [*local-variable-names-for-variable-values* new-binding]
+                  (simplify c))]
+          (when (or (not= r c) (not= @new-binding @parent-variable-name-bindings))
+            (vreset! changed true))
+          (doseq [[v b] @new-binding
+                  :when (not= (get @parent-variable-name-bindings v) b)]
+            (dyna-assert (not (contains? @parent-variable-name-bindings v)))
+            (when (:bound-from-outer-context b) ;; this is just caching the value into a local variable somewhere, so this is always fine
+              (vswap! parent-variable-name-bindings assoc v b)))
+          (when-not (is-empty-rexpr? r)
+            (conj! ret-children [r @new-binding])))))
+    (when @changed
+      (let [ret (persistent! ret-children)]
+        (when-not (empty? handle-disjunct)
+          (debug-repl "disjunct match")
+          (???))
+        ;; this will become a disjunct-op if we use the normal make-disjunct here, and we don't want to have to deal
+        ;; when thtat kind of disjunct
+        (make-disjunct (vec (map first ret)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
