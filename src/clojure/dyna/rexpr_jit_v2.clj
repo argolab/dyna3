@@ -575,7 +575,8 @@
 (def ^{:private true :dynamic true} *jit-currently-rewriting* nil)
 (def ^{:private true :dynamic true} *jit-rexpr-rewrite-metadata*)
 
-(def ^{:private true :dynamic true} *jit-before-performing-rewrite* (fn [rexpr rewrite]))
+;(def ^{:private true :dynamic true} *jit-before-performing-rewrite* (fn [rexpr rewrite]))
+(def ^{:private true :dynamic true} *jit-compute-unification-failure* false)
 
 (defn jit-metadata []
   (let [r (get @*jit-rexpr-rewrite-metadata* *jit-currently-rewriting*)]
@@ -1651,7 +1652,6 @@
                [@runtime-checks @currently-bound-variables])))))
 
 (defn- simplify-perform-generic-rewrite [rexpr rewrite]
-  (*jit-before-performing-rewrite* rexpr rewriwte) ;; so we can setup exception handlers if needed
   (let [kw-args (:kw-args rewrite)]
     (cond (contains? kw-args :check)
           (binding [*locally-bound-variables* (merge {'rexpr {:type :rexpr
@@ -1759,7 +1759,9 @@
     (let [picked (filter *jit-simplify-rewrites-picked-to-run* matching-rewrites)]
       (if (empty? picked)
         nil
-        (simplify-perform-generic-rewrite rexpr (first picked))
+        (if *jit-compute-unification-failure*
+          (make-multiplicity 0)
+          (simplify-perform-generic-rewrite rexpr (first picked)))
         #_(do
           ;; going to perform the rewrite, which means that
 
@@ -1830,7 +1832,12 @@
                              *jit-simplify-call-counter* (volatile! 0)
                              *jit-simplify-rewrites-found* (volatile! #{})
                              *local-conjunctive-rexprs-for-infernece* top-conjuncts]
-                     (let [nr (simplify-jit-internal-rexpr r)]
+                     (let [nr-unification-failure (binding [*jit-compute-unification-failure* true]
+                                                    (simplify-jit-internal-rexpr r))
+                           nr (simplify-jit-internal-rexpr r)]
+                       (when (and (not= nr nr-unification-failure) (not (is-empty-rexpr? nr-unification-failure)))
+                         (debug-repl "unification failure different" false)
+                         (???))
                        (add-return-rexpr-checkpoint! nr)
                        (debug-repl "result of doing rewrite" false)
                        nr
