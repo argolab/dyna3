@@ -57,6 +57,20 @@
   Object
   (toString [this] (str "(jit-local-variable " local-var-symbol ")")))
 
+(defrecord jit-expression-variable-rexpr [cljcode]
+  RexprValueVariable
+  (get-value [this] (???))
+  (get-value-in-context [this ctx] (???))
+  (set-value! [this value] (???))
+  (set-value-in-context! [this ctx value] (???))
+  (is-bound? [this] true)
+  (is-bound-in-context? [this ctx] true)
+  (all-variables [this] #{})
+  (get-representation-in-context [this ctx]
+    (???))
+  Object
+  (toString [this] (str "(jit-expression-variable " cljcode ")")))
+
 
 (defmethod print-method jit-local-variable-rexpr [^jit-local-variable-rexpr this ^java.io.Writer w]
   (.write w (.toString this)))
@@ -108,15 +122,15 @@
 ;; a disjunct inside of the jit would have to have some identifier to track
 ;; which of the branches are still active?  The disjunct id will uniquely
 ;; identify this disjunct as it gets rewritten,
-(def-base-rexpr jit-disjunct [:unchecked disjunct-id
-                              :rexpr-list children])
+;; (def-base-rexpr jit-disjunct [:unchecked disjunct-id
+;;                               :rexpr-list children])
 
-(def-rewrite
-  :match (jit-disjunct disjunct-id (:rexpr-list children))
-  :run-at :standard
-  (do
-    (debug-repl "should not happen, attempting to simplify jit-disjunct")
-    (???)))
+;; (def-rewrite
+;;   :match (jit-disjunct disjunct-id (:rexpr-list children))
+;;   :run-at :standard
+;;   (do
+;;     (debug-repl "should not happen, attempting to simplify jit-disjunct")
+;;     (???)))
 
 #_(defn convert-rexpr-to-placeholder [rexpr]
   (let [iters (find-iterators rexpr)]
@@ -561,6 +575,8 @@
 (def ^{:private true :dynamic true} *jit-currently-rewriting* nil)
 (def ^{:private true :dynamic true} *jit-rexpr-rewrite-metadata*)
 
+(def ^{:private true :dynamic true} *jit-before-performing-rewrite* (fn [rexpr rewrite]))
+
 (defn jit-metadata []
   (let [r (get @*jit-rexpr-rewrite-metadata* *jit-currently-rewriting*)]
     (if (nil? r)
@@ -642,6 +658,8 @@
                                    ~(:exposed-name arg)))
                              (and (instance? jit-local-variable-rexpr arg) (is-bound-jit? arg))
                              `(make-constant ~(strict-get (local-vars-bound arg) :var-name))
+                             (instance? jit-expression-variable-rexpr arg)
+                             `(make-constant ~(:cljcode arg))
                              :else (do (debug-repl "arg type")
                                        (???)))))))]
       (if (and simplify-result (not (is-multiplicity? rexpr)))
@@ -1097,6 +1115,11 @@
             :constant-value true
             :cljcode-expr true}
 
+           (instance? jit-expression-variable-rexpr (:matched-variable varj))
+           {:type :value
+            :constant-value true
+            :cljcode-expr true}
+
            (instance? jit-local-variable-rexpr (:matched-variable varj))
            {:type :value
             :constant-value false
@@ -1182,6 +1205,10 @@
              {:type :value
               :cljcode-expr (strict-get x :var-name)
               :current-value (strict-get x :current-value)})
+
+           (instance? jit-expression-variable-rexpr (:matched-variable varj))
+           {:type :value
+            :cljcode-expr (:cljcode (:matched-variables varj))}
 
            (instance? jit-exposed-variable-rexpr (:matched-variable varj))
            (let [local-name (gensym 'local-cache)
@@ -1624,6 +1651,7 @@
                [@runtime-checks @currently-bound-variables])))))
 
 (defn- simplify-perform-generic-rewrite [rexpr rewrite]
+  (*jit-before-performing-rewrite* rexpr rewriwte) ;; so we can setup exception handlers if needed
   (let [kw-args (:kw-args rewrite)]
     (cond (contains? kw-args :check)
           (binding [*locally-bound-variables* (merge {'rexpr {:type :rexpr
@@ -2019,13 +2047,8 @@
               (debug-repl "jit in agg op" false)
               (if-not (contains? @metadata :out-var)
                 (make-no-simp-aggregator-op-outer operator result-variable body)
-                (let [outvar (:out-var @metadata)
-                      agg-val-var (gensym 'aggcurval)]
-                  (add-to-generation! (fn [inner]
-                                        `(let* [~agg-val-var (deref ~outvar)]
-                                           ~(inner))))
-
-                  (let [ret (make-no-simp-aggregator-op-partial-result (jit-local-variable-rexpr. agg-val-var)
+                (let [outvar (:out-var @metadata)]
+                  (let [ret (make-no-simp-aggregator-op-partial-result (jit-expression-variable-rexpr. `(deref ~outvar))
                                                                        group-vars
                                                                        body)]
                     (debug-repl "partial agg" false)
