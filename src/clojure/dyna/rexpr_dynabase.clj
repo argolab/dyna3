@@ -6,9 +6,11 @@
   (:require [dyna.user-defined-terms :refer [def-user-term]])
   (:require [dyna.assumptions :refer [make-assumption is-valid? depend-on-assumption invalidate!]])
   (:require [dyna.system :as system])
-  (:require [dyna.rexpr-builtins :refer [def-builtin-rexpr]])
+  (:require [dyna.rexpr-builtins :refer [def-builtin-rexpr is-true?]])
   (:require [clojure.set :refer [subset?]])
-  (:import [dyna DynaTerm Dynabase]))
+  (:import [dyna DynaTerm Dynabase])
+  (:import [dyna.rexpr_builtins is-int-rexpr is-float-rexpr is-number-rexpr is-string-rexpr])
+  (:import [dyna.rexpr unify-structure-rexpr]))
 
 ;; R-exprs which represent construction of dynabases
 ;; dynabases are a prototype styled inheritiance system for dyna
@@ -271,3 +273,41 @@
 
 (defmethod print-method Dynabase [^Dynabase this ^java.io.Writer w]
   (.write w (.toString this)))
+
+
+(defmacro not-dynabase-type [type]
+  `(do
+     (def-rewrite
+       :match {:rexpr ~'(dynabase-constructor _ _ _ (:free Dynabase))
+               :context (~type ~'Dynabase (is-true? ~'_))}
+       :run-at :inference
+       (make-multiplicity 0))
+     (def-rewrite
+       :match {:rexpr (~type (:free ~'Var) ~'Result)
+               :context ~'(dynabase-constructor _ _ _ Var)}
+       :run-at :inference
+       :assigns-variable ~'Result
+       false)
+     (def-rewrite
+       :match {:rexpr ~'(dynabase-access _ (:free Dynabase) _)
+               :context (~type ~'Dynabase (is-true? ~'_))}
+       :run-at :inference
+       (make-multiplicity 0))
+     (def-rewrite
+       :match {:rexpr (~type (:free ~'Var) ~'Result)
+               :context ~'(dynabase-access _ Var _)}
+       :run-at :inference
+       :assigns-variable ~'Result
+       false)))
+
+(not-dynabase-type is-int)
+(not-dynabase-type is-float)
+(not-dynabase-type is-number)
+(not-dynabase-type is-string)
+
+(def-rewrite
+  :match-combines [(or (dynabase-constructor _ _ _ (:free Dynabase))
+                       (dynabase-access _ (:free Dynabase) _))
+                   (unify-structure (:free Dynabase) _ _ _ _)]
+  :run-at :inference
+  (make-multiplicity 0))

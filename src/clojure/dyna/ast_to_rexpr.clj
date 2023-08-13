@@ -203,7 +203,7 @@
                                           arguments))]
         (if all-consts
           (DynaTerm. "$constant" [(DynaTerm. (.name ast) DynaTerm/null_term source-file (vec (map #(get % 0) arguments)))]) ;; if this does not have nested structure, then can optimize and just use a constant structure
-          (DynaTerm. "$quote1" [(DynaTerm. (.name ast) DynaTerm/null_term source-file arguments)]))))))
+          (DynaTerm. "$quote1" [(DynaTerm. (.name ast) DynaTerm/null_term source-file (vec arguments))]))))))
 
 #_(defn- get-all-conjuncts [^DynaTerm ast]
   (if (instance? DynaTerm ast)

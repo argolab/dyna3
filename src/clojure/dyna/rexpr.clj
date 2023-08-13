@@ -1628,7 +1628,7 @@
   :run-at [:construction :standard :inference]
   :assigns-variable out
   (let [dbval (get-value dynabase)
-        arg-vals (map get-value arguments)
+        arg-vals (vec (map get-value arguments))
         sterm (DynaTerm. name-str dbval file-name arg-vals)]
     ;; (when (is-ground? out)
     ;;     (debug-repl "uf1"))
@@ -1644,7 +1644,8 @@
             (not= (.name ^DynaTerm out-val) name-str)
             (not= (.arity ^DynaTerm out-val) (count arguments)))
       (make-multiplicity 0) ;; the types do not match, so this is nothing
-      (let [conj-map (into [] (map (fn [a b] (make-unify a (make-constant b)))
+      (let [conj-map (into [] (map (fn [a b]
+                                     (make-unify a (make-constant b)))
                                    arguments (.arguments ^DynaTerm out-val)))
             ret (make-conjunct [(make-unify dynabase (make-constant (.dynabase ^DynaTerm out-val)))
                                 (make-conjunct conj-map)])]

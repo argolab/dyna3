@@ -680,6 +680,14 @@
                              (catch DynaJITRuntimeCheckFailed ~'_
                                ~materalize-code))))))
 
+(defn- add-unification-failure-checkpoint! [rexpr]
+  (let [materalize-code (generate-cljcode-to-materalize-rexpr rexpr :simplify-result false)]
+    (add-to-generation! (fn [inner]
+                          `(try
+                             ~(inner)
+                             (catch UnificationFailure ~'_
+                               ~materalize-code))))))
+
 (defn- generate-cljcode-fn [final-rexpr]
   `(fn [~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))}) ~'simplify]
      ~(when system/status-counters `(StatusCounters/match_attempt))
@@ -742,16 +750,19 @@
                    (???))
     :value (when-not (contains? value :constant-value)
              (assert (contains? value :current-value)) ;; otherwise we can not have that this will be the same as what it is currently, so it needs to know the currentl value
-             (gen-precondition-to-check `(= ~(:current-value value) ~(:cljcode-expr value))))
+             (gen-precondition-to-check
+              (if (true? (:current-value value))
+                (:cljcode-expr value)
+                `(= ~(:current-value value) ~(:cljcode-expr value)))))
 
-    (???))
+    (???)))
 
-  (defn- concat-code [& args]
-    (let [a (remove #(or (nil? %) (boolean? %) (string? %) (number? %)) (drop-last args))
-          l (last args)]
-      (if (#{:rexpr :rexpr-value :value :rexpr-value-list :rexpr-list} (:type l))
-        (assoc l :cljcode-expr `(let* [] ~@a ~(:cljcode-expr l)))
-        `(let* [] ~@a ~l)))))
+(defn- concat-code [& args]
+  (let [a (remove #(or (nil? %) (boolean? %) (string? %) (number? %)) (drop-last args))
+        l (last args)]
+    (if (#{:rexpr :rexpr-value :value :rexpr-value-list :rexpr-list} (:type l))
+      (assoc l :cljcode-expr `(let* [] ~@a ~(:cljcode-expr l)))
+      `(let* [] ~@a ~l))))
 
 (defn- add-precondition-on-same-value! [value]
   (add-to-generation! (gen-precondition-on-same-value value)))
@@ -1094,9 +1105,18 @@
   (cond (is-constant? v) true
         (contains? @*local-variable-names-for-variable-values* v) true
         (instance? jit-local-variable-rexpr v) false ;; if this is bound, it will be contained in the local-variable-names map
-        (instance? jit-exposed-variable-rexpr v) (let [w (jit-evaluate-cljform `(is-bound? ~v))]
+        (instance? jit-expression-variable-rexpr v) true
+        (instance? jit-exposed-variable-rexpr v) (let [w (jit-evaluate-cljform `(is-bound? ~v))
+                                                       r (get-current-value w)]
                                                    (add-precondition-on-same-value! w)
-                                                   (get-current-value w))
+                                                   (when r
+                                                     ;; if this variable is bound, then we will also get the variable value which
+                                                     ;; will catch the fact that there is some value for this variable.
+                                                     ;; though we might only care that the variable is bound instead of the exact value of the variable
+                                                     ;; I suppose that the is-bound-jit function is only called from internal code,
+                                                     ;; so that should not be that big of an issue.....
+                                                     (jit-evaluate-cljform `(get-value ~v)))
+                                                   r)
         :else (???)))
 
 ;; for expressions which can be evaluated when there is a current value, but otherwise we are not going to know
@@ -1130,7 +1150,7 @@
            (do
              (dyna-assert (:current-value varj))
              {:type :value
-              :cljcode-expr `(is-bound? ~(:cljcode-expr varj))
+              :cljcode-expr `(is-bound-in-context? ~(:cljcode-expr varj) ~'**context**)
               :current-value (is-bound? (:current-value varj))})))))
 
 (set-jit-method
@@ -1801,7 +1821,8 @@
                                     *jit-simplify-rewrites-found* (volatile! #{})
                                     *jit-simplify-rewrites-picked-to-run* (constantly false)
                                     *jit-generate-functions* nil ;; make sure that we do not generate any code from selecting between rewrites
-                                    *local-conjunctive-rexprs-for-infernece* top-conjuncts]
+                                    *local-conjunctive-rexprs-for-infernece* top-conjuncts
+                                    *local-variable-names-for-variable-values* (volatile! @*local-variable-names-for-variable-values*)]
                             (let [nr (simplify-jit-internal-rexpr r)]
                               (dyna-assert (= r nr)) ;; we did not pick anything to run, so the result should be the same
                               @*jit-simplify-rewrites-found*))]
@@ -1821,27 +1842,34 @@
                                            (:simplify-call-counter rr)))
                                       possible-rewrites)]
         (when (> (count picked-rr-order) 1)
+          ;(debug-repl "multiple possible rewrites")
           (println "multiple possible"))
         (if (empty? picked-rr-order)
-          r
+          (do
+            (when-not (empty? possible-rewrites)
+              (debug-repl "rewrites did nothing" false))
+            r)
           (let [picked-cc (second (first picked-rr-order))
                 nr (binding [*jit-simplify-rewrites-picked-to-run* (fn [rr-md]
                                                                      (and (= (:simplify-call-counter rr-md) (:simplify-call-counter picked-cc))
                                                                           (= (:matching-vars rr-md) (:matching-vars picked-cc))
                                                                           (= (:kw-args rr-md) (:kw-args picked-cc))))
-                             *jit-simplify-call-counter* (volatile! 0)
-                             *jit-simplify-rewrites-found* (volatile! #{})
                              *local-conjunctive-rexprs-for-infernece* top-conjuncts]
-                     (let [nr-unification-failure (binding [*jit-compute-unification-failure* true]
-                                                    (simplify-jit-internal-rexpr r))
-                           nr (simplify-jit-internal-rexpr r)]
-                       (when (and (not= nr nr-unification-failure) (not (is-empty-rexpr? nr-unification-failure)))
-                         (debug-repl "unification failure different" false)
-                         (???))
-                       (add-return-rexpr-checkpoint! nr)
-                       (debug-repl "result of doing rewrite" false)
-                       nr
-                       ))]
+                     (let [nr-unification-failure (binding [*jit-compute-unification-failure* true
+                                                            *jit-simplify-call-counter* (volatile! 0)
+                                                            *jit-simplify-rewrites-found* (volatile! #{})]
+                                                    (simplify-jit-internal-rexpr r))]
+                       (add-unification-failure-checkpoint! nr-unification-failure)
+                       (let [nr (binding [*jit-simplify-call-counter* (volatile! 0)
+                                          *jit-simplify-rewrites-found* (volatile! #{})]
+                                  (simplify-jit-internal-rexpr r))]
+                         #_(when (and (not= nr nr-unification-failure) (not (is-empty-rexpr? nr-unification-failure)))
+                           (debug-repl "unification failure different" false)
+                           (???))
+                         (add-return-rexpr-checkpoint! nr)
+                         ;(debug-repl "result of doing rewrite" false)
+                         nr
+                         )))]
             (if (not= nr r)
               nr
               (recur (rest picked-rr-order)))))))))
@@ -1856,7 +1884,7 @@
         (recur nr)
         nr))))
 
-(defn- simplify-jit-recursive-call [rexpr] )
+#_(defn- simplify-jit-recursive-call [rexpr] )
 
 
 
@@ -2051,7 +2079,7 @@
             (do
               ;; this is some partially evaluated expression, which will then have to figure out if there is something which could
               ;; allow for it
-              (debug-repl "jit in agg op" false)
+              ;(debug-repl "jit in agg op" false)
               (if-not (contains? @metadata :out-var)
                 (make-no-simp-aggregator-op-outer operator result-variable body)
                 (let [outvar (:out-var @metadata)]
@@ -2113,13 +2141,14 @@
           (when-not (is-empty-rexpr? r)
             (conj! ret-children [r @new-binding])))))
     (when @changed
-      (let [ret (persistent! ret-children)]
+      (let [ret (persistent! ret-children)
+            retd (make-disjunct (vec (map first ret)))]
+        ;(debug-repl "disjunct match")
         (when-not (empty? handle-disjunct)
-          (debug-repl "disjunct match")
           (???))
         ;; this will become a disjunct-op if we use the normal make-disjunct here, and we don't want to have to deal
         ;; when thtat kind of disjunct
-        (make-disjunct (vec (map first ret)))))))
+        retd))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

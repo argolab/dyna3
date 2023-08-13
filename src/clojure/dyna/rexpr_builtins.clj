@@ -873,8 +873,7 @@
 
 (def-rewrite
   :match-combines [(is-int (:free Var) (is-true? _))
-                   (or (lessthan (:free Var) (:ground Upper) (is-true? _))
-                       (lessthan-eq (:free Var) (:ground Upper) (is-true? _)))
+                   (lessthan (:free Var) (:ground Upper) (is-true? _))
                    (or (lessthan (:ground Lower) (:free Var) (is-true? _))
                        (lessthan-eq (:ground Lower) (:free Var) (is-true? _)))]
   :run-at :inference
@@ -884,6 +883,21 @@
               (make-constant 1)
               Var
               (make-constant true)))
+
+(def-rewrite
+  :match-combines [(is-int (:free Var) (is-true? _))
+                   (lessthan-eq (:free Var) (:ground Upper) (is-true? _))
+                   (or (lessthan (:ground Lower) (:free Var) (is-true? _))
+                       (lessthan-eq (:ground Lower) (:free Var) (is-true? _)))]
+  :run-at :inference
+  :infers
+  (make-range (make-constant (round-down (get-value Lower)))
+              (make-constant (round-up (+ 1 (get-value Upper)))) ;; the upper bound is non-inclusive, so we need to +1 in the case of <= for upper
+              (make-constant 1)
+              Var
+              (make-constant true)))
+
+
 
 (defmacro incompatible-types [type1 type2]
   `(do
@@ -912,7 +926,8 @@
        :match {:rexpr (~type ~'(:free Var) ~'(:any Result))
                :context ~'(unify-structure Var _ _ _ _)}
        :run-at :inference
-       (make-unify ~'Result (make-constant false)))
+       :assigns-variable ~'Result
+       false)
      (def-rewrite
        :match {:rexpr ~'(unify-structure (:free Var) _ _ _ _)
                :context (~type ~'Var (is-true? ~'_))}

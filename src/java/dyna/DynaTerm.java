@@ -3,7 +3,8 @@ package dyna;
 import clojure.java.api.Clojure;
 import clojure.lang.IFn;
 import clojure.lang.ILookup;
-import java.util.concurrent.atomic.AtomicLong;
+import clojure.lang.IPending;
+//import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
 
 
@@ -28,6 +29,7 @@ public final class DynaTerm implements ILookup {
         this.dynabase = null_term;
         this.from_file = null;
         this.arguments = arguments;
+        check_arguments();
     }
 
     public DynaTerm(String name, Object dynabase, Object from_file, Object arguments) {
@@ -38,6 +40,7 @@ public final class DynaTerm implements ILookup {
         this.dynabase = dynabase;
         this.from_file = from_file;
         this.arguments = arguments;
+        check_arguments();
     }
 
     private DynaTerm() {
@@ -46,6 +49,23 @@ public final class DynaTerm implements ILookup {
         this.dynabase = this;
         this.from_file = null;
         this.arguments = new Object[]{};
+    }
+
+    private void check_arguments() {
+        if(arguments instanceof IPending)
+            throw new IllegalArgumentException("Should not have a pending type for DynaTerm arguments");
+        // try {
+        //     //final int c = arity();
+        //     /*for(int i = 0; i < c; i++) {
+        //         if(get(i) == null) {
+        //             System.err.println("null in term arguments");
+        //             //throw new RuntimeException("null in term arguments");
+        //         }
+        //         }*/
+        // } catch(Exception err) {
+        //     System.err.println(err);
+        //     //throw new RuntimeException(err);
+        // }
     }
 
     public static boolean include_filename_in_print = false;
