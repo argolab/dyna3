@@ -139,7 +139,7 @@
         (is (= 1 (ctx-get-value ctx (make-variable 'result))))))))
 
 (deftest basic-jit8
-  (let [rexpr (make-aggregator "=" (make-variable 'result) (make-variable 'incoming) true
+  (let [rexpr (make-aggregator "+=" (make-variable 'result) (make-variable 'incoming) true
                                (make-disjunct [(make-conjunct [(make-unify (make-variable 'X) (make-variable 'incoming))
                                                                (make-lessthan (make-variable 'X) (make-constant 10) (make-constant true))])
                                                (make-conjunct [(make-times (make-variable 'X) (make-constant 3) (make-variable 'incoming))
@@ -155,6 +155,7 @@
             ctx (context/make-empty-context rr)]
         (tbinding [generate-new-jit-rewrites true]
           (let [res2 (context/bind-context-raw ctx (simplify-fully rr))]
+            (debug-repl "test")
             (is (= y (ctx-get-value ctx (make-variable 'result))))))))))
 
 #_(deftest jit-memoization1

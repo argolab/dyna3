@@ -136,6 +136,8 @@ $value(&$with_key(R, K)) := R.
 :- make_system_term $value/1.
 
 
+% $map_keys defined in rexpr_builtins.clj
+% it returns a list of all of the keys contained in the map
 
 map_to_list_rec(Map, []) = [].
 map_to_list_rec(Map, [K|Rest]) = [V | map_to_list_rec(Map, Rest)] for Map = {K -> V | _}.
