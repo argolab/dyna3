@@ -112,7 +112,7 @@
 (defmethod print-method jit-exposed-variable-rexpr [^jit-exposed-variable-rexpr this ^java.io.Writer w]
   (.write w (.toString this)))
 
-(defrecord jit-placeholder-variable-rexpr [^RexprValueVariable wrapped]
+#_(defrecord jit-placeholder-variable-rexpr [^RexprValueVariable wrapped]
   RexprValueVariable
   (get-value [this] (get-value wrapped))
   (get-value-in-context [this ctx] (get-value-in-context wrapped ctx))
@@ -128,10 +128,10 @@
 ;; the iterables should be something like which variables and their orders can be
 (def-base-rexpr jit-placeholder [:unchecked external-name ;; non-nil if accessed via the passed in rexpr
                                  :unchecked local-name ;; if partially rewritten, and now held in a local variable, then non-nil
-                                 :var-map placeholder-vars
+                                 :var-list placeholder-vars
                                  ]
-  (exposed-variables [this]
-                     (set (map ->jit-placeholder-variable-rexpr (filter is-variable? (vals placeholder-vars))))))
+  #_(exposed-variables [this]
+                       (set (map ->jit-placeholder-variable-rexpr (filter is-variable? (vals placeholder-vars))))))
 
 (defn- convert-to-primitive-rexpr [rexpr]
   ;; Not 100% sure if this method is really needed anymore, it seems like is essentially doing nothing
@@ -175,14 +175,16 @@
                                                             [(cons :body path) v]))
                                                  (when (contains? child-uses (:incoming rexpr))
                                                    {(list :incoming) {:hidden-var (:incoming rexpr)}})))
-        (is-jit-placeholder? rexpr) (let []
-                                      {() rexpr})
+        (is-jit-placeholder? rexpr) (merge
+                                     {() rexpr}
+                                     (into {} (for [[i v] (zipseq (range) (:placeholder-vars rexpr))]
+                                                [(list :placeholder-vars `(nth ~i)) v])))
 
         :else
         (let [litems (rexpr-map-function-with-access-path rexpr
                                                           (fn fr [fname ftype val]
                                                             (case ftype
-                                                              :rexpr (if (is-jit-placeholder? val)
+                                                              :rexpr (if false;(is-jit-placeholder? val)
                                                                        [[(list fname) val]] ;; this is a base case, so we stop
                                                                        ;; then we are going to keep going
                                                                        (for [[path v] (get-variables-and-path val)]
@@ -253,8 +255,9 @@
                                                  ret)
 
                (is-jit-placeholder? rexpr) (let []
-
-                                             )
+                                             (assert (:external-name rexpr)) ;; the primitive-rexpr code is only call on the instance of the R-expr
+                                             ;; so we can just return its value directly
+                                             (:external-name rexpr))
 
                :else (let [rname (rexpr-name rexpr)
                            sig (@rexpr-containers-signature rname)]
@@ -347,8 +350,7 @@
   ;; (argument) into a single synthic R-expr.  This is not going to evaluate the code and do the conversion
 
   (let [prim-rexpr (convert-to-primitive-rexpr rexpr)
-        exposed-vars (set (remove #(instance? jit-placeholder-variable-rexpr %)
-                                  (filter is-variable? (exposed-variables rexpr))))
+        exposed-vars (set (filter is-variable? (exposed-variables rexpr)))
         placeholder-rexprs (set (get-placeholder-rexprs rexpr))
         root-rexpr (gensym 'root) ;; the variable which will be the argument for the conversions
         vars-path (get-variables-and-path rexpr)
@@ -378,26 +380,27 @@
                             (defmethod rexpr-printer ~(symbol (str new-rexpr-name "-rexpr")) ~'[r]
                               (rexpr-printer (primitive-rexpr ~'r))))
         conversion-function-expr `(fn [~root-rexpr]
-                                   (let ~var-gen-code ;; this is going to get access to all of the
-                                     ;; this will check that we have all of the arguments (non-nil) and that the constant values are the same as what we expect
-                                     (when (and ~@(for [[vpath val] vars-path]
-                                                    (cond (is-constant? val) `(= ~(strict-get var-access vpath) ~val)
-                                                          (is-variable? val) `(not (nil? ~(strict-get var-access vpath)))
-                                                          (rexpr? val) `(rexpr? ~(strict-get var-access vpath))
-                                                          :else (do (debug-repl "zz")
-                                                                    (???)))))
-                                       (~(symbol (str "make-" new-rexpr-name))
-                                        ~@(for [a new-arg-order]
-                                            (strict-get var-access
-                                                        (strict-get (into {} (for [[k v] vars-path] [v k]))
-                                                                    (get new-arg-names-rev a))))))))
+                                    (let ~var-gen-code ;; this is going to get access to all of the
+                                      ;; this will check that we have all of the arguments (non-nil) and that the constant values are the same as what we expect
+                                      (when (and ~@(for [[vpath val] vars-path]
+                                                     (cond (is-constant? val) `(= ~(strict-get var-access vpath) ~val)
+                                                           (is-variable? val) `(not (nil? ~(strict-get var-access vpath)))
+                                                           (rexpr? val) `(rexpr? ~(strict-get var-access vpath))
+                                                           :else (do (debug-repl "zz")
+                                                                     (???)))))
+                                        (~(symbol (str "make-" new-rexpr-name))
+                                         ~@(for [a new-arg-order]
+                                             (strict-get var-access
+                                                         (strict-get (into {} (for [[k v] vars-path] [v k]))
+                                                                     (get new-arg-names-rev a))))))))
+        zzz (debug-repl "zzz")
         ret {:orig-rexpr rexpr
              :prim-rexpr prim-rexpr
              :generated-name new-rexpr-name
              :make-rexpr-type rexpr-def-expr
              :conversion-function-expr conversion-function-expr
              :variable-name-mapping new-arg-names ;; map from existing-name -> new jit-name
-             :variable-order new-arg-order        ;; the order of jit-names as saved in the R-expr
+             :variable-order new-arg-order ;; the order of jit-names as saved in the R-expr
              :prim-rexpr-placeholders (primitive-rexpr-with-placeholders prim-rexpr new-arg-names)
              ;; ;; should the conversion function have that there is some expression.  In the case that it might result in some of
              ;; ;; if there is something which is giong to construct this value, though there might
@@ -468,8 +471,22 @@
                                                        exposed (exposed-variables rexpr)]
                                                    ;; then there are 8 or more disjuncts contained in the trie, so we are not going to compile this
                                                    ;; and instead leave it as a hash table
+
+                                                   ;; this is going to need to figure out which variables it cares about inside of the placeholder.  The placeholder
+                                                   ;; variables that it identifies will matter, so if it changes it to the "order" of the variables,
+                                                   ;; then those are going to have to handle the different expressions which are present
+                                                   ;; though if the variables are not present in the other parts of the expression
+
+                                                   ;; I suppose that it could also have that those other variables are going to figure out which
+
+                                                   ;; I suppose that disjunct and aggregators need to know which variables they are over.
+                                                   ;; but if the variable does not contain the right expression
+                                                   ;; I suppose that the order in which variables appear in the jit-hole would possibly allow for different expressions
+                                                   ;; the issue would mostly be around if the conversion happens twice, and the two states become aliased incorrectly.
+                                                   ;; How those states would become aliased, it might identify that some of the states will
+
                                                    (vswap! pl assoc id rexpr)
-                                                   (make-jit-placeholder id nil (into {} (for [e exposed] [e e]))))
+                                                   (make-jit-placeholder id nil (vec exposed)))
                                                  (let [;; there are 8 or less elements in the trie, so we are going to convert it to a the basic disjunct
                                                        ;; and then add that into the compilation
                                                        new-disjuncts (vec (for [[vals rx] elems
@@ -488,7 +505,7 @@
                        ;; aggregation to handle its children?  Though those will be
                        ;; their own independent compilation units
                        (vswap! pl assoc id rexpr)
-                       (make-jit-placeholder id nil (into {} (for [e exposed] [e e])))))
+                       (make-jit-placeholder id nil (vec exposed))))
                    (rewrite-rexpr-children-no-simp rexpr rr))))
           nr (rp rexpr)
           [synthed _] (synthize-rexpr nr)]
@@ -1155,7 +1172,7 @@
                                                      ;; so that should not be that big of an issue.....
                                                      (jit-evaluate-cljform `(get-value ~v)))
                                                    r)
-        (instance? jit-placeholder-variable-rexpr v) (is-bound-jit? (:wrapped v))
+        ;(instance? jit-placeholder-variable-rexpr v) (is-bound-jit? (:wrapped v))
 
         :else (do
                 (debug-repl "unknown bound")
