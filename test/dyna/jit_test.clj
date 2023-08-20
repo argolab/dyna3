@@ -155,17 +155,32 @@
             ctx (context/make-empty-context rr)]
         (tbinding [generate-new-jit-rewrites true]
           (let [res2 (context/bind-context-raw ctx (simplify-fully rr))]
-            (debug-repl "test")
             (is (= y (ctx-get-value ctx (make-variable 'result))))))))))
 
+(deftest basic-jit9
+  (let [rexpr (make-aggregator "+=" (make-variable 'result) (make-variable 'incoming) true
+                               (make-disjunct (vec (for [i (range 0 100)]
+                                                     (make-conjunct [(make-lessthan-eq (make-variable 'X) (make-constant i) (make-constant true))
+                                                                     (make-unify (make-variable 'incoming) (make-constant i))])))))
+        synth-rexpr (tbinding [system/generate-new-jit-states true]
+                              (convert-to-jitted-rexpr rexpr))]
+    (doseq [i (range 0 100 5)]
+      (let [rr (make-conjunct [(make-unify (make-variable 'X) (make-constant i))
+                               synth-rexpr])
+            ctx (context/make-empty-context rr)]
+        (tbinding [generate-new-jit-rewrites true]
+                  (let [res2 (context/bind-context-raw ctx (simplify-fully rr))]
+                    (debug-repl "test")
+                    (is (= (/ (* i (+ i 1)) 2) (ctx-get-value ctx (make-variable 'result))))))))))
+
 #_(deftest jit-memoization1
-  (let [system (system/make-new-dyna-system)]
-    (system/run-under-system
-     system
-     (tbinding
-      [generate-new-
-       generate-new-jit-rewrites true]
-      (eval-string "
+    (let [system (system/make-new-dyna-system)]
+      (system/run-under-system
+       system
+       (tbinding
+        [generate-new-
+         generate-new-jit-rewrites true]
+        (eval-string "
 fib(N) := fib(N-1)+fib(N-2) for N > 1.
 fib(1) := 1.
 fib(0) := 0.

@@ -112,34 +112,26 @@
 (defmethod print-method jit-exposed-variable-rexpr [^jit-exposed-variable-rexpr this ^java.io.Writer w]
   (.write w (.toString this)))
 
+(defrecord jit-placeholder-variable-rexpr [^RexprValueVariable wrapped]
+  RexprValueVariable
+  (get-value [this] (get-value wrapped))
+  (get-value-in-context [this ctx] (get-value-in-context wrapped ctx))
+  (set-value! [this value] (set-value! wrapped value))
+  (set-value-in-context! [this ctx value] (set-value-in-context! wrapped ctx value))
+  (is-bound? [this] (is-bound? wrapped))
+  (is-bound-in-context? [thix ctx] (is-bound-in-context? wrapped ctx))
+  (all-variables [this] #{wrapped})
+  (get-representation-in-context [this ctx] (get-representation-in-context wrapped ctx))
+  Object
+  (toString [this] (str "(jit-placeholder-variable-rexpr " wrapped ")")))
+
 ;; the iterables should be something like which variables and their orders can be
-(def-base-rexpr jit-placeholder [:unchecked placeholder-id
+(def-base-rexpr jit-placeholder [:unchecked external-name ;; non-nil if accessed via the passed in rexpr
+                                 :unchecked local-name ;; if partially rewritten, and now held in a local variable, then non-nil
                                  :var-map placeholder-vars
-                                 ;:unchecked placeholder-iterables
-                                 ]) ;; which things are iterable will probably need more information about the iterators, or maybe just don't support having iterators be outside of the JIT expression.  Though I suppose that this is likely to happen in the case that there is a disjunct/memoized expression.  Those are things we we do not want to handle.  So there might be a lot of stuff which is not going to get handled directly....sigh
-
-
-;; a disjunct inside of the jit would have to have some identifier to track
-;; which of the branches are still active?  The disjunct id will uniquely
-;; identify this disjunct as it gets rewritten,
-;; (def-base-rexpr jit-disjunct [:unchecked disjunct-id
-;;                               :rexpr-list children])
-
-;; (def-rewrite
-;;   :match (jit-disjunct disjunct-id (:rexpr-list children))
-;;   :run-at :standard
-;;   (do
-;;     (debug-repl "should not happen, attempting to simplify jit-disjunct")
-;;     (???)))
-
-#_(defn convert-rexpr-to-placeholder [rexpr]
-  (let [iters (find-iterators rexpr)]
-    (make-jit-placeholder (gensym 'rexpr-placeholder)
-                          (vec (exposed-variables rexpr))
-
-                          iters; (???) ;; need to build some representation of which variables could be iterated here.  there might be something
-                          ;; about how efficient the different iterators are going to work.  In which case
-                          )))
+                                 ]
+  (exposed-variables [this]
+                     (set (map ->jit-placeholder-variable-rexpr (filter is-variable? (vals placeholder-vars))))))
 
 (defn- convert-to-primitive-rexpr [rexpr]
   ;; Not 100% sure if this method is really needed anymore, it seems like is essentially doing nothing
@@ -162,12 +154,6 @@
         z (if (is-jit-placeholder? c) [c] (get-placeholder-rexprs c))]
     z))
 
-#_(defn get-rexpr-arg-map [rexpr]
-  (let [rtype (rexpr-name rexpr)
-        signature (get @rexpr-containers-signature rtype)
-        args (get-arguments rexpr)]
-    (zipmap (map cdar signature) args)))
-
 (defn- get-variables-and-path [rexpr]
   (cond (is-proj? rexpr) (let [body-path (get-variables-and-path (:body rexpr))
                                var (:var rexpr)
@@ -189,6 +175,9 @@
                                                             [(cons :body path) v]))
                                                  (when (contains? child-uses (:incoming rexpr))
                                                    {(list :incoming) {:hidden-var (:incoming rexpr)}})))
+        (is-jit-placeholder? rexpr) (let []
+                                      {() rexpr})
+
         :else
         (let [litems (rexpr-map-function-with-access-path rexpr
                                                           (fn fr [fname ftype val]
@@ -198,10 +187,9 @@
                                                                        ;; then we are going to keep going
                                                                        (for [[path v] (get-variables-and-path val)]
                                                                          [(cons fname path) v]))
-                                                              :rexpr-list (do (assert (not (is-jit-placeholder? val)))
-                                                                              (for [[i r] (zipseq (range) val)
-                                                                                    [rp rr] (fr `(nth ~i) :rexpr r)]
-                                                                                [(cons fname rp) rr]))
+                                                              :rexpr-list (for [[i r] (zipseq (range) val)
+                                                                                [rp rr] (fr `(nth ~i) :rexpr r)]
+                                                                            [(cons fname rp) rr])
                                                               :var [[(list fname) val]]
                                                               :value [[(list fname) val]]
                                                               :var-list (for [[i v] (zipseq (range) val)]
@@ -264,6 +252,10 @@
                                                          ~body))]
                                                  ret)
 
+               (is-jit-placeholder? rexpr) (let []
+
+                                             )
+
                :else (let [rname (rexpr-name rexpr)
                            sig (@rexpr-containers-signature rname)]
                        `(~(symbol "dyna.rexpr-constructors" (str "make-no-simp-" rname))
@@ -272,12 +264,14 @@
          (is-variable? rexpr) (strict-get varmap rexpr)
          (= typ :rexpr-list) (into [] (map #(primitive-rexpr-cljcode varmap % :rexpr) rexpr))
          (= typ :var-list) (into [] (map #(primitive-rexpr-cljcode varmap % :var) rexpr))
+         (= typ :var-map) (into {} (for [[k var] rexpr]
+                                     [k (primitive-rexpr-cljcode varmap var :var)]))
          (instance? Aggregator rexpr) (with-meta (symbol "dyna.rexpr-aggregators" (str "defined-aggregator-" (:name rexpr)))
                                         {:tag "dyna.rexpr_aggregators.Aggregator"})
          ;`(get @dyna.rexpr-aggregators/aggregators ~(:name rexpr)) ;; this is a object which is reference, hence we can not embed it in the code directlty, and instead will use this to look up the aggregator
 
          (nil? rexpr) nil
-         (#{:str :file-name :mult} typ) rexpr
+         (#{:str :file-name :mult :unchecked} typ) rexpr
          :else (do
                  (debug-repl "unknown mapping to constructor")
                  (???)))))
@@ -316,10 +310,18 @@
                                ]
                            ret)
 
+                         (is-jit-placeholder? v)
+                         (let []
+                           v ;; this will just keep the placeholder expression in the resulting R-expr
+                           )
+
                          :else (rewrite-all-args v #(rf %1 %2 args)))
 
                    (= typ :rexpr-list) (into [] (map #(rf :rexpr % args) v))
                    (= typ :var-list) (into [] (map #(rf :var % args) v))
+                   (= typ :var-map) (into {} (for [[k var] v]
+                                               [k (rf :var var args)]))
+
 
                    (#{:str :unchecked :file-name :mult} typ) (let []
                                                                (assert (and (not (rexpr? v))
@@ -345,18 +347,18 @@
   ;; (argument) into a single synthic R-expr.  This is not going to evaluate the code and do the conversion
 
   (let [prim-rexpr (convert-to-primitive-rexpr rexpr)
-        exposed-vars (into #{} (filter is-variable? (exposed-variables rexpr)))
-        placeholder-rexprs (into #{} (get-placeholder-rexprs rexpr))
+        exposed-vars (set (remove #(instance? jit-placeholder-variable-rexpr %)
+                                  (filter is-variable? (exposed-variables rexpr))))
+        placeholder-rexprs (set (get-placeholder-rexprs rexpr))
         root-rexpr (gensym 'root) ;; the variable which will be the argument for the conversions
         vars-path (get-variables-and-path rexpr)
         [var-access var-gen-code] (get-variables-values-letexpr root-rexpr (keys vars-path))  ;; this might have to handle exceptions which are going to thrown by the
         new-rexpr-name (gensym 'jit-rexpr)
         new-arg-names (merge (into {} (map (fn [v] [v (gensym 'jv)]) exposed-vars))
-                             (into {} (map (fn [r] [r (gensym 'jr)]) placeholder-rexprs)))
+                             (into {} (map (fn [r] [r (:external-name r)]) placeholder-rexprs)))
         new-arg-names-rev (into {} (for [[k v] new-arg-names]
                                      [v k]))
         new-arg-order (vec (vals new-arg-names))
-
         rexpr-def-expr `(do (def-base-rexpr ~new-rexpr-name [~@(flatten (for [a new-arg-order
                                                                               :let [v (get new-arg-names-rev a)]]
                                                                           (cond (rexpr? v) [:rexpr a]
@@ -375,7 +377,6 @@
                                ~(primitive-rexpr-cljcode new-arg-names prim-rexpr)))
                             (defmethod rexpr-printer ~(symbol (str new-rexpr-name "-rexpr")) ~'[r]
                               (rexpr-printer (primitive-rexpr ~'r))))
-
         conversion-function-expr `(fn [~root-rexpr]
                                    (let ~var-gen-code ;; this is going to get access to all of the
                                      ;; this will check that we have all of the arguments (non-nil) and that the constant values are the same as what we expect
@@ -463,10 +464,12 @@
                                                    elems (take 11 (trie/trie-get-values trie nil))
                                                    all-ground (every? (fn [z] (every? #(not (nil? %)) z)) (map first elems))]
                                                (if (or (> (count elems) 8) all-ground)
-                                                 (let []
+                                                 (let [id (gensym 'jr)
+                                                       exposed (exposed-variables rexpr)]
                                                    ;; then there are 8 or more disjuncts contained in the trie, so we are not going to compile this
                                                    ;; and instead leave it as a hash table
-                                                   (???))
+                                                   (vswap! pl assoc id rexpr)
+                                                   (make-jit-placeholder id nil (into {} (for [e exposed] [e e]))))
                                                  (let [;; there are 8 or less elements in the trie, so we are going to convert it to a the basic disjunct
                                                        ;; and then add that into the compilation
                                                        new-disjuncts (vec (for [[vals rx] elems
@@ -478,18 +481,36 @@
                                                    ret)))
 
                      :else
-                     (let [id (count @pl)
+                     (let [id (gensym 'jr)
                            exposed (exposed-variables rexpr)]
                        ;; should the nested expressions also become JITted?  In the
                        ;; case of an aggregator, we might want to pass through the
                        ;; aggregation to handle its children?  Though those will be
                        ;; their own independent compilation units
-                       (make-jit-placeholder id (into {} (for [e exposed] [e e])))))
+                       (vswap! pl assoc id rexpr)
+                       (make-jit-placeholder id nil (into {} (for [e exposed] [e e])))))
                    (rewrite-rexpr-children-no-simp rexpr rr))))
           nr (rp rexpr)
           [synthed _] (synthize-rexpr nr)]
-      ;(debug-repl "TODO")
-      synthed)))
+      (if-not (empty? @pl)
+        (let [synthed-holes
+              (into {}
+                    (for [[key rr] @pl
+                          :when (is-disjunct-op? rr)]
+                      ;; this is going to attempt to jit all of the bodies of the disjunct.  I suppose that this should have some threshold for if this is going
+                      ;; to be useful?  Or if this should figure out if there is going to be some other expression
+                      [key
+                       (if (is-disjunct-op? rr)
+                         (rewrite-rexpr-children rr convert-to-jitted-rexpr-fn)
+                         rr)]))
+              ret (rewrite-rexpr-children synthed
+                                          (fn [r]
+                                            (if (is-jit-placeholder? r)
+                                              (strict-get synthed-holes (:external-name r))
+                                              r)))]
+          ;(debug-repl "handle holes")
+          ret)
+        synthed))))
 
 (intern 'dyna.rexpr-constructors 'convert-to-jitted-rexpr convert-to-jitted-rexpr-fn)
 
@@ -1134,7 +1155,11 @@
                                                      ;; so that should not be that big of an issue.....
                                                      (jit-evaluate-cljform `(get-value ~v)))
                                                    r)
-        :else (???)))
+        (instance? jit-placeholder-variable-rexpr v) (is-bound-jit? (:wrapped v))
+
+        :else (do
+                (debug-repl "unknown bound")
+                (???))))
 
 ;; for expressions which can be evaluated when there is a current value, but otherwise we are not going to know
 ;; what the expression returns
@@ -2099,6 +2124,9 @@
                    (:remains Rbody1)
                    Rbody1)]
     (vswap! metadata update :outer-call-count (fnil inc 0))
+    (vswap! metadata assoc :operator operator)
+    (when (nil? (:current-out-var @metadata))
+      (vswap! metadata assoc :current-out-var (volatile! nil)))
     (when (and (empty? @metadata) (is-aggregator-op-partial-result? Rbody1))
       (when-not (contains? @metadata :group-vars)
         (vswap! metadata assoc :group-vars (:group-vars Rbody1)))
@@ -2180,10 +2208,19 @@
                 combine-fn (jit-evaluate-cljform `(. ~operator combine-ignore-nil))]
             (assert (= body (make-multiplicity 1))) ;; TODO handle other mults here, this is going to have to contribute more than once
             (if (empty? (:group-vars @*jit-aggregator-info*))
-              (add-to-generation! `(vswap! ~out-var ~(:cljcode-expr combine-fn) ~(:cljcode-expr incoming-val)))
-              (add-to-generation! `(vswap! ~out-var update-in [~@(map :cljcode-expr (map jit-evaluate-cljform (:group-vars @*jit-aggregator-info*)))]
-                                           ~(:cljcode-expr combine-fn) ~(:cljcode-expr incoming-val)))
-              )  ;; TODO this needs to handle the different values for this
+              (do
+                (add-to-generation! `(vswap! ~out-var ~(:cljcode-expr combine-fn) ~(:cljcode-expr incoming-val)))
+                (vswap! (:current-out-var @*jit-aggregator-info*)
+                        (. operator combine-ignore-nil)
+                        (get-current-value incoming-val)))
+              (let [path (map jit-evaluate-cljform (:group-vars @*jit-aggregator-info*))]
+                (add-to-generation! `(vswap! ~out-var update-in [~@(map :cljcode-expr path)]
+                                             ~(:cljcode-expr combine-fn) ~(:cljcode-expr incoming-val)))
+                (vswap! (:current-out-var @*jit-aggregator-info*)
+                        update-in
+                        (map :current-value path)
+                        (. operator combine-ignore-nil)
+                        (get-current-value incoming-val))))  ;; TODO this needs to handle the different values for this
             ;(debug-repl "handle jit agg op inner")
             (make-multiplicity 0) ;; this has already been handled, so we can remove it from the R-expr
             )
@@ -2247,14 +2284,14 @@
 
 
 (def-rewrite
-  :match (jit-placeholder _ _)
+  :match (jit-placeholder _ _ _)
   :run-at :standard
   (do
     (debug-repl "should not happen, attempting to simplify jit-placeholder")
     (???)))
 
 (def-rewrite
-  :match (jit-placeholder placeholder-id placeholder-vars)
+  :match (jit-placeholder _ _ _)
   :run-at :jit-compiler
   (do
     (debug-repl "jit placeholder internal")
