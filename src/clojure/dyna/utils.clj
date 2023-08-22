@@ -432,6 +432,10 @@
     (= n 0) (rest coll)
     :else (cons (first coll) (lazy-seq (drop-nth (rest coll) (- n 1))))))
 
+(defn subselect-list [coll]
+  (for [[i v] (zipseq (range) coll)]
+    [v (drop-nth coll i)]))
+
 (defn only [x] {:pre [(nil? (next x))]} (first x))
 
 

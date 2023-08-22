@@ -207,7 +207,7 @@
                                                                 (???)))))]
           (into {} (apply concat (vals litems))))))
 
-(defn- get-variables-values-letexpr [root-var vars-path]
+#_(defn- get-variables-values-letexpr [root-var vars-path]
   ;; construct the vector arguments of a let expression with something which will be able to return all of the different values
   (let [so-far (transient {})
         gen-code (transient [])
@@ -345,6 +345,145 @@
     (rf :rexpr rexpr (into {} (for [[k v] new-arg-names]
                                 [k (jit-exposed-variable-rexpr. v)])))))
 
+(declare ^{:private true}
+         generate-conversion-function-matcher
+         generate-unordered-list-matcher)
+
+(defn- generate-unordered-list-matcher [matching-against-var
+                                        matching-value
+                                        values-to-vars
+                                        inner-function]
+  (case (count matching-value)
+    0 (inner-function values-to-vars)
+    1 (let [elemv (gensym 'elemv)]
+        `(let [~elemv (first ~matching-against-var)]
+           ~(generate-conversion-function-matcher elemv
+                                                  (first matching-value)
+                                                  values-to-vars
+                                                  inner-function)))
+    (let [elemv (gensym 'elemv)
+          otherv (gensym 'otherv)]
+      `(for [[~elemv ~otherv] (subselect-list ~matching-against-var)
+             ret# ~(generate-conversion-function-matcher elemv
+                                                         (first matching-value)
+                                                         values-to-vars
+                                                         (fn [values-to-vars]
+                                                           (generate-unordered-list-matcher otherv
+                                                                                            (rest matching-value)
+                                                                                            values-to-vars
+                                                                                            inner-function)))]
+         ret#))))
+
+(defn- generate-conversion-function-matcher [matching-against-var
+                                             matching-value
+                                             values-to-vars
+                                             inner-function]
+  (cond
+    (or (is-conjunct? matching-value)
+        (is-disjunct? matching-value))
+    (let [argv (gensym 'argv)]
+      `(when (~(if (is-conjunct? matching-value) 'is-conjunct? 'is-disjunct?) ~matching-against-var)
+         (let [~argv (:args ~matching-against-var)]
+           (when (= (count ~argv) ~(count (:args matching-value)))
+             ~(generate-unordered-list-matcher argv
+                                               (:args matching-value)
+                                               values-to-vars
+                                               inner-function)))))
+
+    (is-jit-placeholder? matching-value)
+    (let [values-to-vars (assoc values-to-vars matching-value matching-against-var)
+          exposed (gensym 'exposed)]
+      ;; the matching against the local R-expr should maybe happen first, and then it could do additional matching against anything which is a jit placeholder
+      ;; this will have that the number of variables which are in the placeholder will identify some of the different values here?  But if there is something which
+      `(let [~exposed (vec (exposed-variables ~matching-against-var))]
+         ;; though this is a set, so the set could be smaller if there are fewer exposed variables, or something is aliased together
+         ;; though in that case, it might
+         (when (= (count ~exposed) ~(count (:placeholder-vars matching-value)))
+           ~(generate-unordered-list-matcher exposed
+                                             (:placeholder-vars matching-value)
+                                             values-to-vars
+                                             inner-function))))
+
+    (is-constant? matching-value)
+    `(when (= (get-value ~matching-against-var) ~(get-value matching-value))
+       ~(inner-function values-to-vars))
+
+    (is-variable? matching-value)
+    (if (contains? values-to-vars matching-value)
+      `(when (= ~(strict-get values-to-vars matching-value) ~matching-against-var) ;; I suppose that this could consider the current value
+         ~(inner-function values-to-vars))
+      (inner-function (assoc values-to-vars
+                             matching-value matching-against-var)))
+
+    (instance? Aggregator matching-value)
+    `(when (= (. ~(with-meta matching-against-var{:tag Aggregator}) ~'name) ~(.name ^Aggregator matching-value))
+       ~(inner-function values-to-vars))
+
+    (is-aggregator-op-inner? matching-value)
+    (let [operator (gensym 'operator)
+          incoming (gensym 'incoming)
+          projected (gensym 'projected)
+          body (gensym 'body)]
+      `(when (is-aggregator-op-inner? ~matching-against-var)
+         (let [~operator (. ~(with-meta matching-against-var {:tag aggregator-op-inner-rexpr}) ~'operator)
+               ~incoming (. ~(with-meta matching-against-var {:tag aggregator-op-inner-rexpr}) ~'incoming)
+               ~projected (. ~(with-meta matching-against-var {:tag aggregator-op-inner-rexpr}) ~'projected)
+               ~body (. ~(with-meta matching-against-var {:tag aggregator-op-inner-rexpr}) ~'body)]
+           ~(generate-conversion-function-matcher
+             operator
+             (:operator matching-value)
+             values-to-vars
+             (fn [values-to-vars]
+               (generate-conversion-function-matcher
+                incoming
+                (:incoming matching-value)
+                values-to-vars
+                (fn [values-to-vars]
+                  ;; match against the number of projected variables, then the body of the aggregator, and then the order in which projected
+                  ;; variables are aligned.  The alignment of the projected variables does not matter that much and it is the locations in the body
+                  ;; of the aggregator which are going to be the elements that matter here
+                  `(when (= (count ~projected) ~(count (:projected matching-value)))
+                     ~(generate-conversion-function-matcher
+                       body
+                       (:body matching-value)
+                       values-to-vars
+                       (fn [values-to-vars]
+                         (generate-unordered-list-matcher projected
+                                                          (:projected matching-value)
+                                                          values-to-vars
+                                                          inner-function)))))))))))
+
+    (rexpr? matching-value)
+    (let [rtype (rexpr-name matching-value)
+          rexpr-sig (get @rexpr-containers-signature rtype)
+          rcname (strict-get @rexpr-containers-class-name rtype)
+          var-expands (for [[typ name] rexpr-sig
+                            :let [gvar (gensym name)]]
+                        {:cur-value ((keyword name) matching-value)
+                         :var gvar
+                         :type typ
+                         :let-expr [gvar (list '.
+                                               (with-meta matching-against-var {:tag rcname})
+                                               (symbol (munge name)))]})
+          body-fn (fn br [check-against values-to-vars]
+                    (if (empty? check-against)
+                      (inner-function values-to-vars)
+                      (let [f (first check-against)
+                            r (rest check-against)]
+                        (generate-conversion-function-matcher (:var f)
+                                                              (:cur-value f)
+                                                              values-to-vars
+                                                              #(br r %)))))]
+      `(when (~(symbol "dyna.rexpr-constructors" (str "is-" (rexpr-name matching-value) "?")) ~matching-against-var)
+         (let [~@(apply concat (map :let-expr var-expands))]
+           ~(body-fn var-expands values-to-vars))))
+
+    :else
+    (do
+      (debug-repl "no match")
+      (???))))
+
+
 (defn- synthize-rexpr-cljcode [rexpr]
   ;; this should just generate the required clojure code to convert the rexpr
   ;; (argument) into a single synthic R-expr.  This is not going to evaluate the code and do the conversion
@@ -354,7 +493,7 @@
         placeholder-rexprs (set (get-placeholder-rexprs rexpr))
         root-rexpr (gensym 'root) ;; the variable which will be the argument for the conversions
         vars-path (get-variables-and-path rexpr)
-        [var-access var-gen-code] (get-variables-values-letexpr root-rexpr (keys vars-path))  ;; this might have to handle exceptions which are going to thrown by the
+        ;[var-access var-gen-code] (get-variables-values-letexpr root-rexpr (keys vars-path)) ;; this might have to handle exceptions which are going to thrown by the
         new-rexpr-name (gensym 'jit-rexpr)
         new-arg-names (merge (into {} (map (fn [v] [v (gensym 'jv)]) exposed-vars))
                              (into {} (map (fn [r] [r (:external-name r)]) placeholder-rexprs)))
@@ -379,21 +518,49 @@
                                ~(primitive-rexpr-cljcode new-arg-names prim-rexpr)))
                             (defmethod rexpr-printer ~(symbol (str new-rexpr-name "-rexpr")) ~'[r]
                               (rexpr-printer (primitive-rexpr ~'r))))
+        ;zzz (debug-repl "zzz")
         conversion-function-expr `(fn [~root-rexpr]
-                                    (let ~var-gen-code ;; this is going to get access to all of the
-                                      ;; this will check that we have all of the arguments (non-nil) and that the constant values are the same as what we expect
-                                      (when (and ~@(for [[vpath val] vars-path]
-                                                     (cond (is-constant? val) `(= ~(strict-get var-access vpath) ~val)
-                                                           (is-variable? val) `(not (nil? ~(strict-get var-access vpath)))
-                                                           (rexpr? val) `(rexpr? ~(strict-get var-access vpath))
-                                                           :else (do (debug-repl "zz")
-                                                                     (???)))))
-                                        (~(symbol (str "make-" new-rexpr-name))
-                                         ~@(for [a new-arg-order]
-                                             (strict-get var-access
-                                                         (strict-get (into {} (for [[k v] vars-path] [v k]))
-                                                                     (get new-arg-names-rev a))))))))
-        zzz (debug-repl "zzz")
+                                    (first
+                                     ~(generate-conversion-function-matcher root-rexpr
+                                                                            prim-rexpr
+                                                                            {}
+                                                                            (fn [values-to-vars]
+                                                                              `(list ;; return a list, as we are getting the first element from the iterator
+                                                                                (~(symbol (str "make-" new-rexpr-name))
+                                                                                 ~@(for [a new-arg-order]
+                                                                                     (strict-get values-to-vars
+                                                                                                 (strict-get new-arg-names-rev a)))))))))
+        ;zzz2 (debug-repl "zzz2" false)
+        ;; conversion-function-expr-old `(fn [~root-rexpr]
+        ;;                             (let ~var-gen-code ;; this is going to get access to all of the
+        ;;                               ;; this will check that we have all of the arguments (non-nil) and that the constant values are the same as what we expect
+        ;;                               #_(when (and
+        ;;                                      ;; check that all of the constants embedded in the R-expr are the same
+        ;;                                      ~@(for [[vpath val] vars-path
+        ;;                                              :when (is-constant? val)]
+        ;;                                          `(= (get-value ~(strict-get var-access vpath)) ~(get-value val)))
+        ;;                                      ;; check that the R-expr structure is the same
+        ;;                                      ~@(for [[vpath val] vars-path
+        ;;                                              :when (rexpr? val)]
+        ;;                                          `(~(symbol "dyna.rexpr-constructors" (str "is-" (rexpr-name val) "?"))
+        ;;                                            ~(strict-get var-access vpath))
+        ;;                                          )
+        ;;                                      ~@(for [[vpath val] vars-path]
+        ;;                                          )))
+
+        ;;                               (when (and ~@(for [[vpath val] vars-path]
+        ;;                                              (cond (is-constant? val) `(= ~(strict-get var-access vpath) ~val)
+        ;;                                                    (is-variable? val) `(not (nil? ~(strict-get var-access vpath)))
+        ;;                                                    (rexpr? val) `(rexpr? ~(strict-get var-access vpath))
+        ;;                                                    :else (do (debug-repl "zz")
+        ;;                                                              (???)))))
+        ;;                                 (~(symbol (str "make-" new-rexpr-name))
+        ;;                                  ~@(for [a new-arg-order]
+        ;;                                      (strict-get var-access
+        ;;                                                  (strict-get (into {} (for [[k v] vars-path] [v k]))
+        ;;                                                              (get new-arg-names-rev a))))))))
+        ;; zzz (debug-repl "zzz")
+
         ret {:orig-rexpr rexpr
              :prim-rexpr prim-rexpr
              :generated-name new-rexpr-name
@@ -2156,6 +2323,7 @@
                                    ~(inner))))
           (vswap! metadata assoc :out-var out-var))))
     (when-not (contains? @metadata :group-vars)
+      (debug-repl)
       (vswap! metadata assoc :group-vars (vec (remove is-bound-jit? (exposed-variables Rbody2)))))
 
     (if (is-empty-rexpr? Rbody2)
