@@ -37,6 +37,8 @@
 
 (def rexpr-convert-to-jit-functions (atom {}))
 
+(def rexpr-convert-to-jit-functions-hash-group (atom {}))
+
 (declare is-bound-jit?)
 
 (defrecord jit-local-variable-rexpr [local-var-symbol]
@@ -131,7 +133,10 @@
                                  :var-list placeholder-vars
                                  ]
   #_(exposed-variables [this]
-                       (set (map ->jit-placeholder-variable-rexpr (filter is-variable? (vals placeholder-vars))))))
+                       (set (map ->jit-placeholder-variable-rexpr (filter is-variable? (vals placeholder-vars)))))
+  (rexpr-jittype-hash [this] 0) ;; the jit placeholder most likely goes in the place of a disjunct, so we want to use the same hash-code for this as disjuncts
+
+  )
 
 (defn- convert-to-primitive-rexpr [rexpr]
   ;; Not 100% sure if this method is really needed anymore, it seems like is essentially doing nothing
@@ -579,6 +584,11 @@
     (swap! rexprs-types-constructed assoc new-rexpr-name ret)
     ret))
 
+(defn- convert-to-existing-jit-type [rexpr]
+  (first (for [converter (get @rexpr-convert-to-jit-functions-hash-group (rexpr-jittype-hash rexpr))
+               :let [c (converter rexpr)]
+               :when (not (nil? c))]
+           c)))
 
 (defn synthize-rexpr [rexpr]
   (let [is-new (volatile! false)

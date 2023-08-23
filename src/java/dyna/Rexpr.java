@@ -55,6 +55,8 @@ public interface Rexpr {
 
     Object rexpr_jit_info();
 
+    int rexpr_jittype_hash();
+
     Object check_rexpr_basecases(Object stack);
 
     Rexpr simplify_fast_rexprl(IFn simplify);

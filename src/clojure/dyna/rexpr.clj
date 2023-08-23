@@ -170,7 +170,9 @@
        (alter-meta! (var ~(symbol "dyna.rexpr-constructors" (str "simplify-jit-compilation-step-" name))) assoc :redef true)
 
 
-       (deftype-with-overrides ~(symbol rname) ~(vec (concat (quote [^int cached-hash-code ^:unsynchronized-mutable cached-exposed-variables])
+       (deftype-with-overrides ~(symbol rname) ~(vec (concat (quote [^int cached-hash-code
+                                                                     ^{:tag int :unsynchronized-mutable true} cached-jittype-hash-code
+                                                                     ^:unsynchronized-mutable cached-exposed-variables])
                                                              (if system/track-where-rexpr-constructed (quote [traceback-to-construction traceback-to-rexpr]))
                                                              (map cdar vargroup)))
          ~opt
@@ -436,10 +438,34 @@
                    `(apply min (map #(check-rexpr-basecases % ~'stack) ~(cdar v))))))
 
          (~'simplify-fast-rexprl ~'[this simplify]
+          ;; TODO: this should directly call the right method, or return a base pointer to the right type
+          ;; I suppose that in the case that this is doing the call internally, then it will have that this does not
+          ;; have
           (???))
 
          (~'simplify-inference-rexprl ~'[this simplify]
           (???))
+
+         (~'rexpr-jittype-hash ~'[this]
+          (when (= 0 ~'cached-jittype-hash-code)
+            (set! ~'cached-jittype-hash-code
+                  (unchecked-int
+                   ~(reduce (fn [a b] `(unchecked-add-int ~a ~b))
+                            (hash rname)
+                            (for [[[typ var] idx] (zipseq vargroup (range))
+                                  :when (#{:rexpr :rexpr-list :str :mult :boolean :file-name :var-list} typ)]
+                              `(unchecked-multiply-int ~(+ 3 idx)
+                                                       ~(case typ
+                                                          :rexpr `(rexpr-jittype-hash ~var)
+                                                          :rexpr-list `(unchecked-add-int
+                                                                        (reduce bit-xor 0 (map rexpr-jittype-hash ~var))
+                                                                        (count ~var))
+                                                          :var-list `(count ~var)  ;; the names will not matter, but the number of variables could change what we are doing
+                                                          :str `(hash ~var)
+                                                          :mult var
+                                                          :boolean `(if ~var 7 11)
+                                                          :file-name `(hash ~var))))))))
+          ~'cached-jittype-hash-code)
 
          Object
          (~'equals ~'[this other]
@@ -469,6 +495,7 @@
                                   (hash rname)
                                   (for [[var idx] (zipseq vargroup (range))]
                                     `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
+          0 ; the jittype hash cache
           nil                           ; the cached unique variables
           ~@(if system/track-where-rexpr-constructed `[(Throwable.) (last (tlocal *current-simplify-stack*))])
           ~@(map cdar vargroup))
@@ -491,6 +518,7 @@
                                   (hash rname)
                                   (for [[var idx] (zipseq vargroup (range))]
                                     `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
+                              0 ;; the cached jittype hash
                               nil       ; the cached unique variables
                               ~@(if system/track-where-rexpr-constructed `[(Throwable.) (do
                                                                                           ;; (when-not (or (not (nil? dyna.rexpr/*current-matched-rexpr*))
@@ -802,7 +830,8 @@
                         (context/bind-no-context
                          (make-disjunct (vec (map #(remap-variables-func % remap-function) args)))))
   (is-non-empty-rexpr? [this] (some is-non-empty-rexpr? args))
-  (rexpr-jit-info [this] {:jittable false}))
+  (rexpr-jit-info [this] {:jittable false})
+  (rexpr-jittype-hash [this] 0))
 
 (defmethod rexpr-printer disjunct-rexpr [r]
   (join (str "+" (optional-line-break)) (map rexpr-printer (:args r))))

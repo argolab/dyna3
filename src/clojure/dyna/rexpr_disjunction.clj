@@ -77,7 +77,7 @@
 
   (rexpr-jit-info [this] {:jittable false} ;; this will get converted into a primitive disjunct which we can compile
                   )
-  )
+  (rexpr-jittype-hash [this] 0))
 
 (defn- remap-variables-disjunct-op [this variable-renaming-map remap-fn]
   (if (empty? variable-renaming-map)
