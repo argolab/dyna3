@@ -42,9 +42,8 @@
                                (make-times (make-variable 'c2) (make-constant 7) (make-variable 'd2))])
         synth-rexpr1 (synth rexpr)
         synth-rexpr2 (synth rexpr2)]
-    (debug-repl)
-    (is (= (type synth-rexpr1) (type synth-rexpr2)))
-    (is (not= synth-rexpr1 synth-rexpr2))))
+    (is (= (type (first synth-rexpr1)) (type (first synth-rexpr2))))
+    (is (not= (first synth-rexpr1) (first synth-rexpr2)))))
 
 (deftest basic-jit2
   ;; (a + b)*7 = d

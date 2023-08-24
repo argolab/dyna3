@@ -213,27 +213,6 @@
                                                                 (???)))))]
           (into {} (apply concat (vals litems))))))
 
-#_(defn- get-variables-values-letexpr [root-var vars-path]
-  ;; construct the vector arguments of a let expression with something which will be able to return all of the different values
-  (let [so-far (transient {})
-        gen-code (transient [])
-        rec (fn rec [path]
-              (if (empty? path)
-                root-var
-                (if (contains? so-far path)
-                  (get so-far path)
-                  (let [pv (rec (drop-last path))
-                        lvar (gensym 'vlookup)]
-                    (conj! gen-code lvar)
-                    (conj! gen-code `(-> ~pv ~(last path)))
-                    (assoc! so-far path lvar)
-                    lvar))))
-        ;; vm (for [[k v] vars-path]
-        ;;      [k (rec v)])
-        vm (map (fn [x] [x (rec x)]) vars-path)
-        ]
-    [(into {} vm) (persistent! gen-code)]))
-
 (defn- primitive-rexpr-cljcode
   ([varmap rexpr]
    (primitive-rexpr-cljcode varmap rexpr :rexpr))
@@ -550,7 +529,8 @@
              :generated-name new-rexpr-name
              :make-rexpr-type rexpr-def-expr
              :conversion-function-expr conversion-function-expr
-             :variable-name-mapping new-arg-names ;; map from existing-name -> new jit-name
+             ;:variable-name-mapping new-arg-names ;; map from existing-name -> new jit-name
+             :variable-name-mapping-rev new-arg-names-rev
              :variable-order new-arg-order ;; the order of jit-names as saved in the R-expr
              :prim-rexpr-placeholders (primitive-rexpr-with-placeholders prim-rexpr new-arg-names)
              ;; ;; should the conversion function have that there is some expression.  In the case that it might result in some of
@@ -634,16 +614,22 @@
 
 (defn- compute-converter-matching [rtype rexpr]
   (let [prim-rexpr (:prim-rexpr-placeholders rtype)
-        var-map (:variable-name-mapping rtype)
         new-mapping (first (converter-matching-rexpr prim-rexpr rexpr {}))]
-    ;; this needs to compute a new variable name mapping between the two types
-    (debug-repl "compute new variable name mapping")
-    (assoc rtype :variable-name-mapping {1 (???)})))
+    (when-not (nil? new-mapping)
+      (assoc rtype :variable-name-mapping-rev
+             (for [[a b] new-mapping]
+               (cond (instance? jit-exposed-variable-rexpr a)
+                     [(:exposed-name a) b]
+                     (is-jit-placeholder? a)
+                     [(:external-name a) b]
+                     :else (???)))))))
 
 (defn- synthize-rexpr [rexpr]
   ;; this will identify if an R-expr already has a type which is synthized, and either return that type/conversion function
   (let [jittype-hash (rexpr-jittype-hash rexpr)
         rtype (let [vv (volatile! nil)]
+                ;; bit odd to have this under the swap!, as it is going to potentially cause this transform to happen multiple times if there are racing threads
+                ;; which might not be the best
                 (swap! rexpr-map-to-jit-hash-group
                        (fn [x]
                          (let [converters (get x jittype-hash)
@@ -670,15 +656,6 @@
         ret ((:conversion-function rtype) rexpr)]
     (assert (not (nil? ret)))
     [ret rtype]))
-
-#_(defn- synthize-new-rexpr [rexpr]
-  ;; at this point, holes should ave already been inserted into the R-expr.  This will
-
-  (first (synthize-new-rexpr-old rexpr)))
-
-#_(defn- synthize-comparable-rexpr [rexpr]
-  ;; The order of the arguments could be different for this R-expr.  In which case it will have that it should figure out which of the expressions would cause this
-  (synthize-new-rexpr-old rexpr))
 
 (declare ^:private convert-to-jitted-rexpr-fn)
 
@@ -910,7 +887,7 @@
   ;; seralized state, whereas for an ending state, we might just want to return
   ;; it, as it should go back into the control flow of "other" stuff
   (if (is-empty-rexpr? rexpr)
-    `(throw (UnificationFailure. "JIT multiplicity 0")) ;; faster specical case handling for when it gets a mult 0 meaning that unification has failed
+    `(make-multiplicity 0) ;; we can not throw here as there are multiple nested try-caches which could catch it by accident, so return 0
     (let [re (if-not (is-composit-rexpr? rexpr)
                (let [local-vars-bound @*local-variable-names-for-variable-values*]
                  ;; this is a simple primitive R-expr type (like multiplicity or builtin
@@ -938,10 +915,8 @@
                                                 [v (make-variable (gensym 'vhold))]))
                      new-r (remap-variables rexpr remapped-locals)
                      [_ new-synth] (synthize-rexpr new-r)
-                     ;[_ new-synth] (synthize-rexpr new-r)
                      rlocal-map (into {} (for [[k v] remapped-locals] [v k]))
-                     rvarmap (into {} (for [[k v] (:variable-name-mapping new-synth)] [v k]))]
-                 (debug-repl "materalize code")
+                     rvarmap (:variable-name-mapping-rev new-synth)]
                  `(~(symbol "dyna.rexpr-constructors" (str "make-" (:generated-name new-synth)))
                    ~@(for [v (:variable-order new-synth)
                            :let [lv (rvarmap v)
@@ -2191,7 +2166,8 @@
                              set-extern-values (doall
                                                 (for [[var val] post-local-variable-name-values
                                                       :when (and (instance? jit-exposed-variable-rexpr var)
-                                                                 (not= (get pre-local-variable-name-values var) val))
+                                                                 (not= (get pre-local-variable-name-values var) val)
+                                                                 (not (:bound-from-outer-context val false)))
                                                       :let [varj (jit-evaluate-cljform var)]]
                                                   `(set-value-in-context! ~(:cljcode-expr varj) ~'**context** ~(strict-get val :var-name))))]
                          (when-not (empty? set-extern-values)
