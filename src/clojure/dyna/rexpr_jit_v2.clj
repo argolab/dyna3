@@ -531,41 +531,17 @@
                                                                             {}
                                                                             (fn [values-to-vars]
                                                                               `(list ;; return a list, as we are getting the first element from the iterator
-                                                                                (~(symbol (str "make-" new-rexpr-name))
-                                                                                 ~@(for [a new-arg-order]
-                                                                                     (strict-get values-to-vars
-                                                                                                 (strict-get new-arg-names-rev a)))))))))
-        ;zzz2 (debug-repl "zzz2" false)
-        ;; conversion-function-expr-old `(fn [~root-rexpr]
-        ;;                             (let ~var-gen-code ;; this is going to get access to all of the
-        ;;                               ;; this will check that we have all of the arguments (non-nil) and that the constant values are the same as what we expect
-        ;;                               #_(when (and
-        ;;                                      ;; check that all of the constants embedded in the R-expr are the same
-        ;;                                      ~@(for [[vpath val] vars-path
-        ;;                                              :when (is-constant? val)]
-        ;;                                          `(= (get-value ~(strict-get var-access vpath)) ~(get-value val)))
-        ;;                                      ;; check that the R-expr structure is the same
-        ;;                                      ~@(for [[vpath val] vars-path
-        ;;                                              :when (rexpr? val)]
-        ;;                                          `(~(symbol "dyna.rexpr-constructors" (str "is-" (rexpr-name val) "?"))
-        ;;                                            ~(strict-get var-access vpath))
-        ;;                                          )
-        ;;                                      ~@(for [[vpath val] vars-path]
-        ;;                                          )))
-
-        ;;                               (when (and ~@(for [[vpath val] vars-path]
-        ;;                                              (cond (is-constant? val) `(= ~(strict-get var-access vpath) ~val)
-        ;;                                                    (is-variable? val) `(not (nil? ~(strict-get var-access vpath)))
-        ;;                                                    (rexpr? val) `(rexpr? ~(strict-get var-access vpath))
-        ;;                                                    :else (do (debug-repl "zz")
-        ;;                                                              (???)))))
-        ;;                                 (~(symbol (str "make-" new-rexpr-name))
-        ;;                                  ~@(for [a new-arg-order]
-        ;;                                      (strict-get var-access
-        ;;                                                  (strict-get (into {} (for [[k v] vars-path] [v k]))
-        ;;                                                              (get new-arg-names-rev a))))))))
-        ;; zzz (debug-repl "zzz")
-
+                                                                                (if (tlocal recursive-transformation-to-jit-state)
+                                                                                  (~(symbol (str "make-" new-rexpr-name))
+                                                                                   ~@(for [a new-arg-order
+                                                                                           :let [v (strict-get new-arg-names-rev a)]]
+                                                                                       (if (rexpr? v)
+                                                                                         `(convert-to-jitted-rexpr-fn ~(strict-get values-to-vars v))
+                                                                                         (strict-get values-to-vars v))))
+                                                                                  (~(symbol (str "make-" new-rexpr-name))
+                                                                                   ~@(for [a new-arg-order]
+                                                                                       (strict-get values-to-vars
+                                                                                                   (strict-get new-arg-names-rev a))))))))))
         ret {:orig-rexpr rexpr
              :prim-rexpr prim-rexpr
              :generated-name new-rexpr-name
@@ -590,7 +566,7 @@
                :when (not (nil? c))]
            c)))
 
-(defn synthize-rexpr [rexpr]
+(defn synthize-new-rexpr-old [rexpr]
   (let [is-new (volatile! false)
         rtype (if (contains? @rexprs-map-to-jit rexpr)
                 (get @rexprs-map-to-jit rexpr)
@@ -626,11 +602,105 @@
       ;; return the converted rexpr as well as the type information for this expression
       [(convert-fn rexpr) rtype])))
 
+(defn- synthize-new-rexpr [rexpr]
+  ;; at this point, holes should ave already been inserted into the R-expr.  This will
+  (first (synthize-new-rexpr-old rexpr)))
 
+(defn- synthize-comparable-rexpr [rexpr]
+  ;; The order of the arguments could be different for this R-expr.  In which case it will have that it should figure out which of the expressions would cause this
+  (synthize-new-rexpr-old rexpr))
+
+(declare convert-to-jitted-rexpr-fn)
+
+(defn- convert-to-jitted-rexpr-inspect [rexpr]
+  ;; look at the type of the primitive R-expr and figure out if we need to transform some of the sub units
+  (let [jinfo (rexpr-jit-info rexpr)]
+    (cond (contains? jinfo :generated-name) rexpr ;; this is already a jit compiled type.  There is nothing to do here.  Though I suppose that we could map its arguments?
+
+          (is-aggregator? rexpr) (convert-to-jitted-rexpr-fn
+                                  (convert-basic-aggregator-to-op-aggregator rexpr))
+
+          (is-user-call? rexpr) rexpr ;; there is nothing that we can do for this
+
+          ;; figure out if this is a big disjunct or a small disjunct.  If it is a big disjunct, then it would become a hole with its sub units getting converted
+          ;; if this is a small disjunct, then we can convert it to a primitive R-expr type, and then JIT compile that
+          (is-disjunct-op? rexpr)
+          (let [trie (:rexprs rexpr)
+                vars (:disjunction-variables rexpr)
+                elems (take 11 (trie/trie-get-values trie nil))
+                all-ground (every? (fn [z] (every? #(not (nil? %)) z)) (map first elems))]
+            (if (> (count elems) 8)
+              ;; then we are going to rewrite the leafs of the R-exprs
+              (rewrite-rexpr-children rexpr convert-to-jitted-rexpr-fn)
+              (let [new-disjunct (vec (for [[vals rx] elems
+                                             :let [vals-r (vec (for [[val var] (zipseq vals vars)
+                                                                     :when (not (nil? val))]
+                                                                 (make-no-simp-unify var (make-constant val))))]]
+                                        (make-conjunct (conj vals-r rx))))
+                    ret (make-no-simp-disjunct new-disjunct)]
+                (convert-to-jitted-rexpr-fn ret))))
+
+
+          ;; This R-expr can be converted into the JIT, but it might have things inside of the R-expr which will need to get removed
+          ;; these things will have to get identified and converted into holes
+          :else
+          (let [pl (volatile! {}) ;; things go into holes
+                rp (fn rr [rexpr]
+                     (let [jinfo (rexpr-jit-info rexpr)]
+                       (if-not (:jittable jinfo true)
+                         (cond (is-aggregator? rexpr) (rr (convert-basic-aggregator-to-op-aggregator rexpr))
+                               (is-disjunct-op? rexpr)
+                               (let [trie (:rexprs rexpr)
+                                     vars (:disjunction-variables rexpr)
+                                     elems (take 11 (trie/trie-get-values trie nil))
+                                     all-ground (every? (fn [z] (every? #(not (nil? %)) z)) (map first elems))]
+                                 (if (> (count elems) 8)
+                                   (let [id (gensym 'jr)
+                                         exposed (exposed-variables rexpr)
+                                         new-disjunct (if (tlocal recursive-transformation-to-jit-state)
+                                                        (rewrite-rexpr-children rexpr convert-to-jitted-rexpr-fn)
+                                                        rexpr)]
+                                     (vswap! pl assoc id new-disjunct)
+                                     (make-jit-placeholder id nil (vec exposed)))
+                                   (let [new-disjunct (vec (for [[vals rx] elems
+                                                                 :let [vals-r (vec (for [[val var] (zipseq vals vars)
+                                                                                         :when (not (nil? val))]
+                                                                                     (make-no-simp-unify var (make-constant val))))]]
+                                                             (make-conjunct (conj vals-r
+                                                                                  (rr rx)))))
+                                         ret (make-no-simp-disjunct new-disjunct)]
+                                     ret)))
+                               :else
+                               (let [id (gensym 'jr)
+                                     exposed (exposed-variables rexpr)]
+                                 (vswap! pl assoc id rexpr)
+                                 (make-jit-placeholder id nil (vec exposed))))
+                         (rewrite-rexpr-children rexpr rr))))
+                nr (rp rexpr)
+                synthed (synthize-new-rexpr nr)]
+            (if-not (empty? @pl)
+              (rewrite-rexpr-children synthed (fn [r]
+                                                (assert (is-jit-placeholder? r))
+                                                (strict-get @pl (:external-name r))))
+              synthed)))))
 
 (defn- convert-to-jitted-rexpr-fn [rexpr]
+  (if (or (not (tlocal system/generate-new-jit-states))
+          (is-jit-placeholder? rexpr) ;; already a placeholder, nothing else to do
+          (contains? (rexpr-jit-info rexpr) :generated-name) ;; already jitted
+          (is-user-call? rexpr) ;; nothing can do for this
+          )
+    rexpr ;; just return the R-expr unmodified in this case,
+    (let [existing-type (convert-to-existing-jit-type rexpr)]
+      (if-not (nil? existing-type)
+        existing-type ;; then there was some existing type which was able to do the conversion, so we did not have to worry about it
+        (convert-to-jitted-rexpr-inspect rexpr)))))
+
+
+#_(defn- convert-to-jitted-rexpr-fn [rexpr]
   ;; there are some R-expr types which we do not want to JIT, so those are going to be things that we want to replace with a placeholder in the expression
-  (if-not (tlocal system/generate-new-jit-states)
+  (if (or (not (tlocal system/generate-new-jit-states))
+          (is-jit-placeholder? rexpr))
     rexpr ;; I suppose that we can just return the R-expr unmodified in the case that there is nothing that we are going to do here
     (let [pl (volatile! {})
           rp (fn rr [rexpr]
@@ -639,40 +709,7 @@
                    (cond
                      (is-aggregator? rexpr) (rr (convert-basic-aggregator-to-op-aggregator rexpr))
 
-                     (is-disjunct-op? rexpr) (let [trie (:rexprs rexpr)
-                                                   vars (:disjunction-variables rexpr)
-                                                   elems (take 11 (trie/trie-get-values trie nil))
-                                                   all-ground (every? (fn [z] (every? #(not (nil? %)) z)) (map first elems))]
-                                               (if (or (> (count elems) 8) all-ground)
-                                                 (let [id (gensym 'jr)
-                                                       exposed (exposed-variables rexpr)]
-                                                   ;; then there are 8 or more disjuncts contained in the trie, so we are not going to compile this
-                                                   ;; and instead leave it as a hash table
-
-                                                   ;; this is going to need to figure out which variables it cares about inside of the placeholder.  The placeholder
-                                                   ;; variables that it identifies will matter, so if it changes it to the "order" of the variables,
-                                                   ;; then those are going to have to handle the different expressions which are present
-                                                   ;; though if the variables are not present in the other parts of the expression
-
-                                                   ;; I suppose that it could also have that those other variables are going to figure out which
-
-                                                   ;; I suppose that disjunct and aggregators need to know which variables they are over.
-                                                   ;; but if the variable does not contain the right expression
-                                                   ;; I suppose that the order in which variables appear in the jit-hole would possibly allow for different expressions
-                                                   ;; the issue would mostly be around if the conversion happens twice, and the two states become aliased incorrectly.
-                                                   ;; How those states would become aliased, it might identify that some of the states will
-
-                                                   (vswap! pl assoc id rexpr)
-                                                   (make-jit-placeholder id nil (vec exposed)))
-                                                 (let [;; there are 8 or less elements in the trie, so we are going to convert it to a the basic disjunct
-                                                       ;; and then add that into the compilation
-                                                       new-disjuncts (vec (for [[vals rx] elems
-                                                                                :let [vals-r (vec (for [[val var] (zipseq vals vars)
-                                                                                                        :when (not (nil? val))]
-                                                                                                    (make-no-simp-unify var (make-constant val))))]]
-                                                                            (make-conjunct (conj vals-r (rr rx)))))
-                                                       ret (make-no-simp-disjunct new-disjuncts)]
-                                                   ret)))
+                     (is-disjunct-op? rexpr)
 
                      :else
                      (let [id (gensym 'jr)
@@ -702,7 +739,7 @@
                                             (if (is-jit-placeholder? r)
                                               (strict-get synthed-holes (:external-name r))
                                               r)))]
-          ;(debug-repl "handle holes")
+                                        ;(debug-repl "handle holes")
           ret)
         synthed))))
 
@@ -871,7 +908,8 @@
                                                               (instance? jit-exposed-variable-rexpr v))]
                                                 [v (make-variable (gensym 'vhold))]))
                      new-r (remap-variables rexpr remapped-locals)
-                     [_ new-synth] (synthize-rexpr new-r)
+                     [_ new-synth] (synthize-comparable-rexpr new-r)
+                     ;[_ new-synth] (synthize-rexpr new-r)
                      rlocal-map (into {} (for [[k v] remapped-locals] [v k]))
                      rvarmap (into {} (for [[k v] (:variable-name-mapping new-synth)] [v k]))]
                  `(~(symbol "dyna.rexpr-constructors" (str "make-" (:generated-name new-synth)))
