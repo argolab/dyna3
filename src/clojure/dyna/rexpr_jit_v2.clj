@@ -569,41 +569,76 @@
                :when (not (nil? c))]
            c)))
 
-#_(defn synthize-new-rexpr-old [rexpr]
-  (let [is-new (volatile! false)
-        rtype (if (contains? @rexprs-map-to-jit rexpr)
-                (get @rexprs-map-to-jit rexpr)
-                (let [vv (volatile! nil)]
-                  (swap! rexprs-map-to-jit (fn [x]
-                                             (if (contains? x rexpr)
-                                               (do (vreset! is-new false)
-                                                   (vreset! vv (get x rexpr))
-                                                   x)
-                                               (let [v (synthize-rexpr-cljcode rexpr)]
-                                                 (vreset! is-new true)
-                                                 (vreset! vv v)
-                                                 (assoc x rexpr v)))))
-                  @vv))]
-    (let [convert-fn (if @is-new
-                       (do (binding [*ns* dummy-namespace]
-                             (try
-                               (eval `(do
-                                        (ns dyna.rexpr-jit-v2)
-                                        ~(:make-rexpr-type rtype)))
-                               (catch RuntimeException err
-                                 (do
-                                   (println "failed generate code")
-                                   (aprint (:make-rexpr-type rtype))
-                                   (throw err)))))
-                           (let [f (binding [*ns* dummy-namespace]
-                                     (eval `(do
-                                              (ns dyna.rexpr-jit-v2)
-                                              ~(:conversion-function-expr rtype))))]
-                             (swap! rexpr-convert-to-jit-functions assoc rexpr f)
-                             f))
-                       (get @rexpr-convert-to-jit-functions rexpr))]
-      ;; return the converted rexpr as well as the type information for this expression
-      [(convert-fn rexpr) rtype])))
+(declare ^:private converter-matching-rexpr)
+
+(defn- converter-matching-unordered-list [rtype-list rexpr matched-so-far]
+  (when (= (count rtype-list) (count rexpr))
+    (case (count rtype-list)
+      0 (list nil) ;; there is nothing in the list to match
+      1 (converter-matching-rexpr (first rtype-list) (first rexpr) matched-so-far)
+      ((fn rec [la lb mm]
+         (if (empty? la)
+           (list nil)
+           (let [rb (rest lb)]
+             (for [[item idx] (zipseq la (range))
+                   l1 (converter-matching-rexpr item (first lb) matched-so-far)
+                   l2 (rec (drop-nth la idx) rb (merge matched-so-far l1))]
+               (merge l1 l2)))))
+       rtype-list rexpr matched-so-far))))
+
+(defn- converter-matching-rexpr [rtype-rexpr rexpr matched-so-far]
+  (when (or (and (rexpr? rtype-rexpr) (rexpr? rexpr))
+            (and (is-rexpr-value? rtype-rexpr) (is-rexpr-value? rexpr)))
+    (cond (or (is-disjunct? rtype-rexpr)
+              (is-conjunct? rtype-rexpr))
+          (let [rtype-args (:args rtype-rexpr)
+                args (:args rexpr)]
+            (converter-matching-unordered-list rtype-args args matched-so-far))
+
+          (is-jit-placeholder? rtype-rexpr)
+          (list {rtype-rexpr rexpr})
+
+          (instance? jit-exposed-variable-rexpr rtype-rexpr)
+          (if (contains? matched-so-far rtype-rexpr)
+            (when (= (get matched-so-far rtype-rexpr) rexpr)
+              (list nil)) ;; check if this is the same variable getting matched in both cases
+            (list {rtype-rexpr rexpr}))
+
+          (is-constant? rtype-rexpr)
+          (when (and (is-constant? rexpr)
+                     (= (get-value rtype-rexpr) (get-value rexpr)))
+            (list nil))
+
+          (is-aggregator-op-inner? rtype-rexpr)
+          (when (and (= (:operator rtype-rexpr) (:operator rexpr)))
+            (for [l1 (converter-matching-rexpr (:incoming rtype-rexpr) (:incoming rexpr) matched-so-far)
+                  l2 (converter-matching-rexpr (:body rtype-rexpr) (:body rexpr) (merge matched-so-far l1))
+                  l3 (converter-matching-unordered-list (:projected rtype-rexpr) (:projected rexpr) (merge matched-so-far l1 l2))]
+              (merge l1 l2 l3)))
+
+          (rexpr? rtype-rexpr)
+          ((fn rec [rtype-args args matched-so-far]
+             (if (empty? rtype-args)
+               (list nil)
+               (for [l1 (converter-matching-rexpr (first rtype-args) (first args) matched-so-far)
+                     l2 (rec (rest rtype-args) (rest args) (merge matched-so-far l1))]
+                 (merge l1 l2))))
+           (get-arguments rtype-rexpr)
+           (get-arguments rexpr)
+           matched-so-far)
+
+          :else
+          (do
+            (debug-repl "converter matcher other type")
+            (???)))))
+
+(defn- compute-converter-matching [rtype rexpr]
+  (let [prim-rexpr (:prim-rexpr-placeholders rtype)
+        var-map (:variable-name-mapping rtype)
+        new-mapping (first (converter-matching-rexpr prim-rexpr rexpr {}))]
+    ;; this needs to compute a new variable name mapping between the two types
+    (debug-repl "compute new variable name mapping")
+    (assoc rtype :variable-name-mapping {1 (???)})))
 
 (defn- synthize-rexpr [rexpr]
   ;; this will identify if an R-expr already has a type which is synthized, and either return that type/conversion function
@@ -614,10 +649,9 @@
                          (let [converters (get x jittype-hash)
                                matches (first
                                         (for [cc converters
-                                              :when (do
-                                                      (debug-repl "check converter")
-                                                      (???))]
-                                          cc))]
+                                              :let [mc (compute-converter-matching cc rexpr)]
+                                              :when (not (nil? mc))]
+                                          mc))]
                            (if-not (nil? matches)
                              (do
                                (vreset! vv matches)
@@ -646,7 +680,7 @@
   ;; The order of the arguments could be different for this R-expr.  In which case it will have that it should figure out which of the expressions would cause this
   (synthize-new-rexpr-old rexpr))
 
-(declare convert-to-jitted-rexpr-fn)
+(declare ^:private convert-to-jitted-rexpr-fn)
 
 (defn- convert-to-jitted-rexpr-inspect [rexpr]
   ;; look at the type of the primitive R-expr and figure out if we need to transform some of the sub units
@@ -713,6 +747,11 @@
                                  (make-jit-placeholder id nil (vec exposed))))
                          (rewrite-rexpr-children rexpr rr))))
                 nr (rp rexpr)
+                ;; QUESTION: should this always synthize or should there be something which will stop it.
+                ;; if we allow for merging of jitted types, then it would have that there is some expression between
+                ;; them.  But how would it allow for the different states to be encoded
+                ;;
+                ;; When this figures out which of the states are encoded, it will
                 [synthed _] (synthize-rexpr nr)]
             (if-not (empty? @pl)
               (rewrite-rexpr-children synthed (fn [r]
@@ -732,52 +771,6 @@
         existing-type ;; then there was some existing type which was able to do the conversion, so we did not have to worry about it
         (convert-to-jitted-rexpr-inspect rexpr)))))
 
-
-#_(defn- convert-to-jitted-rexpr-fn [rexpr]
-  ;; there are some R-expr types which we do not want to JIT, so those are going to be things that we want to replace with a placeholder in the expression
-  (if (or (not (tlocal system/generate-new-jit-states))
-          (is-jit-placeholder? rexpr))
-    rexpr ;; I suppose that we can just return the R-expr unmodified in the case that there is nothing that we are going to do here
-    (let [pl (volatile! {})
-          rp (fn rr [rexpr]
-               (let [jinfo (rexpr-jit-info rexpr)]
-                 (if-not (:jittable jinfo true)
-                   (cond
-                     (is-aggregator? rexpr) (rr (convert-basic-aggregator-to-op-aggregator rexpr))
-
-                     (is-disjunct-op? rexpr)
-
-                     :else
-                     (let [id (gensym 'jr)
-                           exposed (exposed-variables rexpr)]
-                       ;; should the nested expressions also become JITted?  In the
-                       ;; case of an aggregator, we might want to pass through the
-                       ;; aggregation to handle its children?  Though those will be
-                       ;; their own independent compilation units
-                       (vswap! pl assoc id rexpr)
-                       (make-jit-placeholder id nil (vec exposed))))
-                   (rewrite-rexpr-children-no-simp rexpr rr))))
-          nr (rp rexpr)
-          [synthed _] (synthize-rexpr nr)]
-      (if-not (empty? @pl)
-        (let [synthed-holes
-              (into {}
-                    (for [[key rr] @pl
-                          :when (is-disjunct-op? rr)]
-                      ;; this is going to attempt to jit all of the bodies of the disjunct.  I suppose that this should have some threshold for if this is going
-                      ;; to be useful?  Or if this should figure out if there is going to be some other expression
-                      [key
-                       (if (is-disjunct-op? rr)
-                         (rewrite-rexpr-children rr convert-to-jitted-rexpr-fn)
-                         rr)]))
-              ret (rewrite-rexpr-children synthed
-                                          (fn [r]
-                                            (if (is-jit-placeholder? r)
-                                              (strict-get synthed-holes (:external-name r))
-                                              r)))]
-                                        ;(debug-repl "handle holes")
-          ret)
-        synthed))))
 
 (intern 'dyna.rexpr-constructors 'convert-to-jitted-rexpr convert-to-jitted-rexpr-fn)
 
@@ -2351,7 +2344,9 @@
       (cond (instance? jit-local-variable-rexpr V)
             (let [r (simplify R)]
               (when-not (= R r)
-                (if (is-bound-jit? V)
+
+                (if (or (is-bound-jit? V)
+                        (is-empty-rexpr? r))
                   r
                   (do (dyna-assert (contains? (exposed-variables r) V))
                       (make-proj V r)))))
