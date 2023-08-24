@@ -28,18 +28,19 @@
 
 
 ;; map from the name of the jitted rexpr -> to the metadata which was used during construction
-(def rexprs-types-constructed (atom {}))
+(def ^:private rexprs-types-constructed (atom {}))
 
-(def rexpr-rewrites-constructed (atom #{}))
+;(def rexpr-rewrites-constructed (atom #{}))
 
 ;; a map from an R-expr to a jitted rexpr
-(def rexprs-map-to-jit (atom {}))
+(def ^:private rexprs-map-to-jit (atom {})) ;; TODO remove
 
-(def rexpr-convert-to-jit-functions (atom {}))
+(def ^:private rexpr-convert-to-jit-functions (atom {})) ;; TODO remove
 
-(def rexpr-convert-to-jit-functions-hash-group (atom {}))
+;(def ^:private rexpr-convert-to-jit-functions-hash-group (atom {}))
+(def ^:private rexpr-map-to-jit-hash-group (atom {}))
 
-(declare is-bound-jit?)
+(declare ^:private is-bound-jit?)
 
 (defrecord jit-local-variable-rexpr [local-var-symbol]
   ;; These variables are not exposed externally.  These variables are projected
@@ -505,6 +506,7 @@
         new-arg-names-rev (into {} (for [[k v] new-arg-names]
                                      [v k]))
         new-arg-order (vec (vals new-arg-names))
+        jittype-hash (rexpr-jittype-hash rexpr)
         rexpr-def-expr `(do (def-base-rexpr ~new-rexpr-name [~@(flatten (for [a new-arg-order
                                                                               :let [v (get new-arg-names-rev a)]]
                                                                           (cond (rexpr? v) [:rexpr a]
@@ -520,7 +522,8 @@
                                (get @dyna.rexpr-jit-v2/rexprs-types-constructed (quote ~new-rexpr-name)))
 
                               (~'primitive-rexpr ~'[this]
-                               ~(primitive-rexpr-cljcode new-arg-names prim-rexpr)))
+                               ~(primitive-rexpr-cljcode new-arg-names prim-rexpr))
+                              (~'rexpr-jittype-hash [this] ~jittype-hash))
                             (defmethod rexpr-printer ~(symbol (str new-rexpr-name "-rexpr")) ~'[r]
                               (rexpr-printer (primitive-rexpr ~'r))))
         ;zzz (debug-repl "zzz")
@@ -561,12 +564,12 @@
     ret))
 
 (defn- convert-to-existing-jit-type [rexpr]
-  (first (for [converter (get @rexpr-convert-to-jit-functions-hash-group (rexpr-jittype-hash rexpr))
-               :let [c (converter rexpr)]
+  (first (for [converter (get @rexpr-map-to-jit-hash-group (rexpr-jittype-hash rexpr))
+               :let [c ((:conversion-function converter) rexpr)]
                :when (not (nil? c))]
            c)))
 
-(defn synthize-new-rexpr-old [rexpr]
+#_(defn synthize-new-rexpr-old [rexpr]
   (let [is-new (volatile! false)
         rtype (if (contains? @rexprs-map-to-jit rexpr)
                 (get @rexprs-map-to-jit rexpr)
@@ -602,11 +605,44 @@
       ;; return the converted rexpr as well as the type information for this expression
       [(convert-fn rexpr) rtype])))
 
-(defn- synthize-new-rexpr [rexpr]
+(defn- synthize-rexpr [rexpr]
+  ;; this will identify if an R-expr already has a type which is synthized, and either return that type/conversion function
+  (let [jittype-hash (rexpr-jittype-hash rexpr)
+        rtype (let [vv (volatile! nil)]
+                (swap! rexpr-map-to-jit-hash-group
+                       (fn [x]
+                         (let [converters (get x jittype-hash)
+                               matches (first
+                                        (for [cc converters
+                                              :when (do
+                                                      (debug-repl "check converter")
+                                                      (???))]
+                                          cc))]
+                           (if-not (nil? matches)
+                             (do
+                               (vreset! vv matches)
+                               x)
+                             (let [new-generated (synthize-rexpr-cljcode rexpr)
+                                   ;; we need to create a new converter and add it to the list
+                                   convert-function (binding [*ns* dummy-namespace]
+                                                      (eval `(do
+                                                               (ns dyna.rexpr-jit-v2)
+                                                               ~(:make-rexpr-type new-generated)
+                                                               ~(:conversion-function-expr new-generated))))
+                                   matches (assoc new-generated :conversion-function convert-function)]
+                               (vreset! vv matches)
+                               (assoc x jittype-hash (cons matches converters)))))))
+                @vv)
+        ret ((:conversion-function rtype) rexpr)]
+    (assert (not (nil? ret)))
+    [ret rtype]))
+
+#_(defn- synthize-new-rexpr [rexpr]
   ;; at this point, holes should ave already been inserted into the R-expr.  This will
+
   (first (synthize-new-rexpr-old rexpr)))
 
-(defn- synthize-comparable-rexpr [rexpr]
+#_(defn- synthize-comparable-rexpr [rexpr]
   ;; The order of the arguments could be different for this R-expr.  In which case it will have that it should figure out which of the expressions would cause this
   (synthize-new-rexpr-old rexpr))
 
@@ -677,7 +713,7 @@
                                  (make-jit-placeholder id nil (vec exposed))))
                          (rewrite-rexpr-children rexpr rr))))
                 nr (rp rexpr)
-                synthed (synthize-new-rexpr nr)]
+                [synthed _] (synthize-rexpr nr)]
             (if-not (empty? @pl)
               (rewrite-rexpr-children synthed (fn [r]
                                                 (assert (is-jit-placeholder? r))
@@ -908,10 +944,11 @@
                                                               (instance? jit-exposed-variable-rexpr v))]
                                                 [v (make-variable (gensym 'vhold))]))
                      new-r (remap-variables rexpr remapped-locals)
-                     [_ new-synth] (synthize-comparable-rexpr new-r)
+                     [_ new-synth] (synthize-rexpr new-r)
                      ;[_ new-synth] (synthize-rexpr new-r)
                      rlocal-map (into {} (for [[k v] remapped-locals] [v k]))
                      rvarmap (into {} (for [[k v] (:variable-name-mapping new-synth)] [v k]))]
+                 (debug-repl "materalize code")
                  `(~(symbol "dyna.rexpr-constructors" (str "make-" (:generated-name new-synth)))
                    ~@(for [v (:variable-order new-synth)
                            :let [lv (rvarmap v)

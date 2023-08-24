@@ -9,44 +9,67 @@
     (:require [dyna.context :as context])
     (:require [dyna.system :as system]))
 
-(defn- synthize-rexpr [x] (???))
+(defn- synthize-rexpr [r]
+  (tbinding [generate-new-jit-states true]
+            (convert-to-jitted-rexpr r)))
 
 (deftest basic-jit1
   ;; test just creating the synthized R-expr
   (let [rexpr (make-conjunct [(make-add (make-variable 'a) (make-variable 'b) (make-variable 'c))
                               (make-times (make-variable 'c) (make-constant 7) (make-variable 'd))])
                                         ;[synth-rexpr _](synthize-rexpr rexpr)
-        synth-rexpr (convert-to-jitted-rexpr rexpr)
+        synth-rexpr (synthize-rexpr rexpr)
         prim-r (primitive-rexpr synth-rexpr)]
-    (is (not (nil? synth-rexpr)))
+     (is (not (nil? synth-rexpr)))
     (is (-> synth-rexpr type .getSimpleName (.startsWith "jit-rexpr")))
     (is (= prim-r rexpr))))
 
+(deftest basic-jit-same-type1
+  (let [rexpr (make-conjunct [(make-add (make-variable 'a) (make-variable 'b) (make-variable 'c))
+                              (make-times (make-variable 'c) (make-constant 7) (make-variable 'd))])
+        rexpr2 (make-conjunct [(make-add (make-variable 'a2) (make-variable 'b2) (make-variable 'c2))
+                               (make-times (make-variable 'c2) (make-constant 7) (make-variable 'd2))])
+        synth-rexpr1 (synthize-rexpr rexpr)
+        synth-rexpr2 (synthize-rexpr rexpr2)]
+    (is (= (type synth-rexpr1) (type synth-rexpr2)))
+    (is (not= synth-rexpr1 synth-rexpr2))))
+
+(deftest basic-jit-same-type2
+  (let [synth #'dyna.rexpr-jit-v2/synthize-rexpr
+        rexpr (make-conjunct [(make-add (make-variable 'a) (make-variable 'b) (make-variable 'c))
+                              (make-times (make-variable 'c) (make-constant 7) (make-variable 'd))])
+        rexpr2 (make-conjunct [(make-add (make-variable 'a2) (make-variable 'b2) (make-variable 'c2))
+                               (make-times (make-variable 'c2) (make-constant 7) (make-variable 'd2))])
+        synth-rexpr1 (synth rexpr)
+        synth-rexpr2 (synth rexpr2)]
+    (debug-repl)
+    (is (= (type synth-rexpr1) (type synth-rexpr2)))
+    (is (not= synth-rexpr1 synth-rexpr2))))
 
 (deftest basic-jit2
   ;; (a + b)*7 = d
   ;; test creating a basic rewrite where all variables are exposed
   (let [rexpr (make-conjunct [(make-add (make-variable 'a) (make-variable 'b) (make-variable 'c))
                               (make-times (make-variable 'c) (make-constant 7) (make-variable 'd))])
-        [synth-rexpr _](synthize-rexpr rexpr)]
+        synth-rexpr (synthize-rexpr rexpr)]
     (is (-> synth-rexpr type .getSimpleName (.startsWith "jit-rexpr")))
     (let [ctx (context/make-empty-context synth-rexpr)]
       (ctx-set-value! ctx (make-variable 'a) 3)
       (ctx-set-value! ctx (make-variable 'b) 2)
       (tbinding [generate-new-jit-rewrites false]
-        (let [res (context/bind-context-raw ctx (simplify-fully synth-rexpr))]
-          (is (identical? res synth-rexpr))))
+                (let [res (context/bind-context-raw ctx (simplify-fully synth-rexpr))]
+                  (is (identical? res synth-rexpr))))
       (tbinding [generate-new-jit-rewrites true]
-        (let [res (context/bind-context-raw ctx (simplify-fully synth-rexpr))]
-          (is (= (make-multiplicity 1) res))
-          (is (= 35 (ctx-get-value ctx (make-variable 'd)))))))))
+                (let [res (context/bind-context-raw ctx (simplify-fully synth-rexpr))]
+                  (is (= (make-multiplicity 1) res))
+                  (is (= 35 (ctx-get-value ctx (make-variable 'd)))))))))
 
 (deftest basic-jit3
   ;; test creating internal variables which are projected out of the expression
   (let [rexpr (make-proj (make-variable 'c)  ;; d = (a + 1)*7
                          (make-conjunct [(make-add (make-variable 'a) (make-constant 1) (make-variable 'c))
                                          (make-times (make-variable 'c) (make-constant 7) (make-variable 'd))]))
-        [synth-rexpr jit-type] (synthize-rexpr rexpr)]
+        synth-rexpr (synthize-rexpr rexpr)]
     (is (-> synth-rexpr type .getSimpleName (.startsWith "jit-rexpr")))
 
     (let [ctx (context/make-empty-context synth-rexpr)]
@@ -63,7 +86,7 @@
                                 (make-conjunct [(make-add (make-variable 'a) (make-variable 'b) (make-variable 'c))
                                                 (make-add (make-variable 'c) (make-variable 'd) (make-variable 'e))
                                                 (make-add (make-variable 'e) (make-variable 'f) (make-variable 'g))]))
-        [synth-rexpr jit-type] (synthize-rexpr rexpr)
+        synth-rexpr (synthize-rexpr rexpr)
         rr (make-conjunct [(make-unify (make-variable 'a) (make-constant 1))
                            (make-unify (make-variable 'b) (make-constant 2))
                            (make-unify (make-variable 'd) (make-constant 3))
@@ -120,7 +143,7 @@
                                                                "f"
                                                                [(make-variable 'C) (make-variable 'D)])
                                          ]))
-        [synth-rexpr jit-type] (synthize-rexpr rexpr)
+        synth-rexpr (synthize-rexpr rexpr)
         rr (make-conjunct [(make-unify (make-variable 'A) (make-constant 7))
                            synth-rexpr])
         ctx (context/make-empty-context rr)]
@@ -133,7 +156,7 @@
 
 (deftest basic-jit7
   (let [rexpr (make-aggregator "=" (make-variable 'result) (make-variable 'incoming) true (make-unify (make-variable 'incoming) (make-variable 'X)))
-        [synth-rexpr jit-type] (synthize-rexpr rexpr)
+        synth-rexpr (synthize-rexpr rexpr)
         rr (make-conjunct [(make-unify (make-variable 'X) (make-constant 1))
                            synth-rexpr])
         ctx (context/make-empty-context rr)]
