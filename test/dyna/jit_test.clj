@@ -115,7 +115,7 @@
 (deftest basic-jit5
   (let [rexpr (make-conjunct [(make-lessthan (make-variable 'a) (make-variable 'b) (make-constant true))
                               (make-lessthan (make-variable 'b) (make-variable 'c) (make-constant true))])
-        [synth-rexpr jit-type] (synthize-rexpr rexpr)
+        synth-rexpr (synthize-rexpr rexpr)
         rr (make-conjunct [(make-unify (make-variable 'a) (make-constant 1))
                            (make-unify (make-variable 'b) (make-constant 2))
                            synth-rexpr])
@@ -197,6 +197,13 @@
                   (let [res2 (context/bind-context-raw ctx (simplify-fully rr))]
                     (debug-repl "test")
                     (is (= (/ (* i (+ i 1)) 2) (ctx-get-value ctx (make-variable 'result))))))))))
+
+
+;; the reflect-structure can create new variables in project statements, which need to get handled.
+
+
+
+
 
 #_(deftest jit-memoization1
     (let [system (system/make-new-dyna-system)]

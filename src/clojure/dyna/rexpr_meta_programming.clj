@@ -13,7 +13,8 @@
   (check-rexpr-basecases [this stack]
                          1 ;; indicate that there is an indirect user call, so we can't be sure about this
                          )
-  (rexpr-jit-info [this] {:jittable false}))
+  (rexpr-jit-info [this] {:jittable false})
+  (rexpr-jittype-hash [this] 0))
 
 (def-base-rexpr reflect-structure [:var out
                                    :var dynabase

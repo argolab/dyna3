@@ -41,7 +41,7 @@
 (def ^:private rexpr-map-to-jit-hash-group (atom {}))
 
 (declare ^:private is-bound-jit?)
-
+(println "TODO: jit-local-variable-rexpr should also be \"allowed\" to be a normal variable as long as it is projected out")
 (defrecord jit-local-variable-rexpr [local-var-symbol]
   ;; These variables are not exposed externally.  These variables are projected
   ;; out before they reach the top.  We are going to give these variables a name
@@ -139,14 +139,19 @@
 
   )
 
+(def-base-rexpr aggregator-op-partial-result [:var partial-var
+                                              :var-list group-vars
+                                              :rexpr remains])
+
+
 (defn- convert-to-primitive-rexpr [rexpr]
   ;; Not 100% sure if this method is really needed anymore, it seems like is essentially doing nothing
   (cond
-    (is-jit-placeholder? rexpr) rexpr  ;; this is already a placeholder, so this just gets returned
-    (is-disjunct? rexpr) (let [;evars (exposed-variables rexpr)
+    (is-jit-placeholder? rexpr) rexpr ;; this is already a placeholder, so this just gets returned
+    (is-disjunct? rexpr) (let [       ;evars (exposed-variables rexpr)
                                ]
                            ;; this is already a primitive, so we can just continue to
-                           ;(debug-repl "prim disjunct")
+                                        ;(debug-repl "prim disjunct")
                            (rewrite-rexpr-children-no-simp rexpr convert-to-primitive-rexpr))
     (or (is-disjunct-op? rexpr) (is-user-call? rexpr))
     (let []
@@ -401,7 +406,7 @@
                              matching-value matching-against-var)))
 
     (instance? Aggregator matching-value)
-    `(when (= (. ~(with-meta matching-against-var{:tag Aggregator}) ~'name) ~(.name ^Aggregator matching-value))
+    `(when (= (. ~(with-meta matching-against-var {:tag Aggregator}) ~'name) ~(.name ^Aggregator matching-value))
        ~(inner-function values-to-vars))
 
     (is-aggregator-op-inner? matching-value)
@@ -438,6 +443,37 @@
                                                           values-to-vars
                                                           inner-function)))))))))))
 
+    (is-aggregator-op-partial-result? matching-value)
+    (let [partial-var (gensym 'agg-partial-var)
+          group-vars (doall (for [_ (range (count (:group-vars matching-value)))]
+                              (gensym 'agg-group-var)))
+          remains (gensym 'agg-remains)
+          ]
+      `(when (and (is-aggregator-op-partial-result? ~matching-against-var)
+                  (= ~(count (:group-vars matching-value))
+                     (count (. ~(with-meta matching-against-var {:tag aggregator-op-partial-result-rexpr}) ~'group-vars))))
+         (let [~partial-var (. ~(with-meta matching-against-var {:tag aggregator-op-partial-result-rexpr}) ~'partial-var)
+               [~@group-vars] (. ~(with-meta matching-against-var {:tag aggregator-op-partial-result-rexpr}) ~'group-vars)
+               ~remains (. ~(with-meta matching-against-var {:tag aggregator-op-partial-result-rexpr}) ~'remains)]
+           ~(generate-conversion-function-matcher
+             partial-var
+             (:partial-var matching-value)
+             values-to-vars
+             (fn [values-to-vars]
+               ((fn rec [a b values-to-vars]
+                  (if (empty? b)
+                    (generate-conversion-function-matcher
+                     remains
+                     (:remains matching-value)
+                     values-to-vars
+                     inner-function)
+                    (generate-conversion-function-matcher
+                     (first b)
+                     (first a)
+                     values-to-vars
+                     (partial rec (rest a) (rest b)))))
+                (:group-vars matching-value) group-vars values-to-vars))))))
+
     (rexpr? matching-value)
     (let [rtype (rexpr-name matching-value)
           rexpr-sig (get @rexpr-containers-signature rtype)
@@ -455,10 +491,21 @@
                       (inner-function values-to-vars)
                       (let [f (first check-against)
                             r (rest check-against)]
-                        (generate-conversion-function-matcher (:var f)
-                                                              (:cur-value f)
-                                                              values-to-vars
-                                                              #(br r %)))))]
+                        #_(when (and (not (rexpr? (:cur-value f)))
+                                   (not (is-rexpr-value? (:cur-value f)))
+                                   (not (is-aggregator-op-outer? matching-value))
+                                   )
+                          (debug-repl "bad type"))
+                        (if (#{:mult :file-name :boolean :str} (:type f))
+                          `(when (= ~(:cur-value f) ~(:var f))
+                             ~(br r values-to-vars))
+                          (do
+                            (when (vector? (:cur-value f))
+                              (debug-repl "bad"))
+                            (generate-conversion-function-matcher (:var f)
+                                                                  (:cur-value f)
+                                                                  values-to-vars
+                                                                  (partial br r)))))))]
       `(when (~(symbol "dyna.rexpr-constructors" (str "is-" (rexpr-name matching-value) "?")) ~matching-against-var)
          (let [~@(apply concat (map :let-expr var-expands))]
            ~(body-fn var-expands values-to-vars))))
@@ -596,6 +643,19 @@
                   l3 (converter-matching-unordered-list (:projected rtype-rexpr) (:projected rexpr) (merge matched-so-far l1 l2))]
               (merge l1 l2 l3)))
 
+          (is-aggregator-op-partial-result? rtype-rexpr)
+          (when (= (count (:group-vars rtype-rexpr)) (count (:group-vars rexpr)))
+            (for [l1 (converter-matching-rexpr (:partial-var rtype-rexpr) (:partial-var rexpr) matched-so-far)
+                  l2 ((fn rec [a b matched-so-far]
+                        (if (empty? a)
+                          (list nil)
+                          (for [l3 (converter-matching-rexpr (first a) (first b) matched-so-far)
+                                l4 (rec (rest a) (rest b) (merge matched-so-far l3))]
+                            (merge l3 l4))))
+                      (:group-vars rtype-rexpr) (:group-vars rexpr) (merge matched-so-far l1))
+                  l5 (converter-matching-rexpr (:remains rtype-rexpr) (:remains rexpr) (merge matched-so-far l1 l2))]
+              (merge l1 l2 l5)))
+
           (rexpr? rtype-rexpr)
           ((fn rec [rtype-args args matched-so-far]
              (if (empty? rtype-args)
@@ -617,19 +677,19 @@
         new-mapping (first (converter-matching-rexpr prim-rexpr rexpr {}))]
     (when-not (nil? new-mapping)
       (assoc rtype :variable-name-mapping-rev
-             (for [[a b] new-mapping]
-               (cond (instance? jit-exposed-variable-rexpr a)
-                     [(:exposed-name a) b]
-                     (is-jit-placeholder? a)
-                     [(:external-name a) b]
-                     :else (???)))))))
+             (into {} (for [[a b] new-mapping]
+                        (cond (instance? jit-exposed-variable-rexpr a)
+                              [(:exposed-name a) b]
+                              (is-jit-placeholder? a)
+                              [(:external-name a) b]
+                              :else (???))))))))
 
 (defn- synthize-rexpr [rexpr]
   ;; this will identify if an R-expr already has a type which is synthized, and either return that type/conversion function
   (let [jittype-hash (rexpr-jittype-hash rexpr)
         rtype (let [vv (volatile! nil)]
                 ;; bit odd to have this under the swap!, as it is going to potentially cause this transform to happen multiple times if there are racing threads
-                ;; which might not be the best
+                ;; which might not be the best....
                 (swap! rexpr-map-to-jit-hash-group
                        (fn [x]
                          (let [converters (get x jittype-hash)
@@ -2351,9 +2411,6 @@
                                ~(inner))))
       out-var)))
 
-(def-base-rexpr aggregator-op-partial-result [:var partial-var
-                                              :var-list group-vars
-                                              :rexpr remains])
 
 
 (def-rewrite
