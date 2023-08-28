@@ -33,7 +33,7 @@
 ;;   (with-meta (symbol "dyna.rexpr-aggregators" (str "defined-aggregator-" (:name a))) {:tag Aggregator}))
 
 (defmethod print-dup Aggregator [^Aggregator a ^java.io.Writer w]
-  (.write w (str " dyna.rexpr-aggregators/defined-aggregator-" (:name a) " ")))
+  (.write w (str "#=(var-get #'dyna.rexpr-aggregators/defined-aggregator-" (:name a) ")")))
 
 (defn is-aggregator-defined? [^String name]
   ;; this method is called by dyna.ParserUtils

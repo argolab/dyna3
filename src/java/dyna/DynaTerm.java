@@ -196,6 +196,7 @@ public final class DynaTerm implements ILookup {
     static private final Object arity_keyword;
 
     static public final DynaTerm null_term;
+    static public DynaTerm get_null_term() { return null_term; } // annoying clojure making this hard
 
     static private final Pattern no_quote_term = Pattern.compile("^\\$?[a-z][a-zA-Z0-9_]*$");
 

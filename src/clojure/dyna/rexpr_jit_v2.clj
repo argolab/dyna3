@@ -364,6 +364,24 @@
                                                                                             inner-function)))]
          ret#))))
 
+(defn- generate-ordered-list-matcher [matching-against-var
+                                      matching-value
+                                      values-to-vars
+                                      inner-function]
+  (if (= 0 (count matching-value))
+    (inner-function values-to-vars)
+    ((fn rec [a i values-to-vars]
+       (if (empty? a)
+         (inner-function values-to-vars)
+         `(do (println "pre order list matcher")
+            ~(generate-conversion-function-matcher
+             `(nth ~matching-against-var ~i)
+             (first a)
+             values-to-vars
+             #(rec (rest a) (+ i 1) %)))))
+     (seq matching-value) 0 values-to-vars)))
+
+
 (defn- generate-conversion-function-matcher [matching-against-var
                                              matching-value
                                              values-to-vars
@@ -373,7 +391,7 @@
         (is-disjunct? matching-value))
     (let [argv (gensym 'argv)]
       `(when (~(if (is-conjunct? matching-value) 'is-conjunct? 'is-disjunct?) ~matching-against-var)
-         (let [~argv (:args ~matching-against-var)]
+         (let [~argv (. ~(with-meta matching-against-var {:tag (type matching-value)}) ~'args)]
            (when (= (count ~argv) ~(count (:args matching-value)))
              ~(generate-unordered-list-matcher argv
                                                (:args matching-value)
@@ -395,8 +413,15 @@
                                              inner-function))))
 
     (is-constant? matching-value)
-    `(when (= (get-value ~matching-against-var) ~(get-value matching-value))
-       ~(inner-function values-to-vars))
+    (let [cval (get-value matching-value)]
+      (assert (not (symbol? cval)))
+      `(if (= (get-value ~matching-against-var) ~(get-value matching-value))
+         (do (println "matched against constant variable")
+             ~(inner-function values-to-vars))
+         (let [~'val-s (get-value ~matching-against-var)
+               ~'val-t ~(get-value matching-value)]
+           (debug-repl "failed match constant")
+           nil)))
 
     (is-variable? matching-value)
     (if (contains? values-to-vars matching-value)
@@ -443,37 +468,6 @@
                                                           values-to-vars
                                                           inner-function)))))))))))
 
-    (is-aggregator-op-partial-result? matching-value)
-    (let [partial-var (gensym 'agg-partial-var)
-          group-vars (doall (for [_ (range (count (:group-vars matching-value)))]
-                              (gensym 'agg-group-var)))
-          remains (gensym 'agg-remains)
-          ]
-      `(when (and (is-aggregator-op-partial-result? ~matching-against-var)
-                  (= ~(count (:group-vars matching-value))
-                     (count (. ~(with-meta matching-against-var {:tag aggregator-op-partial-result-rexpr}) ~'group-vars))))
-         (let [~partial-var (. ~(with-meta matching-against-var {:tag aggregator-op-partial-result-rexpr}) ~'partial-var)
-               [~@group-vars] (. ~(with-meta matching-against-var {:tag aggregator-op-partial-result-rexpr}) ~'group-vars)
-               ~remains (. ~(with-meta matching-against-var {:tag aggregator-op-partial-result-rexpr}) ~'remains)]
-           ~(generate-conversion-function-matcher
-             partial-var
-             (:partial-var matching-value)
-             values-to-vars
-             (fn [values-to-vars]
-               ((fn rec [a b values-to-vars]
-                  (if (empty? b)
-                    (generate-conversion-function-matcher
-                     remains
-                     (:remains matching-value)
-                     values-to-vars
-                     inner-function)
-                    (generate-conversion-function-matcher
-                     (first b)
-                     (first a)
-                     values-to-vars
-                     (partial rec (rest a) (rest b)))))
-                (:group-vars matching-value) group-vars values-to-vars))))))
-
     (rexpr? matching-value)
     (let [rtype (rexpr-name matching-value)
           rexpr-sig (get @rexpr-containers-signature rtype)
@@ -492,21 +486,28 @@
                       (let [f (first check-against)
                             r (rest check-against)]
                         #_(when (and (not (rexpr? (:cur-value f)))
-                                   (not (is-rexpr-value? (:cur-value f)))
-                                   (not (is-aggregator-op-outer? matching-value))
-                                   )
-                          (debug-repl "bad type"))
-                        (if (#{:mult :file-name :boolean :str} (:type f))
+                                     (not (is-rexpr-value? (:cur-value f)))
+                                     (not (is-aggregator-op-outer? matching-value))
+                                     )
+                            (debug-repl "bad type"))
+                        (cond (#{:mult :file-name :boolean :str} (:type f))
                           `(when (= ~(:cur-value f) ~(:var f))
+                             (println ~(str "matched value " (:cur-value f)))
                              ~(br r values-to-vars))
+
+                          (#{:var-list} (:type f))
+                          (generate-ordered-list-matcher (:var f) (:cur-value f) values-to-vars (partial br r))
+
+                          :else
                           (do
-                            (when (vector? (:cur-value f))
+                            #_(when (vector? (:cur-value f))
                               (debug-repl "bad"))
                             (generate-conversion-function-matcher (:var f)
                                                                   (:cur-value f)
                                                                   values-to-vars
                                                                   (partial br r)))))))]
       `(when (~(symbol "dyna.rexpr-constructors" (str "is-" (rexpr-name matching-value) "?")) ~matching-against-var)
+         (println ~(str "matched " (rexpr-name matching-value)))
          (let [~@(apply concat (map :let-expr var-expands))]
            ~(body-fn var-expands values-to-vars))))
 
@@ -613,6 +614,14 @@
                (merge l1 l2)))))
        rtype-list rexpr matched-so-far))))
 
+(defn- converter-matching-ordered-list [rtype-list rexpr matched-so-far]
+  (when (= (count rtype-list) (count rexpr))
+    (if (= 0 (count rtype-list))
+      (list nil)
+      (for [l1 (converter-matching-rexpr (first rtype-list) (first rexpr) matched-so-far)
+            l2 (converter-matching-ordered-list (rest rtype-list) (rest rexpr) (merge matched-so-far l1))]
+        (merge l1 l2)))))
+
 (defn- converter-matching-rexpr [rtype-rexpr rexpr matched-so-far]
   (when (or (and (rexpr? rtype-rexpr) (rexpr? rexpr))
             (and (is-rexpr-value? rtype-rexpr) (is-rexpr-value? rexpr)))
@@ -625,7 +634,8 @@
           (is-jit-placeholder? rtype-rexpr)
           (list {rtype-rexpr rexpr})
 
-          (instance? jit-exposed-variable-rexpr rtype-rexpr)
+          (or (instance? jit-exposed-variable-rexpr rtype-rexpr)
+              (instance? jit-local-variable-rexpr rtype-rexpr))
           (if (contains? matched-so-far rtype-rexpr)
             (when (= (get matched-so-far rtype-rexpr) rexpr)
               (list nil)) ;; check if this is the same variable getting matched in both cases
@@ -643,24 +653,13 @@
                   l3 (converter-matching-unordered-list (:projected rtype-rexpr) (:projected rexpr) (merge matched-so-far l1 l2))]
               (merge l1 l2 l3)))
 
-          (is-aggregator-op-partial-result? rtype-rexpr)
-          (when (= (count (:group-vars rtype-rexpr)) (count (:group-vars rexpr)))
-            (for [l1 (converter-matching-rexpr (:partial-var rtype-rexpr) (:partial-var rexpr) matched-so-far)
-                  l2 ((fn rec [a b matched-so-far]
-                        (if (empty? a)
-                          (list nil)
-                          (for [l3 (converter-matching-rexpr (first a) (first b) matched-so-far)
-                                l4 (rec (rest a) (rest b) (merge matched-so-far l3))]
-                            (merge l3 l4))))
-                      (:group-vars rtype-rexpr) (:group-vars rexpr) (merge matched-so-far l1))
-                  l5 (converter-matching-rexpr (:remains rtype-rexpr) (:remains rexpr) (merge matched-so-far l1 l2))]
-              (merge l1 l2 l5)))
-
           (rexpr? rtype-rexpr)
           ((fn rec [rtype-args args matched-so-far]
              (if (empty? rtype-args)
                (list nil)
-               (for [l1 (converter-matching-rexpr (first rtype-args) (first args) matched-so-far)
+               (for [l1 (if (vector? (first rtype-args))
+                          (converter-matching-ordered-list (first rtype-args) (first args) matched-so-far)
+                          (converter-matching-rexpr (first rtype-args) (first args) matched-so-far))
                      l2 (rec (rest rtype-args) (rest args) (merge matched-so-far l1))]
                  (merge l1 l2))))
            (get-arguments rtype-rexpr)
@@ -714,7 +713,7 @@
                                (assoc x jittype-hash (cons matches converters)))))))
                 @vv)
         ret ((:conversion-function rtype) rexpr)]
-    (assert (not (nil? ret)))
+    (dyna-assert (not (nil? ret)))
     [ret rtype]))
 
 (declare ^:private convert-to-jitted-rexpr-fn)
@@ -1212,9 +1211,8 @@
                                                                  :rexpr-value (cond (contains? g :matched-variable) (:matched-variable g)
                                                                                     (contains? g :constant-value) (:constant-value g)
                                                                                     :else (???))
-                                                                 :rexpr-list (let [v (debug-repl "rl")
+                                                                 :rexpr-list (let [;v (debug-repl "rl")
                                                                                    z (vec (map :rexpr-type (:current-value g)))]
-
                                                                                z)
                                                                  :rexpr-value-list (do
                                                                                      (debug-repl)

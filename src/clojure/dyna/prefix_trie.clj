@@ -407,12 +407,13 @@
      (assert (or (nil? root) (instance? ClojureUnorderedVector root)))))
   (PrefixTrie. arity wildcard root))
 
-(defmethod print-dup PrefixTrie [^PrefixTrie this ^java.io.Writer w]
-  (.write w (str "(dyna.prefix-trie/make-PrefixTrie "
-                 (.arity this) " "
-                 (.contains-wildcard this) " "))
-  (print-dup (.root this) w)
-  (.write w ")"))
+;; the prefix trie is going to require that the clojure hash type maps are also printable, but this does not have a print-dup method...
+#_(defmethod print-dup PrefixTrie [^PrefixTrie this ^java.io.Writer w]
+    (.write w (str "(dyna.prefix-trie/make-PrefixTrie "
+                   (.arity this) " "
+                   (.contains-wildcard this) " "))
+    (print-dup (.root this) w)
+    (.write w ")"))
 
 (defmethod print-method PrefixTrie [^PrefixTrie this ^java.io.Writer w]
   (.write w (str "(PrefixTrie "

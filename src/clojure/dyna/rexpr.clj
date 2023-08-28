@@ -566,13 +566,13 @@
 ;(intern 'dyna.rexpr-constructors 'make-structure make-structure)
 (expose-globally make-structure)
 
-(def ^:const null-term DynaTerm/null_term)
+(def null-term DynaTerm/null_term)
 
 (defmethod print-dup DynaTerm [^DynaTerm term ^java.io.Writer w]
-  (if (= (.dynabase term) term) ;; this only happens on the root $nil term when there is no dynabase
-    (.write w "dyna.DynaTerm/null_term")
+  (if (identical? (.dynabase term) term) ;; this only happens on the root $nil term when there is no dynabase
+    (.write w "#=(dyna.DynaTerm/get_null_term)")
     (do
-      (.write w "(dyna.DynaTerm. ")
+      (.write w "#=(dyna.DynaTerm. ")
       (print-dup (.name term) w)
       (.write w " ")
       (print-dup (.dynabase term) w)
@@ -583,7 +583,7 @@
       (.write w ")"))))
 
 (defmethod print-dup java.net.URL [^java.net.URL url ^java.io.Writer w]
-  (.write w "(java.net.URL. ")
+  (.write w "#=(java.net.URL. ")
   (print-dup (.toExternalForm url) w)
   (.write w ")"))
 
@@ -655,7 +655,9 @@
 
 (defn make-constant [val]
   (dyna-debug (when (nil? val) (debug-repl "make constant with nil")))
-  (assert (not (nil? val))) ;; otherwise this is a bug
+  (assert (and (not (nil? val)) ;; otherwise this is a bug
+               (not (symbol? val))
+               ))
   (dyna-debug (assert (not (instance? constant-value-rexpr val))))
   (constant-value-rexpr. val))
                                         ;(intern 'dyna.rexpr-constructors 'make-constant make-constant)

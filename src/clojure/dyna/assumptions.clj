@@ -120,7 +120,7 @@
 (defmethod print-dup assumption [^assumption this ^java.io.Writer w]
   ;; in the case that this is duplicated, this is going to have to start as
   ;; invalid, as we are going to have to recheck everything if it was to get reloaded
-  (.write w "(dyna.assumptions/make-invalid-assumption)"))
+  (.write w "#=(dyna.assumptions/make-invalid-assumption)"))
 
 (defn make-assumption []
   (assumption. (WeakHashMap.)                               ; downstream dependents
