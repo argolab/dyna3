@@ -214,6 +214,9 @@
 (defn make-nested-context-aggregator-op-inner [rexpr projected-vars incoming-var]
   (context. (get-context-bound) :aggregator-op-inner rexpr #{rexpr} (into {incoming-var nil} (for [v projected-vars] [v nil]))))
 
+(defn make-context-jit [rexpr bound-variables]
+  (context. nil :jit-root rexpr #{rexpr} bound-variables))
+
 (defmethod print-method context [this ^java.io.Writer w]
   (.write w (.toString ^Object this)))
 

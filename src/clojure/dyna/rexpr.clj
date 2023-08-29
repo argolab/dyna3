@@ -314,7 +314,7 @@
                                           :var `(~'remap-function ~(cdar v))
                                           :value `(~'remap-function ~(cdar v))
                                           :hidden-var `(~'remap-function ~(cdar v))
-                                          :var-list `(into [] (map ~'remap-function ~(cdar v)))
+                                          :var-list `(into [] (map ~'remap-function ~(#variable-rexprcdar v)))
                                           :var-map `(into {} (for [~'[kk vv] ~(cdar v)]
                                                                [~'kk (~'remap-function ~'vv)]))
                                           :var-set-map `(into #{} (for [~'s ~(cdar v)]
@@ -1361,13 +1361,13 @@
                                                   (assoc ~'old ~functor-type (conj (get ~'old ~functor-type [])
                                                                                    iter-func#))))
                ;; this needs to save the code definition for finding an iterator
-               `(when-not (:can-jit kw-args true)
-                  ;; this will want to take the matcher name and the func-body for the expression
-                  ;; the matcher will want to identify the same expression values?
+               ;; `(when (:can-jit kw-args true)
+               ;;    ;; this will want to take the matcher name and the func-body for the expression
+               ;;    ;; the matcher will want to identify the same expression values?
 
-                  ;; though there might not be that much stuff which will have custom iterator code?  I suppose that it should
-                  ;; just find what is possible with this
-                  )
+               ;;    ;; though there might not be that much stuff which will have custom iterator code?  I suppose that it should
+               ;;    ;; just find what is possible with this
+               ;;    )
                )
         ]
     ret))

@@ -305,8 +305,8 @@
 
                          (is-jit-placeholder? v)
                          (let []
-                           v ;; this will just keep the placeholder expression in the resulting R-expr
-                           )
+                           ;; we just need to rename the variables, otherwise this should just stay the same
+                           (remap-variables v args))
 
                          :else (rewrite-all-args v #(rf %1 %2 args)))
 
@@ -373,12 +373,11 @@
     ((fn rec [a i values-to-vars]
        (if (empty? a)
          (inner-function values-to-vars)
-         `(do (println "pre order list matcher")
-            ~(generate-conversion-function-matcher
-             `(nth ~matching-against-var ~i)
-             (first a)
-             values-to-vars
-             #(rec (rest a) (+ i 1) %)))))
+         (generate-conversion-function-matcher
+          `(nth ~matching-against-var ~i)
+          (first a)
+          values-to-vars
+          #(rec (rest a) (+ i 1) %))))
      (seq matching-value) 0 values-to-vars)))
 
 
@@ -415,13 +414,8 @@
     (is-constant? matching-value)
     (let [cval (get-value matching-value)]
       (assert (not (symbol? cval)))
-      `(if (= (get-value ~matching-against-var) ~(get-value matching-value))
-         (do (println "matched against constant variable")
-             ~(inner-function values-to-vars))
-         (let [~'val-s (get-value ~matching-against-var)
-               ~'val-t ~(get-value matching-value)]
-           (debug-repl "failed match constant")
-           nil)))
+      `(when (= (get-value ~matching-against-var) ~(get-value matching-value))
+         ~(inner-function values-to-vars)))
 
     (is-variable? matching-value)
     (if (contains? values-to-vars matching-value)
@@ -492,7 +486,7 @@
                             (debug-repl "bad type"))
                         (cond (#{:mult :file-name :boolean :str} (:type f))
                           `(when (= ~(:cur-value f) ~(:var f))
-                             (println ~(str "matched value " (:cur-value f)))
+                             ;(println ~(str "matched value " (:cur-value f)))
                              ~(br r values-to-vars))
 
                           (#{:var-list} (:type f))
@@ -507,7 +501,7 @@
                                                                   values-to-vars
                                                                   (partial br r)))))))]
       `(when (~(symbol "dyna.rexpr-constructors" (str "is-" (rexpr-name matching-value) "?")) ~matching-against-var)
-         (println ~(str "matched " (rexpr-name matching-value)))
+         ;(println ~(str "matched " (rexpr-name matching-value)))
          (let [~@(apply concat (map :let-expr var-expands))]
            ~(body-fn var-expands values-to-vars))))
 
@@ -867,7 +861,7 @@
 (def ^{:private true :dynamic true} *jit-consider-expanding-placeholders* false
   ;; If we want embed the placeholder in the resulting JITted type.
   )
-(def ^{:private true :dynamic true} *jit-call-simplify-on-placeholders* false
+(def ^{:private true :dynamic true} *jit-call-simplify-on-placeholders* true
   ;; if we want to generate a call to simplify on the nested expressions
   )
 
@@ -2272,7 +2266,7 @@
               *jit-generating-in-context* context
               *rewrites-allowed-to-run* #{:standard}
               *jit-consider-expanding-placeholders* false ;; TODO: this should eventually be true
-              *jit-call-simplify-on-placeholders* false
+              ;*jit-call-simplify-on-placeholders* false
               *current-assignment-to-exposed-vars* local-name-to-context
               ;*current-simplify-stack* ()
               *local-variable-names-for-variable-values* (volatile! nil)
@@ -2434,7 +2428,7 @@
                                    ~(inner))))
           (vswap! metadata assoc :out-var out-var))))
     (when-not (contains? @metadata :group-vars)
-      (debug-repl)
+      ;(debug-repl)
       (vswap! metadata assoc :group-vars (vec (remove is-bound-jit? (exposed-variables Rbody2)))))
 
     (if (is-empty-rexpr? Rbody2)
@@ -2587,11 +2581,96 @@
     (???)))
 
 (def-rewrite
-  :match (jit-placeholder _ _ _)
+  :match (jit-placeholder external-name local-name placeholder-vars)
   :run-at :jit-compiler
-  (do
-    (debug-repl "jit placeholder internal")
-    (???)))
+  (let [metadata (jit-metadata)
+        current-value (if-not (nil? external-name)
+                        ((keyword external-name) *jit-generating-rewrite-for-rexpr*)
+                        (strict-get @metadata :current-rexpr))
+        current-cljcode (if-not (nil? external-name)
+                                `(. (with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))}) ~external-name)
+                                local-name)
+        rewrite-sig {:runtime-checks []
+                     :matching-vars []
+                     :simplify-call-counter @*jit-simplify-call-counter*
+                     :kw-args {:jit-placeholder true}}]
+    (vswap! *jit-simplify-call-counter* inc)
+    (when *jit-call-simplify-on-placeholders*
+      (vswap! *jit-simplify-rewrites-found* conj [(tlocal *current-simplify-stack*)
+                                                  rewrite-sig]))
+    (when (and *jit-consider-expanding-placeholders* ;; if the placeholder is osmething that we are willing to embed into the R-expr
+               (>= (:num-simplifies-done @metadata 0) 1)
+               (or (not (is-composit-rexpr? current-value))  ;; we will embed things which do not have recursive nested R-exprs.
+                   (contains? (rexpr-jit-info current-value) :generated-name)) ;; if it is another JITted type, then we can also embed it
+               )
+      ;; then we have already done one rewrite, and the current nested R-expr is a JIT type.  This means that we can merge the two JIT type R-exprs together
+      ;; the reason that we are oging to check if the rewrite
+      (vswap! *jit-simplify-rewrites-found* conj [(tlocal *current-simplify-stack*)
+                                                  (assoc rewrite-sig :jit-hole-embed true)]))
+
+    (cond
+      (*jit-simplify-rewrites-picked-to-run* rewrite-sig)
+      (if *jit-compute-unification-failure*
+        (make-multiplicity 0)
+        (let [vars (doall (for [k placeholder-vars
+                                :let [kv (jit-evaluate-cljform k)
+                                      bv (is-bound-jit? k)]]
+                            (merge {:var k
+                                    :clj-var kv
+                                    :bound bv}
+                                   (when bv
+                                     (let [cv (jit-evaluate-cljform `(get-value ~k))]
+                                       {:current-value-clj cv
+                                        :current-value (get-current-value cv)})))))
+                                        ;values-map (into {} )
+              nested-context-var (gensym 'nested-context)
+              new-local-name (gensym 'new-hole-rexpr)
+              expanding-placeholder *jit-consider-expanding-placeholders*
+              ctx-values (into {} (for [v vars]
+                                    [(get-current-value (:clj-var v)) (:current-value v)]))
+              ctx (context/make-context-jit current-value ctx-values)
+              rewritten-rexpr (context/bind-context-raw ctx
+                                                        (simplify-fast current-value))
+              ]
+          (vswap! metadata update :num-simplifies-done (fnil inc 0))
+          (vswap! metadata assoc
+                  :simplify-fixed-pointed (= rewritten-rexpr current-value)
+                  :current-rexpr rewritten-rexpr)
+          (debug-repl "do jit placeholder rewrite")
+          (add-to-generation! (fn [inner]
+                                `(let [~nested-context-var (context/make-context-jit ~current-cljcode
+                                                                                     {~@(apply concat (for [v vars
+                                                                                                            :when (:bound v)]
+                                                                                                        [(:cljcode-expr (:clj-var v))
+                                                                                                         (:cljcode-expr (:current-value-clj v))]))})
+                                       ~new-local-name (context/bind-context ~nested-context-var
+                                                                             (~'simplify ~current-cljcode))]
+
+                                   (when (is-empty-rexpr? ~new-local-name) ;; if this is expected to get zero, then we might not have something here?
+                                     ;; or we might track if the result is zero, in which case it would have something else.
+                                     (throw (UnificationFailure. "JIT nested simplify got zero")))
+                                   ~(inner)
+                                   )))
+                                        ; *jit-consider-expanding-placeholders*
+          (make-jit-placeholder nil new-local-name placeholder-vars)))
+
+      (*jit-simplify-rewrites-picked-to-run* (assoc rewrite-sig
+                                                    :jit-hole-embed true))
+      (if *jit-compute-unification-failure*
+        (make-multiplicity 0)
+        (let []
+          ;; the R-expr which gets embedded, will have to figure out which of the expressions might
+          (add-to-generation! (fn [inner]
+                                `(do
+                                   ;; first check that the type of the expressionmatches what we are expecting
+                                   (when-not (instance? ~(type current-value) ~current-cljcode)
+                                     (throw (DynaJITRuntimeCheckFailed.)))
+                                   (let [] ;; this is going to have to expand all of the local variable names.
+                                     (???))
+                                   )))
+          (debug-repl "going to embed nested R-expr")
+          ;; this is going to have to do a type check, and then
+          (???))))))
 
 
 #_(def-rewrite
