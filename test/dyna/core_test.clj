@@ -146,3 +146,6 @@
         r2 (my-simple-interface-fn2 val 3 11)]
     (is (= r1 (+ 3 (* 11 5) (* 13 7))))
     (is (= r2 (+ 3 (* 11 5) (* 17 7))))))
+
+
+(def-base-rexpr no-arg-test-case [])

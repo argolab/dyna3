@@ -984,8 +984,10 @@
                      new-r (remap-variables rexpr remapped-locals)
                      [_ new-synth] (synthize-rexpr new-r)
                      rlocal-map (into {} (for [[k v] remapped-locals] [v k]))
-                     rvarmap (:variable-name-mapping-rev new-synth)]
-                 `(~(symbol "dyna.rexpr-constructors" (str "make-" (:generated-name new-synth)))
+                     rvarmap (:variable-name-mapping-rev new-synth)
+                     target-r ((:conversion-function new-synth) rexpr)]
+                 (assert (not (nil? target-r))) ;; if this is nil, then that means this is not a matching R-expr
+                 #_`(~(symbol "dyna.rexpr-constructors" (str "make-" (:generated-name new-synth)))
                    ~@(for [v (:variable-order new-synth)
                            :let [lv (rvarmap v)
                                  arg (get rlocal-map lv lv)]]
@@ -999,12 +1001,36 @@
                              (instance? jit-expression-variable-rexpr arg)
                              `(make-constant ~(:cljcode arg))
                              (is-jit-placeholder? arg)
-                             (if (:external-name arg)
+                             (let []
+
+                               (if (:external-name arg)
+                                 `(. ~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))})
+                                     ~(:external-name arg))
+                                 (do
+                                   (assert (:local-name arg))
+                                   (:local-name arg))))
+
+                             :else (do (debug-repl "arg type")
+                                       (???)))))
+                 `(~(symbol "dyna.rexpr-constructors" (str "make-no-simp-" (:generated-name new-synth)))
+                   ~@(for [arg (get-arguments target-r)]
+                       (cond (instance? jit-exposed-variable-rexpr arg)
+                             (if (contains? local-vars-bound arg)
+                               `(make-constant ~(strict-get (local-vars-bound arg) :var-name))
                                `(. ~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))})
-                                   ~(:external-name arg))
-                               (do
-                                 (assert (:local-name arg))
-                                 (:local-name arg)))
+                                   ~(:exposed-name arg)))
+                             (and (instance? jit-local-variable-rexpr arg) (is-bound-jit? arg))
+                             `(make-constant ~(strict-get (local-vars-bound arg) :var-name))
+                             (instance? jit-expression-variable-rexpr arg)
+                             `(make-constant ~(:cljcode arg))
+                             (is-jit-placeholder? arg)
+                             (let []
+                               (if (:external-name arg)
+                                 `(. ~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))})
+                                     ~(:external-name arg))
+                                 (do
+                                   (assert (:local-name arg))
+                                   (:local-name arg))))
 
                              :else (do (debug-repl "arg type")
                                        (???)))))))]

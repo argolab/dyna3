@@ -152,7 +152,7 @@
     `(do
        (swap! rexpr-containers-signature (fn ~'[x]
                                            (assert (not (contains? ~'x '~name))) ;; make sure that we do not define two R-exprs with the same names
-                                           (assoc ~'x '~name (quote ~vargroup))))
+                                           (assoc ~'x '~name (quote ~(vec vargroup)))))
        (declare ~(symbol (str "make-" name))
                 ~(symbol (str "make-no-simp-" name)) ;; this should really be something that is "require context"
                 ~(symbol (str "is-" name "?")))
