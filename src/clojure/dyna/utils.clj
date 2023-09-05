@@ -460,10 +460,10 @@
     (assert (tlocal-vars v))
     `(. ^ThreadVar (ThreadVar/get) ~v)))
 
-(defmacro tbinding [bnds & body]
+
+(defmacro tbinding-with-var [thread-var bnds & body]
   (assert (even? (count bnds)))
-  (let [thread-var (gensym 'thread-var)
-        stash-names (into {} (for [[k _] (partition 2 bnds)
+  (let [stash-names (into {} (for [[k _] (partition 2 bnds)
                                    :let [k2 (symbol (munge (name k)))]]
                                (do
                                  (when-not (contains? tlocal-vars k2)
@@ -471,24 +471,24 @@
                                    (println tlocal-vars)
                                    (assert false))
                                  [k2 (gensym (str "stash-" k2))])))]
-    `(let* [^ThreadVar ~thread-var (ThreadVar/get)
-            ~@(apply concat (for [[k s] stash-names] ;; cache all of the old values
+    `(let* [~@(apply concat (for [[k s] stash-names] ;; cache all of the old values
                               [s `(. ^ThreadVar ~thread-var ~k)]))
             ret#
             (try
               (do
-                ~@(for [[k v] (partition 2 bnds)]  ;; set all of the values
+                ~@(for [[k v] (partition 2 bnds)] ;; set all of the values
                     `(set! (. ^ThreadVar ~thread-var ~(symbol (munge (name k)))) ~v))
-                                        ;(debug-repl)
                 ~@body ;; evaluate the body
                 )
               (finally
                 (do
                   ~@(for [[k s] stash-names] ;; unset all of the bindings
                       `(set! (. ^ThreadVar ~thread-var ~k) ~s)))))]
-                                        ;(debug-repl "unset")
        ret#)))
 
+(defmacro tbinding [bnds & body]
+  `(let* [^ThreadVar thread-var# (ThreadVar/get)]
+     (tbinding-with-var thread-var# ~bnds ~@body)))
 
 (comment
 

@@ -314,7 +314,7 @@
                                           :var `(~'remap-function ~(cdar v))
                                           :value `(~'remap-function ~(cdar v))
                                           :hidden-var `(~'remap-function ~(cdar v))
-                                          :var-list `(into [] (map ~'remap-function ~(#variable-rexprcdar v)))
+                                          :var-list `(into [] (map ~'remap-function ~(cdar v)))
                                           :var-map `(into {} (for [~'[kk vv] ~(cdar v)]
                                                                [~'kk (~'remap-function ~'vv)]))
                                           :var-set-map `(into #{} (for [~'s ~(cdar v)]

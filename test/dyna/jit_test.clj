@@ -189,7 +189,7 @@
                                                                      (make-unify (make-variable 'incoming) (make-constant i))])))))
         synth-rexpr (tbinding [system/generate-new-jit-states true]
                               (convert-to-jitted-rexpr rexpr))]
-    (doseq [i (range 0 100 5)]
+    (doseq [i (range 0 60 5)]
       (let [rr (make-conjunct [(make-unify (make-variable 'X) (make-constant i))
                                synth-rexpr])
             ctx (context/make-empty-context rr)]

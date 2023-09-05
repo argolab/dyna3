@@ -144,12 +144,94 @@
                                               :rexpr remains])
 
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defmacro ^:private bad-gen [& args] (throw (RuntimeException. "BAD code generation.  Attempted to use some code in the generated output which should have never been used")))
+
+(def ^{:private true :dynamic true} *jit-generating-rewrite-for-rexpr* nil
+  ;; set to the root R-expr which we are creating a rewrite for
+  )
+(def ^{:private true :dynamic true} *jit-generating-in-context* nil
+  ;; set to the context which the root R-expr is present in
+  )
+
+(def ^{:private true :dynamic true} *current-assignment-to-exposed-vars* {}
+  ;; variables which are exposed will have some current value.  These values can be looked up using the *jit-generating-in-context*
+  ;; with this indirecting through what needs to happen for a given value
+  )
+
+(def ^{:private true :dynamic true} *local-variable-names-for-variable-values* nil;(volatile! nil)
+  ;; values from variables which have been read can be stored in a local variable.  these variables can just read from these local variables instead of looking through the context
+  ;; if a variable value's is read, then it should get saved to a local variable somewhere
+  )
+
+(def ^{:private true :dynamic true} *rewrites-allowed-to-run* #{:construction :standard}
+  ;; which rewrites are we allowed to attempt to run at this point the inference
+  ;; rewrites might not be run all of the time depending on if we are building a
+  ;; "standard" rewrite or an "inference" rewrite
+  )
+
+(def ^{:private true :dynamic true} *rewrites-allowed-to-use-inference-context* false
+  ;; we can perform inferences inside of the JITted context, however when
+  ;; dealing with the outer context this will only look at variable bindings
+  ;; unless this value is true.  The reason is that those inferences are still allowed to run when "fast"
+  )
+
+
+(def ^{:private true :dynamic true} *local-conjunctive-rexprs-for-infernece* nil
+  ;; local R-exprs which are conjunctive which can also be used for inference
+  )
+(def ^{:private true :dynamic true} *jit-consider-expanding-placeholders* false
+  ;; If we want embed the placeholder in the resulting JITted type.
+  )
+(def ^{:private true :dynamic true} *jit-call-simplify-on-placeholders* true
+  ;; if we want to generate a call to simplify on the nested expressions
+  )
+
+(def ^{:private true :dynamic true} *rewrite-ns*
+  ;; the namespace that the current rewrite was originally constructed in
+  (find-ns 'dyna.rexpr-jit-v2))
+
+(def ^{:private true :dynamic true} *locally-bound-variables* {}
+  ;; the variable names are going to be given new generated names, so we need to track some mapping here
+  )
+
+
+(def ^{:private true :dynamic true} *rexpr-checked-already* nil
+  ;; R-exprs which have already been checked and found to be true.  We do not want to infer an R-expr which then gets check and then just cycle
+  ;; in the rewrites that we generate, so anytime that an R-expr is rewritten as mult-1, we will track it as "already checked"
+  )
+
+
+(def ^{:private true :dynamic true} *preconditions-known-true* #{})
+
+(def ^{:private true :dynamic true} *jit-simplify-call-counter* nil)
+(def ^{:private true :dynamic true} *jit-simplify-rewrites-found* nil)
+(def ^{:private true :dynamic true} *jit-simplify-rewrites-picked-to-run* (constantly false))
+
+(def ^{:private true :dynamic true} *jit-generate-functions* nil)
+
+(def ^{:private true :dynamic true} *jit-incremented-status-counter* nil)
+
+(def ^{:private true :dynamic true} *jit-computing-match-of-rewrite* nil)
+(def ^{:private true :dynamic true} *jit-currently-rewriting* nil)
+(def ^{:private true :dynamic true} *jit-rexpr-rewrite-metadata*)
+
+;(def ^{:private true :dynamic true} *jit-before-performing-rewrite* (fn [rexpr rewrite]))
+(def ^{:private true :dynamic true} *jit-compute-unification-failure* false)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
 (defn- convert-to-primitive-rexpr [rexpr]
   ;; Not 100% sure if this method is really needed anymore, it seems like is essentially doing nothing
   (cond
-    (is-jit-placeholder? rexpr) rexpr ;; this is already a placeholder, so this just gets returned
-    (is-disjunct? rexpr) (let [       ;evars (exposed-variables rexpr)
-                               ]
+    (is-jit-placeholder? rexpr) (let []
+                                  (if-not (nil?  (:external-name rexpr))
+                                    rexpr  ;; this is already a placeholder, so this just gets returned
+                                    (make-jit-placeholder (gensym 'jr) nil (:placeholder-vars rexpr))))
+    (is-disjunct? rexpr) (let []
                            ;; this is already a primitive, so we can just continue to
                                         ;(debug-repl "prim disjunct")
                            (rewrite-rexpr-children-no-simp rexpr convert-to-primitive-rexpr))
@@ -165,7 +247,7 @@
         z (if (is-jit-placeholder? c) [c] (get-placeholder-rexprs c))]
     z))
 
-(defn- get-variables-and-path [rexpr]
+#_(defn- get-variables-and-path [rexpr]
   (cond (is-proj? rexpr) (let [body-path (get-variables-and-path (:body rexpr))
                                var (:var rexpr)
                                child-uses (some #(contains? (exposed-variables %) var)
@@ -245,9 +327,11 @@
                                                  ret)
 
                (is-jit-placeholder? rexpr) (let []
-                                             (assert (:external-name rexpr)) ;; the primitive-rexpr code is only call on the instance of the R-expr
-                                             ;; so we can just return its value directly
+                                             ;; this is generating the primitive code for the current R-expr
+                                             ;; there should be no local-name, as that would mean that it has some other expression
+                                             (assert (:external-name rexpr))
                                              (:external-name rexpr))
+
 
                :else (let [rname (rexpr-name rexpr)
                            sig (@rexpr-containers-signature rname)]
@@ -516,18 +600,20 @@
   ;; (argument) into a single synthic R-expr.  This is not going to evaluate the code and do the conversion
 
   (let [prim-rexpr (convert-to-primitive-rexpr rexpr)
-        exposed-vars (set (filter is-variable? (exposed-variables rexpr)))
-        placeholder-rexprs (set (get-placeholder-rexprs rexpr))
+        exposed-vars (set (filter is-variable? (exposed-variables prim-rexpr)))
+        placeholder-rexprs (set (get-placeholder-rexprs prim-rexpr))
         root-rexpr (gensym 'root) ;; the variable which will be the argument for the conversions
-        vars-path (get-variables-and-path rexpr)
+        ;vars-path (get-variables-and-path rexpr)
         ;[var-access var-gen-code] (get-variables-values-letexpr root-rexpr (keys vars-path)) ;; this might have to handle exceptions which are going to thrown by the
         new-rexpr-name (gensym 'jit-rexpr)
         new-arg-names (merge (into {} (map (fn [v] [v (gensym 'jv)]) exposed-vars))
-                             (into {} (map (fn [r] [r (:external-name r)]) placeholder-rexprs)))
+                             (into {} (map (fn [r]
+                                             (dyna-assert (:external-name r))
+                                             [r (:external-name r)]) placeholder-rexprs)))
         new-arg-names-rev (into {} (for [[k v] new-arg-names]
                                      [v k]))
         new-arg-order (vec (vals new-arg-names))
-        jittype-hash (rexpr-jittype-hash rexpr)
+        jittype-hash (rexpr-jittype-hash prim-rexpr)
         rexpr-def-expr `(do (def-base-rexpr ~new-rexpr-name [~@(flatten (for [a new-arg-order
                                                                               :let [v (get new-arg-names-rev a)]]
                                                                           (cond (rexpr? v) [:rexpr a]
@@ -697,11 +783,15 @@
                                x)
                              (let [new-generated (synthize-rexpr-cljcode rexpr)
                                    ;; we need to create a new converter and add it to the list
-                                   convert-function (binding [*ns* dummy-namespace]
-                                                      (eval `(do
-                                                               (ns dyna.rexpr-jit-v2)
-                                                               ~(:make-rexpr-type new-generated)
-                                                               ~(:conversion-function-expr new-generated))))
+                                   convert-function (try
+                                                      (binding [*ns* dummy-namespace]
+                                                        (eval `(do
+                                                                 (ns dyna.rexpr-jit-v2)
+                                                                 ~(:make-rexpr-type new-generated)
+                                                                 ~(:conversion-function-expr new-generated))))
+                                                      (catch Exception err (do
+                                                                             (debug-repl "convert fn" false)
+                                                                             (throw err))))
                                    matches (assoc new-generated :conversion-function convert-function)]
                                (vreset! vv matches)
                                (assoc x jittype-hash (cons matches converters)))))))
@@ -821,81 +911,6 @@
             (get-arguments rexpr))))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defmacro ^:private bad-gen [& args] (throw (RuntimeException. "BAD code generation.  Attempted to use some code in the generated output which should have never been used")))
-
-(def ^{:private true :dynamic true} *jit-generating-rewrite-for-rexpr* nil
-  ;; set to the root R-expr which we are creating a rewrite for
-  )
-(def ^{:private true :dynamic true} *jit-generating-in-context* nil
-  ;; set to the context which the root R-expr is present in
-  )
-
-(def ^{:private true :dynamic true} *current-assignment-to-exposed-vars* {}
-  ;; variables which are exposed will have some current value.  These values can be looked up using the *jit-generating-in-context*
-  ;; with this indirecting through what needs to happen for a given value
-  )
-
-(def ^{:private true :dynamic true} *local-variable-names-for-variable-values* nil;(volatile! nil)
-  ;; values from variables which have been read can be stored in a local variable.  these variables can just read from these local variables instead of looking through the context
-  ;; if a variable value's is read, then it should get saved to a local variable somewhere
-  )
-
-(def ^{:private true :dynamic true} *rewrites-allowed-to-run* #{:construction :standard}
-  ;; which rewrites are we allowed to attempt to run at this point the inference
-  ;; rewrites might not be run all of the time depending on if we are building a
-  ;; "standard" rewrite or an "inference" rewrite
-  )
-
-(def ^{:private true :dynamic true} *rewrites-allowed-to-use-inference-context* false
-  ;; we can perform inferences inside of the JITted context, however when
-  ;; dealing with the outer context this will only look at variable bindings
-  ;; unless this value is true.  The reason is that those inferences are still allowed to run when "fast"
-  )
-
-
-(def ^{:private true :dynamic true} *local-conjunctive-rexprs-for-infernece* nil
-  ;; local R-exprs which are conjunctive which can also be used for inference
-  )
-(def ^{:private true :dynamic true} *jit-consider-expanding-placeholders* false
-  ;; If we want embed the placeholder in the resulting JITted type.
-  )
-(def ^{:private true :dynamic true} *jit-call-simplify-on-placeholders* true
-  ;; if we want to generate a call to simplify on the nested expressions
-  )
-
-(def ^{:private true :dynamic true} *rewrite-ns*
-  ;; the namespace that the current rewrite was originally constructed in
-  (find-ns 'dyna.rexpr-jit-v2))
-
-(def ^{:private true :dynamic true} *locally-bound-variables* {}
-  ;; the variable names are going to be given new generated names, so we need to track some mapping here
-  )
-
-
-(def ^{:private true :dynamic true} *rexpr-checked-already* nil
-  ;; R-exprs which have already been checked and found to be true.  We do not want to infer an R-expr which then gets check and then just cycle
-  ;; in the rewrites that we generate, so anytime that an R-expr is rewritten as mult-1, we will track it as "already checked"
-  )
-
-
-(def ^{:private true :dynamic true} *preconditions-known-true* #{})
-
-(def ^{:private true :dynamic true} *jit-simplify-call-counter* nil)
-(def ^{:private true :dynamic true} *jit-simplify-rewrites-found* nil)
-(def ^{:private true :dynamic true} *jit-simplify-rewrites-picked-to-run* (constantly false))
-
-(def ^{:private true :dynamic true} *jit-generate-functions* nil)
-
-(def ^{:private true :dynamic true} *jit-incremented-status-counter* nil)
-
-(def ^{:private true :dynamic true} *jit-computing-match-of-rewrite* nil)
-(def ^{:private true :dynamic true} *jit-currently-rewriting* nil)
-(def ^{:private true :dynamic true} *jit-rexpr-rewrite-metadata*)
-
-;(def ^{:private true :dynamic true} *jit-before-performing-rewrite* (fn [rexpr rewrite]))
-(def ^{:private true :dynamic true} *jit-compute-unification-failure* false)
 
 (defn jit-metadata []
   (let [r (get @*jit-rexpr-rewrite-metadata* *jit-currently-rewriting*)]
@@ -910,7 +925,7 @@
           r (generate-cljcode (rest generate-functions))]
       (fn [inner] (f (partial r inner))))))
 
-(defn can-generate-code? []
+(defn- can-generate-code? []
   (not (nil? *jit-generate-functions*)))
 
 (defn- add-to-generation! [value]
@@ -983,6 +998,14 @@
                              `(make-constant ~(strict-get (local-vars-bound arg) :var-name))
                              (instance? jit-expression-variable-rexpr arg)
                              `(make-constant ~(:cljcode arg))
+                             (is-jit-placeholder? arg)
+                             (if (:external-name arg)
+                               `(. ~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))})
+                                   ~(:external-name arg))
+                               (do
+                                 (assert (:local-name arg))
+                                 (:local-name arg)))
+
                              :else (do (debug-repl "arg type")
                                        (???)))))))]
       (if (and simplify-result (not (is-multiplicity? rexpr)))
@@ -2184,6 +2207,7 @@
                                            (if (:aggregator-assign-value false) -20000 0)
                                            (if (contains? (:kw-args rr) :check) -200000 0) ;; checks should go earlier
                                            (if (contains? (:kw-args rr) :assigns-variable) -100000 0) ;; then assignments of variables
+                                           (if (:jit-hole-embed rr false) -10000 0) ;; if we can make the JIT state larger by embedding something inside
                                            (case (:run-at (:kw-args rr))
                                              :construction -5000 ;; if this only runs at construction, it should go quickly first
                                              :inference 5000 ;; if this is more expensive inference, therefore run it later
@@ -2276,7 +2300,9 @@
               *jit-rexpr-rewrite-metadata* (volatile! {})]
       (tbinding
        [current-simplify-stack ()
-        use-optimized-disjunct false]
+        use-optimized-disjunct false
+        memoization-make-guesses-handler (constantly false) ;; disable all guessing while we are doing compilation with the JIT
+        ]
        (debug-tbinding
         ;; restart these values, as we are running a nested version of simplify for ourselves
         [current-simplify-running nil]
@@ -2588,14 +2614,14 @@
                         ((keyword external-name) *jit-generating-rewrite-for-rexpr*)
                         (strict-get @metadata :current-rexpr))
         current-cljcode (if-not (nil? external-name)
-                                `(. (with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))}) ~external-name)
+                                `(. ~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))}) ~external-name)
                                 local-name)
         rewrite-sig {:runtime-checks []
                      :matching-vars []
                      :simplify-call-counter @*jit-simplify-call-counter*
                      :kw-args {:jit-placeholder true}}]
     (vswap! *jit-simplify-call-counter* inc)
-    (when *jit-call-simplify-on-placeholders*
+    (when (and *jit-call-simplify-on-placeholders* (not (:simplify-fixed-pointed @metadata false)))
       (vswap! *jit-simplify-rewrites-found* conj [(tlocal *current-simplify-stack*)
                                                   rewrite-sig]))
     (when (and *jit-consider-expanding-placeholders* ;; if the placeholder is osmething that we are willing to embed into the R-expr
@@ -2630,29 +2656,40 @@
                                     [(get-current-value (:clj-var v)) (:current-value v)]))
               ctx (context/make-context-jit current-value ctx-values)
               rewritten-rexpr (context/bind-context-raw ctx
-                                                        (simplify-fast current-value))
+                                                        (try
+                                                          ;; TODO: this should call different simplify methods depending on which kind of simplify we are perfoming
+                                                          ;; but in the case that it is inference, then it will need some information about the calling context
+                                                          ;; which is expensive information to "create" at runtime and pass along....
+                                                          (simplify-fast current-value)
+                                                          (catch UnificationFailure _ (make-multiplicity 0))))
               ]
+          (assert (can-generate-code?))
           (vswap! metadata update :num-simplifies-done (fnil inc 0))
           (vswap! metadata assoc
                   :simplify-fixed-pointed (= rewritten-rexpr current-value)
                   :current-rexpr rewritten-rexpr)
-          (debug-repl "do jit placeholder rewrite")
+          (debug-repl "do jit placeholder rewrite" false)
           (add-to-generation! (fn [inner]
                                 `(let [~nested-context-var (context/make-context-jit ~current-cljcode
-                                                                                     {~@(apply concat (for [v vars
-                                                                                                            :when (:bound v)]
-                                                                                                        [(:cljcode-expr (:clj-var v))
-                                                                                                         (:cljcode-expr (:current-value-clj v))]))})
-                                       ~new-local-name (context/bind-context ~nested-context-var
-                                                                             (~'simplify ~current-cljcode))]
+                                                                                     ~(into {} (for [v vars
+                                                                                                     :when (:bound v)]
+                                                                                                 [(:cljcode-expr (:clj-var v))
+                                                                                                  (:cljcode-expr (:current-value-clj v))])))
+                                       ~new-local-name (tbinding-with-var ~'**threadvar**
+                                                                          [;; this will need to have aggregators get set here
+
+                                                                           ]
+                                                                          (context/bind-context ~nested-context-var
+                                                                                                (~'simplify ~current-cljcode)))]
 
                                    (when (is-empty-rexpr? ~new-local-name) ;; if this is expected to get zero, then we might not have something here?
                                      ;; or we might track if the result is zero, in which case it would have something else.
                                      (throw (UnificationFailure. "JIT nested simplify got zero")))
                                    ~(inner)
                                    )))
-                                        ; *jit-consider-expanding-placeholders*
+
           (make-jit-placeholder nil new-local-name placeholder-vars)))
+
 
       (*jit-simplify-rewrites-picked-to-run* (assoc rewrite-sig
                                                     :jit-hole-embed true))
@@ -2670,7 +2707,10 @@
                                    )))
           (debug-repl "going to embed nested R-expr")
           ;; this is going to have to do a type check, and then
-          (???))))))
+          (???)))
+
+      :else nil ;; then we are not doing any rewrite
+      )))
 
 
 #_(def-rewrite
