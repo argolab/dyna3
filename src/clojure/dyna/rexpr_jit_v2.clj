@@ -2445,6 +2445,8 @@
 (def ^{:private true :dynamic true} *jit-aggregator-info*)
 
 (defn- aggregator-out-var []
+  (when-not (bound? #'*jit-aggregator-info*)
+    (debug-repl "agg out not bound"))
   (if (:out-var @*jit-aggregator-info*)
     (:out-var @*jit-aggregator-info*)
     (let [out-var (gensym 'aggoutA)]
