@@ -64,7 +64,7 @@ public final class ThreadVar {
 
 
     public IFn aggregator_op_saturated = new AFn () {
-            public Object invoke() {
+            public Object invoke(){
                 return false;
             }
         };
@@ -72,6 +72,10 @@ public final class ThreadVar {
     public IFn aggregator_op_get_variable_value = RT.var("dyna.base-protocols", "get-value");
 
     public boolean aggregator_op_should_eager_run_iterators = false;
+
+    // public Object aggregator_active_aggregator = null;
+    // public Object aggregator_accumulator = null;
+    // public Object aggregator_
 
 
     // system.clj
@@ -82,7 +86,7 @@ public final class ThreadVar {
     public boolean generate_new_jit_rewrites = false;
     public boolean generate_new_jit_states = false;
     public boolean recursive_transformation_to_jit_state = true;
-
+    public boolean is_generating_jit_rewrite = false;
 
     public Atom globally_defined_user_term = new Atom(RT.map());
     public Atom user_defined_terms = new Atom(RT.map());

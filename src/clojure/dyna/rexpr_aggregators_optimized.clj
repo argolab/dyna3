@@ -232,7 +232,9 @@
 
 (def-rewrite
   :match {:rexpr (aggregator-op-inner operator (:any incoming) (:any-list projected-vars) (:rexpr R))
-          :check (not (or (is-constant? incoming) (some #{incoming} (exposed-variables R))))}
+          :check (not (or (is-constant? incoming)
+                          (some #{incoming} (exposed-variables R))
+                          (tlocal is-generating-jit-rewrite)))}
   :is-debug-check-rewrite true
   :run-at :construction
   (do
@@ -283,7 +285,7 @@
   :run-at [:standard :inference]
   (let [accumulator (volatile! nil)
         exposed-vars (vec (exposed-variables Rbody))
-        debug-incoming-exposed-values (vec (map get-value exposed-vars))
+        ;debug-incoming-exposed-values (vec (map get-value exposed-vars))
         ctx (context/make-nested-context-aggregator-op-outer Rbody)
         contrib-func (fn [value mult]
                        (assert (>= mult 1))
@@ -323,9 +325,9 @@
                   (sf cur-val)))))
           (fn [] false))]
     (tbinding [aggregator-op-contribute-value contrib-func
-              aggregator-op-additional-constraints additional-constraint-func
-              aggregator-op-saturated check-saturated-func
-              aggregator-op-should-eager-run-iterators false]
+               aggregator-op-additional-constraints additional-constraint-func
+               aggregator-op-saturated check-saturated-func
+               aggregator-op-should-eager-run-iterators false]
       (let [[ret-value-map ret] (context/bind-context ctx
                                                       (try (simplify Rbody)
                                                            (catch UnificationFailure e (make-multiplicity 0))))]

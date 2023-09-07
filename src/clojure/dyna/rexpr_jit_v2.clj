@@ -221,6 +221,8 @@
 ;(def ^{:private true :dynamic true} *jit-before-performing-rewrite* (fn [rexpr rewrite]))
 (def ^{:private true :dynamic true} *jit-compute-unification-failure* false)
 
+(def ^{:private true :dynamic true} *jit-inside-disjunct* false)
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
@@ -229,7 +231,7 @@
   (cond
     (is-jit-placeholder? rexpr) (let []
                                   (if-not (nil?  (:external-name rexpr))
-                                    rexpr  ;; this is already a placeholder, so this just gets returned
+                                    rexpr ;; this is already a placeholder, so this just gets returned
                                     (make-jit-placeholder (gensym 'jr) nil (:placeholder-vars rexpr))))
     (is-disjunct? rexpr) (let []
                            ;; this is already a primitive, so we can just continue to
@@ -598,7 +600,6 @@
 (defn- synthize-rexpr-cljcode [rexpr]
   ;; this should just generate the required clojure code to convert the rexpr
   ;; (argument) into a single synthic R-expr.  This is not going to evaluate the code and do the conversion
-
   (let [prim-rexpr (convert-to-primitive-rexpr rexpr)
         exposed-vars (set (filter is-variable? (exposed-variables prim-rexpr)))
         placeholder-rexprs (set (get-placeholder-rexprs prim-rexpr))
@@ -986,7 +987,7 @@
                      rlocal-map (into {} (for [[k v] remapped-locals] [v k]))
                      rvarmap (:variable-name-mapping-rev new-synth)
                      target-r ((:conversion-function new-synth) rexpr)]
-                 (assert (not (nil? target-r))) ;; if this is nil, then that means this is not a matching R-expr
+                 (dyna-assert (not (nil? target-r))) ;; if this is nil, then that means this is not a matching R-expr
                  #_`(~(symbol "dyna.rexpr-constructors" (str "make-" (:generated-name new-synth)))
                    ~@(for [v (:variable-order new-synth)
                            :let [lv (rvarmap v)
@@ -1710,7 +1711,7 @@
                   (every? #(and (contains? % :current-value)
                                 (#{:rexpr-value-list :rexpr-list} (:type %)))
                           varjs)))
-     (let [new-vals (doall (for [group-vals (apply map list (map :current-value varjs))]
+     (let [new-vals (doall (for [group-vals (apply map list (map get-current-value varjs))]
                              ((:invoke funj) (cons func group-vals))))
            types (into #{} (map :type new-vals))]
        (assert (= 1 (count types)))
@@ -1719,7 +1720,7 @@
                 :value :value
                 :rexpr-value :rexpr-value-list)
         :current-value (if (= :value (first types))
-                         (map :current-value new-vals)
+                         (map get-current-value new-vals)
                          new-vals)
         :cljcode-expr `(list ~@(map #(:cljcode-expr % `(bad-gen)) new-vals))}
        ))))
@@ -2328,6 +2329,7 @@
        [current-simplify-stack ()
         use-optimized-disjunct false
         memoization-make-guesses-handler (constantly false) ;; disable all guessing while we are doing compilation with the JIT
+        is-generating-jit-rewrite true
         ]
        (debug-tbinding
         ;; restart these values, as we are running a nested version of simplify for ourselves
@@ -2506,8 +2508,13 @@
               (assert (can-generate-code?))
               (assert (empty? (:group-vars @metadata))) ;; TODO
               (if (contains? @metadata :out-var)
-                (do
+                (let [path (map jit-evaluate-cljform (:group-vars @metadata))
+                      current-value (if (empty? path)
+                                      @(:current-out-var @metadata)
+                                      (get-in @(:current-out-var @metadata) (map get-current-value path)))]
+                  (assert (empty? path))
                   (jit-evaluate-cljform `(set-value! ~result-variable ((. ~operator lower-value) (deref ~{:type :value
+                                                                                                          :current-value current-value
                                                                                                           :cljcode-expr (:out-var @metadata)}))))
                   (make-multiplicity 1))
                 (make-multiplicity 0))
@@ -2538,7 +2545,78 @@
                       (debug-repl "partial agg" false)
                       ret)))))))))))
 
+(defn- agg-inner-value-handle-context [rexpr incoming-variable])
+
+(defn- agg-inner-value-handle-jit [rexpr incoming-variable]
+
+  )
+
 (def-rewrite
+  :match (aggregator-op-inner operator (:any incoming) (:any-list projected-vars) (:rexpr R))
+  :run-at :jit-compiler
+  (do
+    (vswap! *jit-simplify-call-counter* inc)
+    (let [metadata (jit-metadata)
+          self-id {:runtime-checks []
+                   :matching-vars []
+                   :simplify-call-counter @*jit-simplify-call-counter*
+                   :aggregator-pass-value true
+                   :kw-args {:agg-inner true}}]
+      (when (is-multiplicity? R)
+        (vswap! *jit-simplify-rewrites-found* conj [(tlocal *current-simplify-stack*)
+                                                    self-id]))
+      (let [body (simplify R)]
+        (if (*jit-simplify-rewrites-picked-to-run* self-id)
+          (if *jit-compute-unification-failure*
+            (make-multiplicity 0)
+            (let [incoming-val (jit-evaluate-cljform `(get-value ~incoming))
+                  local-agg (bound? #'*jit-aggregator-info*)]
+              (assert (can-generate-code?))
+              (assert (and (is-multiplicity? body) (= 1 (:mult body)))) ;; TODO: this needs to handle higher mult
+              (if local-agg
+                (let [out-var (aggregator-out-var)
+                      combine-fn (jit-evaluate-cljform `(. ~operator combine-ignore-nil))
+                      path (map jit-evaluate-cljform (:group-vars @*jit-aggregator-info*))
+                      ]
+                  (add-to-generation!
+                   (if (empty? path)
+                     `(vswap! ~out-var ~(:cljcode-expr combine-fn) ~(:cljcode-expr incoming-val))
+                     `(vswap! ~out-var update-in [~@(map :cljcode-expr path)]
+                              ~(:cljcode-expr combine-fn) ~(:cljcode-expr incoming-val))))
+                  (if (empty? path)
+                    (vswap! (:current-out-var @*jit-aggregator-info*) (. operator combine-ignore-nil) (get-current-value incoming-val))
+                    (vswap! (:current-out-var @*jit-aggregator-info*) update-in (map get-current-value path)
+                            (. operator combine-ignore-nil)
+                            (get-current-value incoming-val)))
+                  (make-multiplicity 0) ;; this aggregator is done, so we just return the aggregator with value zero
+                  )
+                (do
+                  (debug-repl "value pass for external call")
+                  (???)))))
+          (if (is-empty-rexpr? body)
+            body
+            (make-no-simp-aggregator-op-inner operator incoming projected-vars body)))))))
+
+#_(def-rewrite
+  :match (aggregator-op-inner operator (:any incoming) (:any-list projected-vars) (:rexpr R))
+  :run-at :jit-compiler
+  (let [metadata (jit-metadata)
+        body (simplify R)]
+    (if (and (= R body) (not (is-bound-jit? incoming)))
+      nil ;; there is nothing rewritten/bound, so we just let this stuff continue
+      (if (is-empty-rexpr? body)
+        (do
+          (when *jit-compute-unification-failure*
+            (vswap! metadata assoc :unification-failure-empty true))
+          body)
+        (do
+          (when *jit-compute-unification-failure*
+            (vswap! metadata assoc :unification-failure-empty false))
+
+          )))
+    ))
+
+#_(def-rewrite
   :match (aggregator-op-inner operator (:any incoming) (:any-list projected-vars) (:rexpr R))
   :run-at :jit-compiler
   (let [body (simplify R)]
@@ -2564,12 +2642,12 @@
                         update-in
                         (map :current-value path)
                         (. operator combine-ignore-nil)
-                        (get-current-value incoming-val))))  ;; TODO this needs to handle the different values for this
-            ;(debug-repl "handle jit agg op inner")
+                        (get-current-value incoming-val)))) ;; TODO this needs to handle the different values for this
+                                        ;(debug-repl "handle jit agg op inner")
             (make-multiplicity 0) ;; this has already been handled, so we can remove it from the R-expr
             )
           (let [ret (make-no-simp-aggregator-op-inner operator incoming projected-vars body)]
-            ;(debug-repl "more to do in aggregator")
+                                        ;(debug-repl "more to do in aggregator")
             ret))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2587,7 +2665,8 @@
         ]
     (doseq [c children]
       (let [new-binding (volatile! @parent-variable-name-bindings)]
-        (let [r (binding [*local-variable-names-for-variable-values* new-binding]
+        (let [r (binding [*local-variable-names-for-variable-values* new-binding
+                          *jit-inside-disjunct* true]
                   (simplify c))]
           (when (or (not= r c) (not= @new-binding @parent-variable-name-bindings))
             (vreset! changed true))
