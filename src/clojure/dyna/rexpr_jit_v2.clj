@@ -1150,6 +1150,9 @@
                  :else nil)
     :rexpr-value (or (:current-value value)
                      (:constant-value value))
+    :rexpr-value-list (map get-current-value (:current-value value))
+    :rexpr (:rexpr-type value)
+    :rexpr-list (map get-current-value (:current-value value))
     (let []
       (debug-repl "todo: unknown current value type")
       (???))))
@@ -1255,9 +1258,7 @@
                                                                  :rexpr-value (cond (contains? g :matched-variable) (:matched-variable g)
                                                                                     (contains? g :constant-value) (:constant-value g)
                                                                                     :else (???))
-                                                                 :rexpr-list (let [;v (debug-repl "rl")
-                                                                                   z (vec (map :rexpr-type (:current-value g)))]
-                                                                               z)
+                                                                 :rexpr-list (vec (get-current-value g))
                                                                  :rexpr-value-list (do
                                                                                      (debug-repl)
                                                                                      (???))
@@ -1322,7 +1323,9 @@
                                              :cljcode-expr (:cljcode expr)
                                              :matched-variable expr}
 
-                                            :else (???))
+                                            :else (do
+                                                    (debug-repl "unknown rexpr value")
+                                                    (???)))
 
           (keyword? expr) (let []
                             {:type :value
@@ -1532,7 +1535,7 @@
              (dyna-assert (:current-value varj))
              {:type :value
               :cljcode-expr `(is-bound-in-context? ~(:cljcode-expr varj) ~'**context**)
-              :current-value (is-bound? (:current-value varj))})))))
+              :current-value (is-bound? (get-current-value varj))})))))
 
 (set-jit-method
  #'is-constant?
@@ -1711,7 +1714,7 @@
                   (every? #(and (contains? % :current-value)
                                 (#{:rexpr-value-list :rexpr-list} (:type %)))
                           varjs)))
-     (let [new-vals (doall (for [group-vals (apply map list (map get-current-value varjs))]
+     (let [new-vals (doall (for [group-vals (apply map list (map :current-value varjs))]
                              ((:invoke funj) (cons func group-vals))))
            types (into #{} (map :type new-vals))]
        (assert (= 1 (count types)))

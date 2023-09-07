@@ -149,7 +149,7 @@
     (tbinding
      [generate-new-jit-rewrites true]
      (let [res (context/bind-context-raw ctx (simplify-fully rr))]
-       (debug-repl)
+       ;(debug-repl)
        (is (= 7 (ctx-get-value ctx (make-variable 'C))))))
     ))
 
