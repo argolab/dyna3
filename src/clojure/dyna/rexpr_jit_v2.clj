@@ -1503,6 +1503,7 @@
                 (debug-repl "unknown bound")
                 (???))))
 
+
 ;; for expressions which can be evaluated when there is a current value, but otherwise we are not going to know
 ;; what the expression returns
 (set-jit-method
@@ -2572,7 +2573,8 @@
         (if (*jit-simplify-rewrites-picked-to-run* self-id)
           (if *jit-compute-unification-failure*
             (make-multiplicity 0)
-            (let [incoming-val (jit-evaluate-cljform `(get-value ~incoming))
+            (let [vvv (debug-repl "incoming")
+                  incoming-val (jit-evaluate-cljform `(get-value ~incoming))
                   local-agg (bound? #'*jit-aggregator-info*)]
               (assert (can-generate-code?))
               (assert (and (is-multiplicity? body) (= 1 (:mult body)))) ;; TODO: this needs to handle higher mult
@@ -2598,7 +2600,12 @@
                   (???)))))
           (if (is-empty-rexpr? body)
             body
-            (make-no-simp-aggregator-op-inner operator incoming projected-vars body)))))))
+            (do
+              (when (is-multiplicity? body)
+                (dyna-assert (is-bound-jit? incoming)))
+              (when (is-bound-jit? incoming)
+                (debug-repl "currently bound"))
+              (make-no-simp-aggregator-op-inner operator incoming projected-vars body))))))))
 
 #_(def-rewrite
   :match (aggregator-op-inner operator (:any incoming) (:any-list projected-vars) (:rexpr R))
