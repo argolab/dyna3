@@ -2546,7 +2546,7 @@
                                                                 result-variable
                                                                 ret-body)
                           ]
-                      (debug-repl "partial agg" false)
+                      ;(debug-repl "partial agg" false)
                       ret)))))))))))
 
 (defn- agg-inner-value-handle-context [rexpr incoming-variable])
@@ -2573,7 +2573,8 @@
         (if (*jit-simplify-rewrites-picked-to-run* self-id)
           (if *jit-compute-unification-failure*
             (make-multiplicity 0)
-            (let [vvv (debug-repl "incoming")
+            (let [vvv (when-not (is-bound-jit? incoming)
+                        (debug-repl "incoming"))
                   incoming-val (jit-evaluate-cljform `(get-value ~incoming))
                   local-agg (bound? #'*jit-aggregator-info*)]
               (assert (can-generate-code?))
@@ -2601,10 +2602,6 @@
           (if (is-empty-rexpr? body)
             body
             (do
-              (when (is-multiplicity? body)
-                (dyna-assert (is-bound-jit? incoming)))
-              (when (is-bound-jit? incoming)
-                (debug-repl "currently bound"))
               (make-no-simp-aggregator-op-inner operator incoming projected-vars body))))))))
 
 #_(def-rewrite
@@ -2668,13 +2665,21 @@
   (let [metadata (jit-metadata)
         ex-child (map exposed-variables children)
         exposed (apply union ex-child)
-        handle-disjunct (remove is-bound-jit? exposed) ;; anything that is bound externally does not need to be handled by the disjunct
+        ;;handle-disjunct (remove is-bound-jit? exposed) ;; anything that is bound externally does not need to be handled by the disjunct
         ret-children (transient [])
         parent-variable-name-bindings *local-variable-names-for-variable-values*
-        changed (volatile! false)
-        ]
-    (doseq [c children]
+        changed (volatile! false)]
+    #_(when (contains? @metadata :disjunct-bindings)
+      (debug-repl "handle disjunct bindings"))
+
+    (doseq [[c prev-bind] (zipseq-longest children (:disjunct-bindings @metadata))]
       (let [new-binding (volatile! @parent-variable-name-bindings)]
+        (doseq [[k v] prev-bind
+                :when (not= (@new-binding k) v)]
+          (if (nil? (@new-binding k))
+            (vswap! new-binding assoc k v)
+            (do (debug-repl "handle diff value")
+                (???))))
         (let [r (binding [*local-variable-names-for-variable-values* new-binding
                           *jit-inside-disjunct* true]
                   (simplify c))]
@@ -2689,13 +2694,17 @@
             (conj! ret-children [r @new-binding])))))
     (when @changed
       (let [ret (persistent! ret-children)
-            retd (make-disjunct (vec (map first ret)))]
-        ;(debug-repl "disjunct match")
-        (when-not (empty? handle-disjunct)
-          (???))
-        ;; this will become a disjunct-op if we use the normal make-disjunct here, and we don't want to have to deal
-        ;; when thtat kind of disjunct
-        retd))))
+            bindings (map second (remove #(is-empty-rexpr? (first %)) ret))
+            retd (vec (remove is-empty-rexpr? (map first ret)))]
+        (case (count retd)
+          0 (make-multiplicity 0)
+          1 (do
+              (vswap! *local-variable-names-for-variable-values* merge (first bindings))
+              (first retd))
+          (do
+            (when-not *jit-compute-unification-failure*
+              (vswap! metadata assoc :disjunct-bindings bindings))
+            (make-no-simp-disjunct retd)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
