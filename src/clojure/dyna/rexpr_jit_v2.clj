@@ -1658,11 +1658,6 @@
      (assert (not (nil? *jit-generate-functions*)))
      ;; this will have to track which variables are set.
      ;; it should also have that this is going to set the value in the current context.  This will mean that it will be looking for it to find
-     #_(add-to-generation! (fn [inner]
-                           `(let* [~local-value-name ~(:cljcode-expr valj)]
-                              ~(when (instance? jit-exposed-variable-rexpr (:matched-variable varj))
-                                 `(set-value-in-context! ~(:cljcode-expr varj) ~'**context** ~local-value-name))
-                              ~(inner))))
      (when (not= source-clj local-value-name)
        (add-to-generation! (fn [inner]
                              `(let* [~local-value-name ~source-clj]
@@ -2511,14 +2506,19 @@
               (assert (can-generate-code?))
               (assert (empty? (:group-vars @metadata))) ;; TODO
               (if (contains? @metadata :out-var)
-                (let [path (map jit-evaluate-cljform (:group-vars @metadata))
-                      current-value (if (empty? path)
-                                      @(:current-out-var @metadata)
-                                      (get-in @(:current-out-var @metadata) (map get-current-value path)))]
-                  (assert (empty? path))
-                  (jit-evaluate-cljform `(set-value! ~result-variable ((. ~operator lower-value) (deref ~{:type :value
-                                                                                                          :current-value current-value
-                                                                                                          :cljcode-expr (:out-var @metadata)}))))
+                (let [path (map jit-evaluate-cljform (:group-vars @metadata))]
+                  (if (empty? path)
+                    (jit-evaluate-cljform `(set-value! ~result-variable ((. ~operator lower-value) (deref ~{:type :value
+                                                                                                            :current-value (:current-out-var @metadata)
+                                                                                                            :cljcode-expr (:out-var @metadata)}))))
+                    (do
+                      (debug-repl "handle something with a path")
+                      (jit-evaluate-cljform `(set-value! ~result-variable ((. ~operator lower-value) (get-in (deref ~{:type :value
+                                                                                                                      :current-value (:current-out-var @metadata)
+                                                                                                                      :cljcode-expr (:out-var @metadata)})
+                                                                                                             [~@(map #(list 'get-value %) (:group-vars @metadata))]))))
+                      (???)))
+
                   (make-multiplicity 1))
                 (make-multiplicity 0))
               ))
