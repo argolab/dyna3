@@ -2797,10 +2797,13 @@
           (debug-repl "do jit placeholder rewrite" false)
           (add-to-generation! (fn [inner]
                                 `(let [~nested-context-var (context/make-context-jit ~current-cljcode
-                                                                                     ~(into {} (for [v vars
-                                                                                                     :when (:bound v)]
-                                                                                                 [(:cljcode-expr (:clj-var v))
-                                                                                                  (:cljcode-expr (:current-value-clj v))])))
+                                                                                     ;; using assoc here instead of a map {} because it is possible
+                                                                                     ;; that a variable will be repeated
+                                                                                     (assoc {} ~@(apply concat
+                                                                                                        (for [v vars
+                                                                                                              :when (:bound v)]
+                                                                                                          [(:cljcode-expr (:clj-var v))
+                                                                                                           (:cljcode-expr (:current-value-clj v))]))))
                                        ~new-local-name (tbinding-with-var ~'**threadvar**
                                                                           [;; this will need to have aggregators get set here
 
