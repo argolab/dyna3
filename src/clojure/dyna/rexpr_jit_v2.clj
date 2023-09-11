@@ -2830,10 +2830,32 @@
                                                           ;; which is expensive information to "create" at runtime and pass along....
                                                           (simplify-fast current-value)
                                                           (catch UnificationFailure _ (make-multiplicity 0))))
+
               aggregator-func-bindings (when (bound? #'*jit-aggregator-info*)
-                                         ['aggregator-op-contribute-value `(fn [~'incoming-value ~'mult]
-                                                                             (debug-repl "jit contribute value fun")
-                                                                             (???))]
+                                         (let [agg-path (doall
+                                                         (for [v (:group-vars @*jit-aggregator-info*)]
+                                                           (???) ;; This is going to have to handle already bound values from the local context
+                                                           ;; and also get values from the context in the case that it could be assigned elsewhere
+                                                           ))
+                                               out-var (aggregator-out-var)
+                                               op (with-meta (symbol "dyna.rexpr-aggregators" (str "defined-aggregator-"
+                                                                                                   (:name (strict-get @*jit-aggregator-info* :operator))))
+                                                    {:tag "dyna.rexpr_aggregators.Aggregator"})]
+                                           ['aggregator-op-contribute-value `(fn [~'incoming-value ~'mult]
+                                                                               (let [^RContext ~'**context** (ContextHandle/get) ;; going to reget the context, as it might have changed in the nested context, so we will still be able to get the new variable values
+                                                                                     ~'path [~@agg-path]
+                                                                                     ]
+                                                                                 (vswap! ~out-var
+                                                                                         ~@(when-not (empty? agg-path)
+                                                                                             `[update-in ~'path])
+                                                                                         (. ~op combine-ignore-nil)
+                                                                                         ((. ~op many-items) ~'incoming-value ~'mult))
+                                                                                 (debug-repl "jit contribute value fun")
+                                                                                 (make-multiplicity 0) ;; this has incoperated the value, s we record a zero R-expr
+                                                                                 ))
+                                            'aggregator-op-additional-constraints `(constantly (make-multiplicity 1))
+                                            'aggregator-op-saturated `(constantly false)
+                                            ])
                                          )
               ]
           (assert (can-generate-code?))

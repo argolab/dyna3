@@ -147,6 +147,8 @@
                 (???)) ;; this is wrong.  Nothing is projected with outer.  All of the values should just "float up"
             #_(make-conjunct [(make-variable-assignment-conjunct value-map)
                               resulting-rexpr])))
+      (= context-kind :jit-root) resulting-rexpr
+
       :else (do
               (dyna-debug (debug-repl "context unknown kind"))
               (???))))  ;; todo: other kinds of contexts which are going
