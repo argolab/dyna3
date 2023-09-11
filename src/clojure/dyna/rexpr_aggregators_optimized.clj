@@ -423,7 +423,8 @@
          :else
          (let [should-run-iterator (and (or all-exposed-bound
                                             (tlocal *aggregator-op-should-eager-run-iterators*))
-                                        (not (tlocal *simplify-looking-for-fast-fail-only*)))
+                                        (not (tlocal *simplify-looking-for-fast-fail-only*))
+                                        (not (tlocal is-generating-jit-rewrite)))
                additional-constraints ((tlocal *aggregator-op-additional-constraints*) incoming-variable)
                nR2 (if (not= (make-multiplicity 1) additional-constraints)
                      (make-conjunct [additional-constraints nR])
