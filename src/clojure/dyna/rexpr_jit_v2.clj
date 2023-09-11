@@ -1061,7 +1061,7 @@
                                ~materalize-code))))))
 
 (defn- add-unification-failure-checkpoint! [rexpr]
-  (let [materalize-code (generate-cljcode-to-materalize-rexpr rexpr :simplify-result false)]
+  (let [materalize-code (generate-cljcode-to-materalize-rexpr rexpr :simplify-result true)] ;; we want to simplify the result here, as this might be some internal branch has failed instead of the whole expression
     (add-to-generation! (fn [inner]
                           `(try
                              ~(inner)
@@ -1481,6 +1481,12 @@
                                (concat-code
                                 (gen-precondition-to-check `(not ~(:cljcode-expr condv)))
                                 (jit-evaluate-cljform false-b)))))})
+
+(swap! evaluate-symbol-meta assoc 'loop*
+       {:dyna-jit-inline (fn [[_ init & body]]
+                           ;; a loop inside of the JIT would have to figure out what the return types are.  Also this would have to deal with different
+                           ;; values during every step of the loop.  I suppose that this should not really need to be something that we are worried about in the first place
+                           (???))})
 
 (defn- set-jit-method [v f]
   (if (var? v)
@@ -2234,7 +2240,7 @@
                               @*jit-simplify-rewrites-found*))]
     (if (empty? possible-rewrites)
       (do
-        (debug-repl "no possible rewrites" false)
+        ;(debug-repl "no possible rewrites" false)
         r) ;; then we are "done" and we just return this R-expr unrewritten
       (loop [picked-rr-order (sort-by (fn [[simplify-stack rr]]
                                         (+ (* 1000 (count simplify-stack)) ;; prefer things at the top of the stack
@@ -2305,7 +2311,7 @@
           (recur nr)
           nr)))))
 
-
+()
 
 (defn- maybe-create-rewrite [context rexpr jinfo simplify-method & {:keys [simplify-inference] :or {simplify-inference false}}]
   ;; this first needs to check if it has already attempted to create a rewrite
@@ -2318,59 +2324,66 @@
                                     (let [[[f fi] & r] l]
                                       (recur (update-in m [f :index] conj fi)
                                              r))))
-        local-name-to-context (zipmap (:variable-order jinfo) (get-arguments rexpr))]
-    ;(debug-repl "aa")
-    (binding [*jit-generating-rewrite-for-rexpr* rexpr
-              *jit-generating-in-context* context
-              *rewrites-allowed-to-run* #{:standard}
-              *jit-consider-expanding-placeholders* false ;; TODO: this should eventually be true
-              ;*jit-call-simplify-on-placeholders* false
-              *current-assignment-to-exposed-vars* local-name-to-context
-              ;*current-simplify-stack* ()
-              *local-variable-names-for-variable-values* (volatile! nil)
-              *jit-generate-functions* (transient [])
-              *jit-incremented-status-counter* (volatile! false)
-              *rexpr-checked-already* (transient #{})
-              *jit-rexpr-rewrite-metadata* (volatile! {})]
-      (tbinding
-       [current-simplify-stack ()
-        use-optimized-disjunct false
-        memoization-make-guesses-handler (constantly false) ;; disable all guessing while we are doing compilation with the JIT
-        is-generating-jit-rewrite true
-        ]
-       (debug-tbinding
-        ;; restart these values, as we are running a nested version of simplify for ourselves
-        [current-simplify-running nil]
-        (let [prim-r (:prim-rexpr-placeholders jinfo)
-              result (simplify-jit-internal-rexpr-loop prim-r)]
-          (when (is-jit-placeholder? result)
-            (let [v (if (:external-name result)
-                      `(. ~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))})
-                          ~(:external-name result))
-                      (:local-name result))]
-              (add-to-generation! (fn [inner]
-                                    ;; then we are not going to call the inner function, and instead will just return the result of the placeholder
-                                    ;; this means looking up the placeholder's name and returning that
-                                    v))))
-          (if (or (not= result prim-r) (is-jit-placeholder? result))
-            ;; then there is something that we can generate, and we are going to want to run that generation and then evaluate it against the current R-expr
-            (let [gen-fn (generate-cljcode-fn result)
-                  __ (println gen-fn)
-                  __ (debug-repl "pr0" false)
-                  fn-evaled (binding [*ns* dummy-namespace]
-                              (eval `(do
-                                       (ns dyna.rexpr-jit-v2)
-                                       (def-rewrite-direct ~(:generated-name jinfo) [:standard] ~gen-fn))))]
-
-              (debug-repl "pr1" false)
-              (let [rr (try (fn-evaled rexpr simplify-method)
-                            (catch UnificationFailure _ (make-multiplicity 0)))]
-                (debug-repl "pr2" false)
-                (assert (not= rexpr rr)) ;; otherwise there was no rewriting done, and the generated rewrite failed for some reason
-                rr))
-            (do
-              ;; then there was nothing that can be rewritten, so this should just return the same R-expr back
-              rexpr))))))))
+        local-name-to-context (zipmap (:variable-order jinfo) (get-arguments rexpr))
+        generated-function
+        (binding [*jit-generating-rewrite-for-rexpr* rexpr
+                  *jit-generating-in-context* context
+                  *rewrites-allowed-to-run* #{:standard}
+                  *jit-consider-expanding-placeholders* false ;; TODO: this should eventually be true
+                                        ;*jit-call-simplify-on-placeholders* false
+                  *current-assignment-to-exposed-vars* local-name-to-context
+                                        ;*current-simplify-stack* ()
+                  *local-variable-names-for-variable-values* (volatile! nil)
+                  *jit-generate-functions* (transient [])
+                  *jit-incremented-status-counter* (volatile! false)
+                  *rexpr-checked-already* (transient #{})
+                  *jit-rexpr-rewrite-metadata* (volatile! {})]
+          (tbinding
+           [current-simplify-stack ()
+            use-optimized-disjunct false
+            memoization-make-guesses-handler (constantly false) ;; disable all guessing while we are doing compilation with the JIT
+            is-generating-jit-rewrite true
+            aggregator-op-contribute-value (fn [& args] (???)) ;; this should not get called directly from the JIT
+            ]
+           (debug-tbinding
+            ;; restart these values, as we are running a nested version of simplify for ourselves
+            [current-simplify-running nil]
+            (let [prim-r (:prim-rexpr-placeholders jinfo)
+                  result (simplify-jit-internal-rexpr-loop prim-r)]
+              (when (is-jit-placeholder? result)
+                (let [v (if (:external-name result)
+                          `(. ~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))})
+                              ~(:external-name result))
+                          (:local-name result))]
+                  (add-to-generation! (fn [inner]
+                                        ;; then we are not going to call the inner function, and instead will just return the result of the placeholder
+                                        ;; this means looking up the placeholder's name and returning that
+                                        v))))
+              (if (or (not= result prim-r) (is-jit-placeholder? result))
+                ;; then there is something that we can generate, and we are going to want to run that generation and then evaluate it against the current R-expr
+                (let [gen-fn (generate-cljcode-fn result)
+                      __ (println gen-fn)
+                      __ (debug-repl "pr0" false)
+                      fn-evaled (binding [*ns* dummy-namespace]
+                                  (eval `(do
+                                           (ns dyna.rexpr-jit-v2)
+                                           (def-rewrite-direct ~(:generated-name jinfo) [:standard] ~gen-fn))))]
+                  fn-evaled
+                                        ;(debug-repl "pr1" false)
+                  #_(let [rr (try (fn-evaled rexpr simplify-method)
+                                (catch UnificationFailure _ (make-multiplicity 0)))]
+                    (when (is-empty-rexpr? rr)
+                      (debug-repl "pr2" false))
+                    (assert (not= rexpr rr)) ;; otherwise there was no rewriting done, and the generated rewrite failed for some reason
+                    rr))
+                simplify-identity ;; if nothing was generated, then we are just going to return an identity function which does not do any rewriting
+                )))))
+        ;; evaluate the function here so that we clear all of the bindings which are specific to the JIT.   This should get back to whatever is the JIT's
+        rr (generated-function rexpr simplify-method)]
+    (assert (or (not= rr rexpr) (identical? simplify-identity generated-function)))
+    #_(when (is-empty-rexpr? rr)
+      (debug-repl "empty r" false))
+    rr))
 
 (defn- maybe-create-rewrites-inference [context rexpr jinfo]
   (???))
@@ -2525,7 +2538,8 @@
               (assert (can-generate-code?))
               (assert (empty? (:group-vars @metadata))) ;; TODO
               (if (contains? @metadata :out-var)
-                (let [path (map jit-evaluate-cljform (:group-vars @metadata))]
+                (let [path (map jit-evaluate-cljform (:group-vars @metadata))
+                      ]
                   (if (empty? path)
                     (jit-evaluate-cljform `(set-value! ~result-variable ((. ~operator lower-value) (deref ~{:type :value
                                                                                                             :current-value (:current-out-var @metadata)
@@ -2635,7 +2649,7 @@
                         )))
                   ;; this can have that some R-expr will get returned, in which case it will have to handle the returned value
 
-                  (debug-repl "value pass for external call")
+                  ;(debug-repl "value pass for external call")
                   (let [r (make-jit-placeholder nil agg-contrib-result [])
                         rm (jit-metadata r)]
                     ;; just assume that the result is zero, in which case there would be nothing to do here.  This will realistically
@@ -2850,7 +2864,7 @@
                                                                                              `[update-in ~'path])
                                                                                          (. ~op combine-ignore-nil)
                                                                                          ((. ~op many-items) ~'incoming-value ~'mult))
-                                                                                 (debug-repl "jit contribute value fun")
+                                                                                 ;(debug-repl "jit contribute value fun")
                                                                                  (make-multiplicity 0) ;; this has incoperated the value, s we record a zero R-expr
                                                                                  ))
                                             'aggregator-op-additional-constraints `(constantly (make-multiplicity 1))
@@ -2879,7 +2893,7 @@
                                                                            ]
                                                                           (context/bind-context ~nested-context-var
                                                                                                 (~'simplify ~current-cljcode)))]
-
+                                   (debug-repl "after placeholder simplify inner" false)
                                    (when (is-empty-rexpr? ~new-local-name) ;; if this is expected to get zero, then we might not have something here?
                                      ;; or we might track if the result is zero, in which case it would have something else.
                                      (throw (UnificationFailure. "JIT nested simplify got zero")))

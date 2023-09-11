@@ -1,7 +1,7 @@
 (ns dyna.jit-test
     (:require [clojure.test :refer :all])
     (:require [dyna.core])
-    (:require [dyna.rexpr :refer [simplify simplify-fully null-term]])
+    (:require [dyna.rexpr :refer [simplify simplify-fully null-term simplify-top]])
     (:require [dyna.utils :refer :all])
     (:require [dyna.rexpr-constructors :refer :all])
     (:require [dyna.rexpr-jit-v2 :refer :all])
@@ -185,7 +185,7 @@
 (deftest basic-jit9
   (let [rexpr (make-aggregator "+=" (make-variable 'result) (make-variable 'incoming) true
                                (make-disjunct (vec (for [i (range 0 100)]
-                                                     (make-conjunct [(make-lessthan-eq (make-variable 'X) (make-constant i) (make-constant true))
+                                                     (make-conjunct [(make-lessthan-eq (make-constant i) (make-variable 'X) (make-constant true))
                                                                      (make-unify (make-variable 'incoming) (make-constant i))])))))
         synth-rexpr (tbinding [system/generate-new-jit-states true]
                               (convert-to-jitted-rexpr rexpr))]
