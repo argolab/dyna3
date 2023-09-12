@@ -2363,7 +2363,7 @@
                 ;; then there is something that we can generate, and we are going to want to run that generation and then evaluate it against the current R-expr
                 (let [gen-fn (generate-cljcode-fn result)
                       __ (println gen-fn)
-                      __ (debug-repl "pr0" false)
+                      ;__ (debug-repl "pr0" false)
                       fn-evaled (binding [*ns* dummy-namespace]
                                   (eval `(do
                                            (ns dyna.rexpr-jit-v2)
@@ -2498,24 +2498,42 @@
         Rbody2 (if (is-aggregator-op-partial-result? Rbody1)
                    (:remains Rbody1)
                    Rbody1)]
-    (vswap! metadata update :outer-call-count (fnil inc 0))
-    (vswap! metadata assoc :operator operator)
-    (when (nil? (:current-out-var @metadata))
-      (vswap! metadata assoc :current-out-var (volatile! nil)))
-    (when (and (empty? @metadata) (is-aggregator-op-partial-result? Rbody1))
+    (when (and (can-generate-code?)
+               (is-aggregator-op-partial-result? Rbody1)
+               (not *jit-compute-unification-failure*))
+      (if (contains? @metadata :group-vars)
+        (assert (= (:group-vars Rbody1) (@metadata :group-vars)))
+        (vswap! metadata assoc :group-vars (:group-vars Rbody1)))
+      (if (contains? @metadata :out-var)
+        (dyna-assert (= (:cljcode (:partial-var Rbody1)) `(deref ~(:out-var @metadata))))
+        (let [out-var (gensym 'aggoutB)
+              prev-vals (jit-evaluate-cljform `(get-value ~(:partial-var Rbody1)))]
+          (debug-repl "load agg var")
+          (add-to-generation! (fn [inner]
+                                `(let* [~out-var (volatile! ~(:cljcode-expr prev-vals))]
+                                   ~(inner))))
+          (vswap! metadata assoc :out-var out-var :current-out-var (volatile! (get-current-value prev-vals))))))
+
+    #_(when (and (empty? @metadata) (is-aggregator-op-partial-result? Rbody1))
       (when-not (contains? @metadata :group-vars)
         (vswap! metadata assoc :group-vars (:group-vars Rbody1)))
       (when (and (not (contains? @metadata :out-var))
                  (can-generate-code?))
         (let [out-var (gensym 'aggoutB)
               prev-vals (jit-evaluate-cljform `(get-value ~(:partial-var Rbody1)))]
+          (debug-repl "prev get value")
           (add-to-generation! (fn [inner]
                                 `(let* [~out-var (volatile! ~(:cljcode-expr prev-vals))]
                                    ~(inner))))
-          (vswap! metadata assoc :out-var out-var))))
-    (when-not (contains? @metadata :group-vars)
-      ;(debug-repl)
-      (vswap! metadata assoc :group-vars (vec (remove is-bound-jit? (exposed-variables Rbody2)))))
+          (vswap! metadata assoc :out-var out-var :current-out-var (volatile! (get-current-value prev-vals))))))
+
+    ;(vswap! metadata update :outer-call-count (fnil inc 0))
+    (vswap! metadata assoc :operator operator)
+    (when (can-generate-code?)
+      (when (nil? (:current-out-var @metadata))
+        (vswap! metadata assoc :current-out-var (volatile! nil)))
+      (when-not (contains? @metadata :group-vars)
+        (vswap! metadata assoc :group-vars (vec (remove is-bound-jit? (exposed-variables Rbody2))))))
 
     (if (is-empty-rexpr? Rbody2)
       (do
@@ -2534,52 +2552,67 @@
           (if *jit-compute-unification-failure*
             (make-multiplicity 0)
             (let []
-              (debug-repl "pick agg")
+
               (assert (can-generate-code?))
               (assert (empty? (:group-vars @metadata))) ;; TODO
               (if (contains? @metadata :out-var)
                 (let [path (map jit-evaluate-cljform (:group-vars @metadata))
+                      agg-var `(deref ~(:out-var @metadata))
+                      agg-get (if (empty? path) agg-var `(get-in ~agg-var [~@(map #(list 'get-value %) (:group-vars @metadata))]))
+                      agg-lower `((. ~(with-meta (symbol "dyna.rexpr-aggregators" (str "defined-aggregator-" (:name operator)))
+                                        {:tag "dyna.rexpr_aggregators.Aggregator"})
+                                     ~'lower-value)
+                                  ~agg-get)
+                      agg-out-var (gensym 'agg-out-value)
+                      agg-current (if (empty? path)
+                                    @(:current-out-var @metadata)
+                                    (get-in @(:current-out-var @metadata) (map get-current-value path)))
                       ]
-                  (if (empty? path)
-                    (jit-evaluate-cljform `(set-value! ~result-variable ((. ~operator lower-value) (deref ~{:type :value
-                                                                                                            :current-value (:current-out-var @metadata)
-                                                                                                            :cljcode-expr (:out-var @metadata)}))))
-                    (do
-                      (debug-repl "handle something with a path")
-                      (jit-evaluate-cljform `(set-value! ~result-variable ((. ~operator lower-value) (get-in (deref ~{:type :value
-                                                                                                                      :current-value (:current-out-var @metadata)
-                                                                                                                      :cljcode-expr (:out-var @metadata)})
-                                                                                                             [~@(map #(list 'get-value %) (:group-vars @metadata))]))))
-                      (???)))
-
+                  (debug-repl "pick agg")
+                  (add-to-generation! (fn [inner]
+                                        `(let [~agg-out-var ~agg-lower]
+                                           (debug-repl "jitted agg out")
+                                           (when (nil? ~agg-out-var)
+                                             (throw (UnificationFailure. "aggregator is over nothing")))
+                                           ~(inner))))
+                  (jit-evaluate-cljform `(set-value! ~result-variable ~{:type :value
+                                                                        :cljcode-expr agg-out-var
+                                                                        :current-value (if (nil? agg-current) ;; if the current value is nil, then that means that nothing was aggregated, which would just be the unification failure case.  However, we are going to generate assuming that something will be returned.  Hence, we will just fill in the dummy value of 0 for this
+                                                                                         0
+                                                                                         agg-current)}))
                   (make-multiplicity 1))
                 (make-multiplicity 0))
               ))
-          nil))
+          (if (contains? @metadata :out-var)
+            (make-no-simp-aggregator-op-outer operator
+                                              result-variable
+                                              (make-no-simp-aggregator-op-partial-result (jit-expression-variable-rexpr. `(deref ~(:out-var @metadata)))
+                                                                                         (:group-vars @metadata)
+                                                                                         Rbody2))
+            nil)))
       (let [group-vars (:group-vars @metadata)
             body (binding [*jit-aggregator-info* metadata]
                    (simplify Rbody2))]
         (if (and (= body Rbody2) (nil? (:out-var @metadata)))
-          nil ;; then nothing was rewritten
-          (do
-            (if (and (is-empty-rexpr? body) (empty? (:group-vars @metadata)) (not (contains? @metadata :out-var)))
-              (make-multiplicity 0)
-              (do
-                ;; this is some partially evaluated expression, which will then have to figure out if there is something which could
-                ;; allow for it
+          nil
+          (if (and (is-empty-rexpr? body) (empty? (:group-vars @metadata)) (not (contains? @metadata :out-var)))
+            (make-multiplicity 0)
+            (do
+              ;; this is some partially evaluated expression, which will then have to figure out if there is something which could
+              ;; allow for it
                                         ;(debug-repl "jit in agg op" false)
-                (if-not (contains? @metadata :out-var)
-                  (make-no-simp-aggregator-op-outer operator result-variable body)
-                  (let [outvar (:out-var @metadata)]
-                    (let [ret-body (make-no-simp-aggregator-op-partial-result (jit-expression-variable-rexpr. `(deref ~outvar))
-                                                                              group-vars
-                                                                              body)
-                          ret (make-no-simp-aggregator-op-outer operator
-                                                                result-variable
-                                                                ret-body)
-                          ]
-                      ;(debug-repl "partial agg" false)
-                      ret)))))))))))
+              (if-not (contains? @metadata :out-var)
+                (make-no-simp-aggregator-op-outer operator result-variable body)
+                (let [outvar (:out-var @metadata)]
+                  (let [ret-body (make-no-simp-aggregator-op-partial-result (jit-expression-variable-rexpr. `(deref ~outvar))
+                                                                            group-vars
+                                                                            body)
+                        ret (make-no-simp-aggregator-op-outer operator
+                                                              result-variable
+                                                              ret-body)
+                        ]
+                                        ;(debug-repl "partial agg" false)
+                    ret))))))))))
 
 (defn- agg-inner-value-handle-context [rexpr incoming-variable])
 
@@ -2789,6 +2822,14 @@
     (???)))
 
 (def-rewrite
+  :match (jit-placeholder _ _ placeholder-vars)
+  :run-at :construction
+  :is-check-rewrite true
+  (do
+    (dyna-assert (not (some is-constant? placeholder-vars)))
+    nil))
+
+(def-rewrite
   :match (jit-placeholder external-name local-name placeholder-vars)
   :run-at :jit-compiler
   (let [metadata (jit-metadata)
@@ -2796,8 +2837,8 @@
                         ((keyword external-name) *jit-generating-rewrite-for-rexpr*)
                         (strict-get @metadata :current-rexpr))
         current-cljcode (if-not (nil? external-name)
-                                `(. ~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))}) ~external-name)
-                                local-name)
+                          `(. ~(with-meta 'rexpr {:tag (.getName (type *jit-generating-rewrite-for-rexpr*))}) ~external-name)
+                          local-name)
         rewrite-sig {:runtime-checks []
                      :matching-vars []
                      :simplify-call-counter @*jit-simplify-call-counter*
@@ -2805,10 +2846,14 @@
     (vswap! *jit-simplify-call-counter* inc)
     (when (and *jit-call-simplify-on-placeholders* (not (:simplify-fixed-pointed @metadata false)))
       (vswap! *jit-simplify-rewrites-found* conj [(tlocal *current-simplify-stack*)
-                                                  rewrite-sig]))
+                                                  rewrite-sig])
+      (when (and (can-generate-code?)
+                 (bound? #'*jit-aggregator-info*))
+        ;; make sure the out var is pre populated, otherwise this is going to have that this will result in nothing
+        (aggregator-out-var)))
     (when (and *jit-consider-expanding-placeholders* ;; if the placeholder is osmething that we are willing to embed into the R-expr
                (>= (:num-simplifies-done @metadata 0) 1)
-               (or (not (is-composit-rexpr? current-value))  ;; we will embed things which do not have recursive nested R-exprs.
+               (or (not (is-composit-rexpr? current-value)) ;; we will embed things which do not have recursive nested R-exprs.
                    (contains? (rexpr-jit-info current-value) :generated-name)) ;; if it is another JITted type, then we can also embed it
                )
       ;; then we have already done one rewrite, and the current nested R-expr is a JIT type.  This means that we can merge the two JIT type R-exprs together
@@ -2864,7 +2909,7 @@
                                                                                              `[update-in ~'path])
                                                                                          (. ~op combine-ignore-nil)
                                                                                          ((. ~op many-items) ~'incoming-value ~'mult))
-                                                                                 ;(debug-repl "jit contribute value fun")
+                                        ;(debug-repl "jit contribute value fun")
                                                                                  (make-multiplicity 0) ;; this has incoperated the value, s we record a zero R-expr
                                                                                  ))
                                             'aggregator-op-additional-constraints `(constantly (make-multiplicity 1))
@@ -2888,7 +2933,7 @@
                                                                                                           [(:cljcode-expr (:clj-var v))
                                                                                                            (:cljcode-expr (:current-value-clj v))]))))
                                        ~new-local-name (tbinding-with-var ~'**threadvar**
-                                                                          [;; this will need to have aggregators get set here
+                                                                          [ ;; this will need to have aggregators get set here
                                                                            ~@aggregator-func-bindings
                                                                            ]
                                                                           (context/bind-context ~nested-context-var
