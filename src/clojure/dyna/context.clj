@@ -61,7 +61,8 @@
         ;; then depending on the kind of context this is, we might have different behavior of
         ;; setting the value of the variable.
         (if (or (contains? #{:root :disjunct :aggregator :if-expr-coditional :memo-expr-conditional :aggregator-op-outer
-                             } context-kind)
+                             :jit-root}
+                           context-kind)
                 (and (contains? #{:aggregator-conjunctive :proj :aggregator-op-inner} context-kind)
                      (contains? value-map variable)))
           ;; then we set the value locally
