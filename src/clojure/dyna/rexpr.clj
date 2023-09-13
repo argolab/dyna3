@@ -55,9 +55,10 @@
 
 ;; functions which define how iterators are accessed for a given Rexpr
 (def rexpr-iterators-accessors (atom {}))
+(def rexpr-iterators-source (atom {}))
 
 
-;(def ^:dynamic *current-matched-rexpr* nil)
+                                        ;(def ^:dynamic *current-matched-rexpr* nil)
 #_(def ^:dynamic *current-top-level-rexpr* nil)
 #_(def ^:dynamic *current-simplify-stack* [])  ;; the last value of this is used for tracking :constructed-from
 #_(def ^:dynamic *current-simplify-running* nil)
@@ -1354,10 +1355,14 @@
         matcher-rexpr (if (map? matcher) (:rexpr matcher) matcher)
         functor-name (car matcher-rexpr)
         functor-type (symbol (str functor-name "-rexpr"))
+        can-jit (:can-jit kw-args true)
         iter-func `(fn ~'[rexpr]
                      (match-rexpr ~'rexpr ~matcher ~func-body))
-        ret `(let [iter-func# ~iter-func]
-               (swap! rexpr-iterators-accessors (fn ~'[old]
+        ret `(let [~'iter-func-var ~iter-func]
+               ~(when can-jit
+                  `(swap! rexpr-iterators-source update ~functor-type conj [(quote kw-args) (quote func-body)]))
+               (swap! rexpr-iterators-accessors update ~functor-type conj ~'iter-func-var)
+               #_(swap! rexpr-iterators-accessors (fn ~'[old]
                                                   (assoc ~'old ~functor-type (conj (get ~'old ~functor-type [])
                                                                                    iter-func#))))
                ;; this needs to save the code definition for finding an iterator

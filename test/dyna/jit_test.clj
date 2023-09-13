@@ -1,7 +1,7 @@
 (ns dyna.jit-test
     (:require [clojure.test :refer :all])
     (:require [dyna.core])
-    (:require [dyna.rexpr :refer [simplify simplify-fully null-term simplify-top]])
+    (:require [dyna.rexpr :refer [simplify simplify-fully null-term simplify-top find-iterators]])
     (:require [dyna.utils :refer :all])
     (:require [dyna.rexpr-constructors :refer :all])
     (:require [dyna.rexpr-jit-v2 :refer :all])
@@ -197,6 +197,14 @@
                   (let [res2 (context/bind-context-raw ctx (simplify-fully rr))]
                     (debug-repl "test")
                     (is (= (/ (* i (+ i 1)) 2) (ctx-get-value ctx (make-variable 'result))))))))))
+
+(deftest basic-jit10
+  (let [rexpr (make-conjunct [(make-unify (make-variable 'X) (make-variable 'Y))
+                              (make-range (make-constant 0) (make-constant 10) (make-constant 1) (make-variable 'X) (make-constant true))])
+        synth-rexpr (tbinding [system/generate-new-jit-states true]
+                              (convert-to-jitted-rexpr rexpr))
+        iters (find-iterators synth-rexpr)]
+    (is (not (empty? iters)))))
 
 
 ;; the reflect-structure can create new variables in project statements, which need to get handled.

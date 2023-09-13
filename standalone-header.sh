@@ -105,7 +105,7 @@ while [ $# -gt 0 ]; do
             exit 0
             ;;
         --version)
-            echo "Version: $version"
+            echo "Dyna Version: $version"
             exit 0
             ;;
         -agentlib*|-D*|-XX*)
