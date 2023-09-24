@@ -552,33 +552,36 @@
   :assigns-variable Contained
   false)
 
+(defn- ^{:dyna-jit-external true} range-iterator [Out low-v high-v step-v]
+  (let [r (range low-v high-v step-v)]
+    #{(reify DIterable
+        (iter-what-variables-bound [this] #{Out})
+        (iter-variable-binding-order [this] [[Out]])
+        (iter-create-iterator [this which-binding]
+          (reify DIterator
+            (iter-run-cb [this cb-fn] (doseq [v (iter-run-iterable this)] (cb-fn v)))
+            (iter-run-iterable [this]
+              (for [v r]
+                (reify DIteratorInstance
+                  (iter-variable-value [this] v)
+                  (iter-continuation [this] nil))))
+            (iter-run-iterable-unconsolidated [this] (iter-run-iterable this))
+            (iter-bind-value [this value]
+              (if (and (int? value) (< (mod (- value low-v) step-v) high-v))
+                iterator-empty-instance
+                nil))
+            (iter-estimate-cardinality [this]
+              (quot (- high-v low-v) step-v)
+                                        ;(count r) ;; this is not optimized, as it will scan through the entire list when doing this count
+              ))))}))
+
 (def-iterator
   :match (range (:ground Low) (:ground High) (:ground Step) (:free Out) (is-true? Contained))
   (let [low-v (get-value Low)
         high-v (get-value High)
         step-v (get-value Step)]
     (when (and (int? low-v) (int? high-v) (int? step-v))
-      (let [r (range low-v high-v step-v)]
-        #{(reify DIterable
-            (iter-what-variables-bound [this] #{Out})
-            (iter-variable-binding-order [this] [[Out]])
-            (iter-create-iterator [this which-binding]
-              (reify DIterator
-                (iter-run-cb [this cb-fn] (doseq [v (iter-run-iterable this)] (cb-fn v)))
-                (iter-run-iterable [this]
-                  (for [v r]
-                    (reify DIteratorInstance
-                      (iter-variable-value [this] v)
-                      (iter-continuation [this] nil))))
-                (iter-run-iterable-unconsolidated [this] (iter-run-iterable this))
-                (iter-bind-value [this value]
-                  (if (and (int? value) (< (mod (- value low-v) step-v) high-v))
-                    iterator-empty-instance
-                    nil))
-                (iter-estimate-cardinality [this]
-                  (quot (- high-v low-v) step-v)
-                  ;(count r) ;; this is not optimized, as it will scan through the entire list when doing this count
-                  ))))}))))
+      (range-iterator Out low-v high-v step-v))))
 
 
 ;; there should be notation that this is going to introduce a disjunct

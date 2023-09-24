@@ -1360,7 +1360,7 @@
                      (match-rexpr ~'rexpr ~matcher ~func-body))
         ret `(let [~'iter-func-var ~iter-func]
                ~(when can-jit
-                  `(swap! rexpr-iterators-source update ~functor-type conj [(quote ~kw-args) (quote ~func-body)]))
+                  `(swap! rexpr-iterators-source update ~functor-type conj [(quote ~kw-args) (quote ~func-body) ~'*ns*]))
                (swap! rexpr-iterators-accessors update ~functor-type conj ~'iter-func-var)
                #_(swap! rexpr-iterators-accessors (fn ~'[old]
                                                   (assoc ~'old ~functor-type (conj (get ~'old ~functor-type [])
