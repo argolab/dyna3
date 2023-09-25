@@ -577,7 +577,7 @@
         new-arg-order (vec (vals new-arg-names))
         jittype-hash (rexpr-jittype-hash prim-rexpr)
         prim-rexpr-with-placeholder (primitive-rexpr-with-placeholders prim-rexpr new-arg-names)
-        find-iterator-code (binding [*jit-generating-rewrite-for-rexpr* (str "dyna.rexpr_jit_v2" (munge new-rexpr-name))
+        find-iterator-code (binding [*jit-generating-rewrite-for-rexpr* (str "dyna.rexpr_jit_v2." new-rexpr-name "-rexpr")
                                      *local-variable-names-for-variable-values* (volatile! nil)
                                      ]
                              (find-iterators-cljcode prim-rexpr-with-placeholder))
@@ -623,12 +623,15 @@
                                                                                                    (strict-get new-arg-names-rev a))))))))))
         def-iterator-expr (when find-iterator-code
                             `(swap! rexpr-iterators-accessors update ~(symbol (str new-rexpr-name "-rexpr")) conj
-                                    (fn [~(with-meta 'rexpr {:tag (str "dyna.rexpr_jit_v2" (munge new-rexpr-name))})]
-                                      ~find-iterator-code)))
+                                    (fn [~(with-meta 'rexpr {:tag (str "dyna.rexpr_jit_v2." new-rexpr-name "-rexpr")})]
+                                      (let [^RContext ~'**context** (ContextHandle/get)
+                                            ^ThreadVar ~'**threadvar** (ThreadVar/get)]
+                                        ~find-iterator-code))))
         ret {:orig-rexpr rexpr
              :prim-rexpr prim-rexpr
              :generated-name new-rexpr-name
              :make-rexpr-type rexpr-def-expr
+             :def-iterator-expr def-iterator-expr
              :conversion-function-expr conversion-function-expr
                                         ;:variable-name-mapping new-arg-names ;; map from existing-name -> new jit-name
              :variable-name-mapping-rev new-arg-names-rev
@@ -761,6 +764,7 @@
                                                         (eval `(do
                                                                  (ns dyna.rexpr-jit-v2)
                                                                  ~(:make-rexpr-type new-generated)
+                                                                 ~(:def-iterator-expr new-generated)
                                                                  ~(:conversion-function-expr new-generated))))
                                                       (catch Exception err (do
                                                                              (debug-repl "convert fn" false)
@@ -1079,8 +1083,9 @@
 
 (defn- gen-precondition-to-check [condition]
   (assert (not (map? condition)))
-  (assert *jit-consider-current-value*)
-  `(jit-precondition-to-check ~condition))
+  (when-not (= true condition)
+    (dyna-assert *jit-consider-current-value*)
+    `(jit-precondition-to-check ~condition)))
 
 #_(defn- add-precondition-to-check! [condition]
   (???))
@@ -1110,10 +1115,15 @@
 
     (???)))
 
+(defn- is-jit-expression? [x]
+  (and (map? x) (#{:rexpr :rexpr-value :value :rexpr-value-list :rexpr-list} (:type x))))
+
 (defn- concat-code [& args]
-  (let [a (remove #(or (nil? %) (boolean? %) (string? %) (number? %)) (drop-last args))
+  (let [a (remove #(or (nil? %) (boolean? %) (string? %) (number? %))
+                  (map #(if (is-jit-expression? %) (:cljcode-expr %) %)
+                       (drop-last args)))
         l (last args)]
-    (if (#{:rexpr :rexpr-value :value :rexpr-value-list :rexpr-list} (:type l))
+    (if (is-jit-expression? l)
       (assoc l :cljcode-expr `(let* [] ~@a ~(:cljcode-expr l)))
       `(let* [] ~@a ~l))))
 
@@ -1125,14 +1135,17 @@
 (declare ^{:private true} simplify-jit-internal-rexpr)
 
 (defn- get-current-value [value]
-  (assert *jit-consider-current-value*)
   (case (:type value)
     :value (cond (contains? value :constant-value) (:constant-value value)
-                 (contains? value :current-value) (:current-value value)
+                 (and (contains? value :current-value) *jit-consider-current-value*) (:current-value value)
                  :else nil)
-    :rexpr-value (or (:current-value value)
-                     (:constant-value value))
+    :rexpr-value (or (:constant-value value)
+                     (do
+                       (assert *jit-consider-current-value*)
+                       (:current-value value)))
     :rexpr-value-list (map get-current-value (:current-value value))
+
+    ;; the R-exprs should always be able to return the current value, as it will represent the state
     :rexpr (:rexpr-type value)
     :rexpr-list (map get-current-value (:current-value value))
     (let []
@@ -1140,8 +1153,9 @@
       (???))))
 
 (defn- has-current-value? [value]
-  (and *jit-consider-current-value*
-       (or (contains? value :constant-value) (contains? value :current-value))))
+  (or (contains? value :constant-value)
+      (and *jit-consider-current-value*
+           (contains? value :current-value))))
 
 (def ^{:private true :dynamic true}  *jit-evaluate-cljform-current* ())
 
@@ -1162,8 +1176,7 @@
     (cond (nil? expr) {:type :value ;; R-exprs and Rexpr-values are not allowed to take on the valid nil, so this must mean that it is of the value type
                        :constant-value nil}
 
-          (and (map? expr)
-               (#{:rexpr :rexpr-value :value :rexpr-value-list :rexpr-list} (:type expr))) expr ;; this is already something that was evaluated by the JIT, so we are just going to pass it through
+          (is-jit-expression? expr) expr ;; this is already something that was evaluated by the JIT, so we are just going to pass it through
 
           (symbol? expr) (let [local-symbol (get *locally-bound-variables* expr)]
                            (if-not (nil? local-symbol)
@@ -1297,10 +1310,12 @@
                                                       result (when can-eval
                                                                (apply (var-get var) (map get-current-value avals)))]
                                                   (if can-eval
-                                                    (assoc ret
-                                                           (if (every? #(contains? % :constant-value) avals)
-                                                             :constant-value :current-value)
-                                                           result)
+                                                    (if (every? #(contains? % :constant-value) avals)
+                                                      (assoc ret
+                                                             :constant-value result
+                                                             :cljcode-expr result)
+                                                      (assoc ret
+                                                             :current-value result))
                                                     ret)))}
 
                                      ;; (and (ifn? (var-get var)) (#{find-ns 'dyna.iterators} (:ns m)))
@@ -1488,15 +1503,19 @@
 (swap! evaluate-symbol-meta assoc 'if
        {:dyna-jit-inline (fn [[_ cond true-b false-b]]
                            (let [condv (jit-evaluate-cljform cond)
-                                 cval (get-current-value condv)]
-                             (assert *jit-consider-current-value*)
-                             (if cval
-                               (concat-code
-                                (gen-precondition-to-check (:cljcode-expr condv))
-                                (jit-evaluate-cljform true-b))
-                               (concat-code
-                                (gen-precondition-to-check `(not ~(:cljcode-expr condv)))
-                                (jit-evaluate-cljform false-b)))))})
+                                 cval (when (has-current-value? condv)
+                                        (get-current-value condv))]
+                             (if-not (has-current-value? condv)
+                               (do
+                                 (debug-repl "evaluate if without current value")
+                                 (???))
+                               (if cval
+                                 (concat-code
+                                  (gen-precondition-to-check (:cljcode-expr condv))
+                                  (jit-evaluate-cljform true-b))
+                                 (concat-code
+                                  (gen-precondition-to-check `(not ~(:cljcode-expr condv)))
+                                  (jit-evaluate-cljform false-b))))))})
 
 (swap! evaluate-symbol-meta assoc 'loop*
        {:dyna-jit-inline (fn [[_ init & body]]
@@ -1652,7 +1671,8 @@
             :cljcode-expr (:cljcode (:matched-variables varj))}
 
            (instance? jit-exposed-variable-rexpr (:matched-variable varj))
-           (let [cval (get-current-value varj)]
+           (let [cval (when *jit-consider-current-value*
+                        (get-current-value varj))]
              (if (nil? cval)
                ;; if there is no current value, then we will just return the code which returns the current value
                ;; but we are unable to figure out what the current value for this is
@@ -1857,15 +1877,15 @@
              (and (contains? f :current-value) *jit-consider-current-value*)
              (case (ensure-simple-symbol m)
                and (if (:current-value f)
-                     (do (gen-precondition-to-check (:cljcode-expr f))
-                         (jit-evaluate-cljform `(and ~@(rest args))))
-                     (do (gen-precondition-to-check `(not ~(:cljcode-expr f)))
-                         f))
+                     (concat-code (gen-precondition-to-check (:cljcode-expr f))
+                                  (jit-evaluate-cljform `(and ~@(rest args))))
+                     (concat-code (gen-precondition-to-check `(not ~(:cljcode-expr f)))
+                                  f))
                or (if (:current-value f)
-                    (do (gen-precondition-to-check (:cljcode-expr f))
-                        f)
-                    (do (gen-precondition-to-check `(not ~(:cljcode-expr f)))
-                        (jit-evaluate-cljform `(or ~@(rest args))))))
+                    (concat-code (gen-precondition-to-check (:cljcode-expr f))
+                                 f)
+                    (concat-code (gen-precondition-to-check `(not ~(:cljcode-expr f)))
+                                 (jit-evaluate-cljform `(or ~@(rest args))))))
              :else
              (let [r (jit-evaluate-cljform `(~m ~@(rest args)))
                    cf (:cljcode-expr f)]
@@ -2598,7 +2618,7 @@
                            (= 2 (count matcher))
                            (ns-resolve *rewrite-ns* (car matcher)))
                       (let [f (ns-resolve *rewrite-ns* (car matcher))
-                            cv (when *jit-consider-current-value*
+                            cv (when (has-current-value? curval)
                                  (get-current-value curval))
                             success (when-not (nil? cv)
                                       (f cv))]
@@ -2611,7 +2631,7 @@
                             (list true))
                           (do
                             ;; then we are going to generate a runtime check which calls this function, as we are unable to evaluate this expression statically
-                            (vswap! runtime-checks conj `(~f ~(:cljcode-expr cv)))
+                            (vswap! runtime-checks conj `(~f ~(:cljcode-expr curval)))
                             (when-not (= '_ (cdar matcher))
                               (assert (not (contains? @currently-bound-variables (cdar matcher))))
                               (vswap! currently-bound-variables assoc (cdar matcher) curval))
@@ -2673,9 +2693,10 @@
                                         *jit-consider-current-value* false]
                                 ;; the when check is going to come after whatever happens from the jit-evaluate-cljform code does
                                 ;; if the
-                                (let [c (:cljcode-expr (jit-evaluate-cljform (:iter-body i)))]
-                                  (if-not (empty? (:runtime-checks i))
-                                    `(when (and ~@(:runtime-checks i))
+                                (let [c (:cljcode-expr (jit-evaluate-cljform (:iter-body i)))
+                                      checks (remove (partial = true) (:runtime-checks i))]
+                                  (if-not (empty? checks)
+                                    `(when (and ~@checks)
                                        ~c)
                                     c))))
                 r (if (> (count i-clj) 1)

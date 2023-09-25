@@ -203,8 +203,11 @@
                               (make-range (make-constant 0) (make-constant 10) (make-constant 1) (make-variable 'X) (make-constant true))])
         synth-rexpr (tbinding [system/generate-new-jit-states true]
                               (convert-to-jitted-rexpr rexpr))
-        iters (find-iterators synth-rexpr)]
-    (is (not (empty? iters)))))
+        ctx (context/make-empty-context synth-rexpr)
+        iters (context/bind-context-raw ctx
+                                        (find-iterators synth-rexpr))]
+    (is (not (empty? iters)))
+    (debug-repl "has iterator")))
 
 
 ;; the reflect-structure can create new variables in project statements, which need to get handled.
