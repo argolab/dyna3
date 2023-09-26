@@ -565,6 +565,14 @@
                                                   (make-conjunct [(make-no-simp-unify incoming-variable (make-constant val))
                                                                   (remap-variables R {incoming-variable (make-constant val)})]))))))))))
 
+(defn- ^{:dyna-jit-external true} aggregator-iterator-filter [incoming-variable iters]
+  (remove nil? (map (fn [i]
+                          (let [b (iter-what-variables-bound i)]
+                            (if (not (some #{incoming-variable} b))
+                              i
+                              (if (>= (count b) 2)
+                                (make-skip-variables-iterator i #{incoming-variable})))))
+                        iters)))
 
 (def-iterator
   ;; the iterator can only work for conjunctive aggregators, as we are trying to
@@ -574,15 +582,9 @@
   :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (true? is-conjunctive) (:rexpr R))
   (let [iters (find-iterators R)]
     (if (is-bound? incoming-variable) ;; I suppose that the iterator could still
-                                      ;; show up in the case that it would be
-                                      ;; bound, but then it would still need to
-                                      ;; get filtered out in all cases??
+      ;; show up in the case that it would be
+      ;; bound, but then it would still need to
+      ;; get filtered out in all cases??
       iters
       ;; for iterators which contain the incoming variable, this should get filtered out
-      (remove nil? (map (fn [i]
-                          (let [b (iter-what-variables-bound i)]
-                            (if (not (some #{incoming-variable} b))
-                              i
-                              (if (>= (count b) 2)
-                                (make-skip-variables-iterator i #{incoming-variable})))))
-                        iters)))))
+      (aggregator-iterator-filter incoming-variable iters))))

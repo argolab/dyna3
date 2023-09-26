@@ -1962,18 +1962,22 @@
       (when-not (empty? ncv)
         (make-conjunct (conj ncv (make-proj A (make-conjunct conj-children))))))))
 
+
+(defn- ^{:dyna-jit-external true} projection-iterator-filter [A iters]
+  (remove nil? (map (fn [i]
+                      (let [b (iter-what-variables-bound i)]
+                        (if (not (some #{A} b))
+                          i
+                          (if (>= (count b) 2)
+                            (iterators/make-skip-variables-iterator i #{A})))))
+                    iters)))
+
 (def-iterator
   :match (proj (:variable A) (:rexpr R))
   (let [iters (find-iterators R)]
     ;; if the variable that is projected is contained in the iterator, then we
     ;; will just project it out of the iterator as well
-    (remove nil? (map (fn [i]
-                        (let [b (iter-what-variables-bound i)]
-                          (if (not (some #{A} b))
-                            i
-                            (if (>= (count b) 2)
-                              (iterators/make-skip-variables-iterator i #{A})))))
-                      iters))))
+    (projection-iterator-filter A iters)))
 
 (def-rewrite
   :match (proj (:variable A) (:rexpr R))

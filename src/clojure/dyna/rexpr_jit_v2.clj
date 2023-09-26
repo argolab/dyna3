@@ -34,9 +34,9 @@
 ;(def rexpr-rewrites-constructed (atom #{}))
 
 ;; a map from an R-expr to a jitted rexpr
-(def ^:private rexprs-map-to-jit (atom {})) ;; TODO remove
+;(def ^:private rexprs-map-to-jit (atom {})) ;; TODO remove
 
-(def ^:private rexpr-convert-to-jit-functions (atom {})) ;; TODO remove
+;(def ^:private rexpr-convert-to-jit-functions (atom {})) ;; TODO remove
 
 ;(def ^:private rexpr-convert-to-jit-functions-hash-group (atom {}))
 (def ^:private rexpr-map-to-jit-hash-group (atom {}))
@@ -581,8 +581,6 @@
                                      *local-variable-names-for-variable-values* (volatile! nil)
                                      ]
                              (find-iterators-cljcode prim-rexpr-with-placeholder))
-        zzz (when find-iterator-code
-              (debug-repl "has iter code to gen"))
         rexpr-def-expr `(do (def-base-rexpr ~new-rexpr-name [~@(flatten (for [a new-arg-order
                                                                               :let [v (get new-arg-names-rev a)]]
                                                                           (cond (rexpr? v) [:rexpr a]
@@ -1242,7 +1240,11 @@
                                                                                        (instance? jit-hidden-variable-rexpr (:matched-variable v)))
                                                                                    (:cljcode-expr v)
 
-                                                                                   (instance? jit-local-variable-rexpr (:matched-variable v)) (???)
+                                                                                   (instance? jit-local-variable-rexpr (:matched-variable v))
+                                                                                   (do
+                                                                                     ;; the local variable will be something that needs to get filtered out when this comes out
+                                                                                     ;; to a top level expression?  But if there is some representation which will have that it
+                                                                                     `(jit-local-variable-rexpr. (quote ~(-> v :matched-variable :local-var-symbol))))
                                                                                    (instance? jit-expression-variable-rexpr (:matched-variable v)) (???)))
                                                               (do
                                                                 (debug-repl "can not pass type")
@@ -1394,7 +1396,7 @@
                              (merge {:type (case (first types)
                                              :rexpr-value :rexpr-value-list
                                              :value :value)
-                                     :cljcode-expr (vec (map #(:cljcode-expr % `(bad-gen)) vs))}
+                                     :cljcode-expr (vec (map #(:cljcode-expr % `(bad-gen "vector arg no code")) vs))}
                                     (when constant
                                       {:constant-value (vec (map :constant-value vs))}))))
 
@@ -1506,9 +1508,17 @@
                                  cval (when (has-current-value? condv)
                                         (get-current-value condv))]
                              (if-not (has-current-value? condv)
-                               (do
-                                 (debug-repl "evaluate if without current value")
-                                 (???))
+                               (binding [*jit-generate-functions* (if (nil? *jit-generate-functions*)
+                                                                    nil
+                                                                    () ;; this will cause an error if anything attempts to generate inside of the if branch
+                                                                    )]
+                                 (let [true-r (jit-evaluate-cljform true-b)
+                                       false-r (jit-evaluate-cljform false-b)]
+                                   (assert (and (= :value (:type true-r)) (= :value (:type false-r))))
+                                   {:type :value
+                                    :cljcode-expr `(if ~(:cljcode-expr condv)
+                                                     ~(:cljcode-expr true-r)
+                                                     ~(:cljcode-expr false-r))}))
                                (if cval
                                  (concat-code
                                   (gen-precondition-to-check (:cljcode-expr condv))
@@ -1693,7 +1703,7 @@
                       :cljcode-expr local-name})
                    {:type :value
                     :current-value (get-value cval)
-                    :cljcode-expr `(bad-gen)}))))
+                    :cljcode-expr `(bad-gen "get value without gen cache")}))))
 
            :else
            (let []
@@ -1774,7 +1784,7 @@
      (let [new-vals (doall (for [group-vals (apply map list (map :current-value varjs))]
                              ((:invoke funj) (cons func group-vals))))
            types (into #{} (map :type new-vals))
-           cljcode (map #(:cljcode-expr % `(bad-gen)) new-vals)]
+           cljcode (map #(:cljcode-expr % `(bad-gen "bad map")) new-vals)]
        ;(debug-repl "jit map")
        (assert (= 1 (count types)))
        {:type (case (first types)
@@ -1954,7 +1964,7 @@
                                      {:type t
                                       :matched-variable arg
                                       :current-value (strict-get x :current-value)
-                                      :cljcode-expr `(bad-gen)})
+                                      :cljcode-expr `(bad-gen "local variable 1")})
                                    {:type t
                                     :matched-variable arg})
 
@@ -1974,11 +1984,11 @@
                                   :current-value arg
                                   ;; the value should already be embedded in the R-expr in this case, so there is no need to retrieve the value
                                   :constant-value arg  ;; these should be constant values which are embed already
-                                  :cljcode-expr `(bad-gen)}
+                                  :cljcode-expr arg}
 
                                  (= t :rexpr-value-list)
                                  {:type :rexpr-value-list
-                                  :cljcode-expr `(bad-gen) ;; we can not directly generate this representation?  Though the individual variables should still be accessable?
+                                  :cljcode-expr `(bad-gen "rexpr value list 1") ;; we can not directly generate this representation?  Though the individual variables should still be accessable?
                                   :matched-variable arg
                                   :current-value (vec (for [z arg]
                                                         (cond (instance? jit-exposed-variable-rexpr z)
@@ -1994,7 +2004,7 @@
                                                                   {:type :rexpr-value
                                                                    :matched-variable z
                                                                    :current-value (strict-get x :current-value)
-                                                                   :cljcode-expr `(bad-gen)})
+                                                                   :cljcode-expr `(bad-gen "local variable 2")})
                                                                 {:type :rexpr-value
                                                                  :matched-variable arg})
 
@@ -2510,7 +2520,7 @@
                                      {:type t
                                       :matched-variable arg
                                       ;:current-value (strict-get x :current-value)
-                                      :cljcode-expr `(bad-gen)})
+                                      :cljcode-expr `(bad-gen "local variable 3")})
                                    {:type t
                                     :matched-variable arg})
 
@@ -2530,38 +2540,47 @@
                                   :current-value arg
                                   ;; the value should already be embedded in the R-expr in this case, so there is no need to retrieve the value
                                   :constant-value arg  ;; these should be constant values which are embed already
-                                  :cljcode-expr `(bad-gen)}
+                                  :cljcode-expr arg}
 
                                  (= t :rexpr-value-list)
                                  {:type :rexpr-value-list
-                                  :cljcode-expr `(bad-gen) ;; we can not directly generate this representation?  Though the individual variables should still be accessable?
-                                  ;:matched-variable arg
+                                  :cljcode-expr (vec (map #(-> % jit-evaluate-cljform :cljcode-expr) arg))
+                                        ;`(bad-gen "rexpr value list 2") ;; we can not directly generate this representation?  Though the individual variables should still be accessable?
+                                        ;:matched-variable arg
                                   :current-value arg #_(vec (for [z arg]
-                                                        (cond (instance? jit-exposed-variable-rexpr z)
-                                                              {:type :rexpr-value
-                                                               :current-value (*current-assignment-to-exposed-vars* (:exposed-name z))
-                                                               :cljcode-expr `(. ~(with-meta 'rexpr {:tag (jit-generating-rewrite-for-rexpr-type)})
-                                                                                 (:exposed-name z))
-                                                               :matched-variable z}
+                                                              (cond (instance? jit-exposed-variable-rexpr z)
+                                                                    {:type :rexpr-value
+                                                                     :current-value (*current-assignment-to-exposed-vars* (:exposed-name z))
+                                                                     :cljcode-expr `(. ~(with-meta 'rexpr {:tag (jit-generating-rewrite-for-rexpr-type)})
+                                                                                       (:exposed-name z))
+                                                                     :matched-variable z}
 
-                                                              (instance? jit-local-variable-rexpr z)
-                                                              (if (contains? @*local-variable-names-for-variable-values* z)
-                                                                (let [x (@*local-variable-names-for-variable-values* z)]
-                                                                  {:type :rexpr-value
-                                                                   :matched-variable z
-                                                                   :current-value (strict-get x :current-value)
-                                                                   :cljcode-expr `(bad-gen)})
-                                                                {:type :rexpr-value
-                                                                 :matched-variable arg})
+                                                                    (instance? jit-local-variable-rexpr z)
+                                                                    (if (contains? @*local-variable-names-for-variable-values* z)
+                                                                      (let [x (@*local-variable-names-for-variable-values* z)]
+                                                                        {:type :rexpr-value
+                                                                         :matched-variable z
+                                                                         :current-value (strict-get x :current-value)
+                                                                         :cljcode-expr `(bad-gen)})
+                                                                      {:type :rexpr-value
+                                                                       :matched-variable arg})
 
-                                                              :else (let []
-                                                                      (debug-repl "TODO")
-                                                                      (???)))))}
+                                                                    :else (let []
+                                                                            (debug-repl "TODO")
+                                                                            (???)))))}
 
                                  ;; (is-variable? arg)
                                  ;; {:type :rexpr-value
                                  ;;  :current-value arg
                                  ;;  }
+
+                                 (instance? Aggregator arg)
+                                 {:type :value
+                                  :cljcode-expr (symbol "dyna.rexpr-aggregators" (str "defined-aggregator-" (:name arg)))
+                                  :constant-value arg}
+
+                                 ;; (= t :unknown)
+                                 ;; {:type }
 
                                  :else
                                  (let []
@@ -2682,7 +2701,6 @@
                                            :bound-vars bound-vars
                                            :namespace def-ns))))]
         ;; then we are going to generate some union between all of the different iterator methods, which means that this should figure out which of the methods will have that this
-        (debug-repl "iter ttt")
         (when-not (empty? iter-matches)
           (let [i-clj (for [i iter-matches]
                               (binding [*locally-bound-variables* (merge {'rexpr {:type :rexpr
@@ -2702,8 +2720,8 @@
                 r (if (> (count i-clj) 1)
                     `(union #{} ~@i-clj)
                     (first i-clj))]
-            (println r)
-            (debug-repl "has some way to construct an iterator" false)
+            ;; (println r)
+            ;; (debug-repl "has some way to construct an iterator" false)
             r))))))
 
 (set-jit-method

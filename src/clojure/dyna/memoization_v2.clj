@@ -25,7 +25,7 @@
 (def unset-priority-default-work -1e16)
 
 (defn- get-all-children [rexpr]
-  (let [c (ensure-set (get-children rexpr))]
+  (let [c (set (get-children rexpr))]
     (union c
            (apply union (map get-all-children c)))))
 (declare get-tables-from-rexpr)
@@ -803,10 +803,10 @@
         (add-watcher! @orig-rexpr-assumpt-v watcher)
         ;; TODO: this should refresh the updated key instead of rebuilding the entire table
         (add-watcher! (:def-assumption new2) watcher)))
-    (let [old-tables (ensure-set (when (:memoized-rexpr old1)
+    (let [old-tables (set (when (:memoized-rexpr old1)
                                    (filter #(or (is-memoized-access? %) (is-memoization-placeholder? %))
                                            (get-all-children (:memoized-rexpr old1)))))
-          new-tables (ensure-set (when (:memoized-rexpr new2)
+          new-tables (set (when (:memoized-rexpr new2)
                                    (filter #(or (is-memoized-access? %) (is-memoization-placeholder? %))
                                            (get-all-children (:memoized-rexpr new2)))))]
 

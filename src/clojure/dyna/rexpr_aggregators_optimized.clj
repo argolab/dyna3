@@ -60,7 +60,7 @@
                                     ret)))
   (all-conjunctive-rexprs [this]
                           (cons [#{} this]
-                                (let [vs (conj (ensure-set projected) incoming)]
+                                (let [vs (conj (set projected) incoming)]
                                   (for [[proj-out rexpr] (all-conjunctive-rexprs body)]
                                     [(union proj-out (intersection vs (exposed-variables rexpr))) rexpr])))))
 
@@ -530,16 +530,19 @@
   (make-multiplicity 0))
 
 
+(defn- ^{:dyna-jit-external true} aggregator-inner-iterator-filter [iters pv]
+  (remove nil? (for [i iters
+                     :let [b (iter-what-variables-bound i)]]
+                 (if-not (some pv b)
+                   i ;; this does not interact with the restricted variables, so this can just to through
+                   (if (some #(not (pv %)) b) ;; then there is at least one variable that is not something that we are projecting out
+                     (make-skip-variables-iterator i pv))))))
+
 (def-iterator
   :match (aggregator-op-inner operator (:any incoming-variable) (:any-list projected-vars) (:rexpr Rbody))
   (let [iters (find-iterators Rbody)
-        pv (ensure-set (conj projected-vars incoming-variable))]
-    (remove nil? (for [i iters
-                       :let [b (iter-what-variables-bound i)]]
-                   (if-not (some pv b)
-                     i ;; this does not interact with the restricted variables, so this can just to through
-                     (if (some #(not (pv %)) b) ;; then there is at least one variable that is not something that we are projecting out
-                       (make-skip-variables-iterator i pv)))))))
+        pv (set (conj projected-vars incoming-variable))]
+    (aggregator-inner-iterator-filter iters pv)))
 
 (def-iterator
   :match (aggregator-op-outer (:unchecked operator) (:any result-variable) (:rexpr R))

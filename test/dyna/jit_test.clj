@@ -207,8 +207,20 @@
         iters (context/bind-context-raw ctx
                                         (find-iterators synth-rexpr))]
     (is (not (empty? iters)))
-    (debug-repl "has iterator")))
+    (is (= #{(make-variable 'X)} (iter-what-variables-bound (first iters))))))
 
+
+(deftest basic-jit11
+  (let [rexpr (make-aggregator "+=" (make-variable 'result) (make-variable 'incoming) true
+                               (make-range (make-constant 0) (make-variable 'X) (make-constant 1) (make-variable 'incoming) (make-constant true)))
+        synth-rexpr (tbinding [system/generate-new-jit-states true]
+                              (convert-to-jitted-rexpr rexpr))
+        rr (make-conjunct [(make-unify (make-variable 'X) (make-constant 10))
+                           synth-rexpr])
+        ctx (context/make-empty-context rr)
+        res (context/bind-context-raw ctx (simplify-fully rr))]
+    (debug-repl "need iter result")
+    ))
 
 ;; the reflect-structure can create new variables in project statements, which need to get handled.
 

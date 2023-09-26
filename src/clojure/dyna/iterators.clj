@@ -24,7 +24,7 @@
 ;; this will want to find which of the values will have this binding
 
 
-
+(def ^{:private true} ensure-set set)
 
 
 (defn make-unit-iterator [variable value]
