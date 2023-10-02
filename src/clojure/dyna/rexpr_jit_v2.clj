@@ -31,119 +31,10 @@
 ;; map from the name of the jitted rexpr -> to the metadata which was used during construction
 (def ^:private rexprs-types-constructed (atom {}))
 
-;(def rexpr-rewrites-constructed (atom #{}))
-
-;; a map from an R-expr to a jitted rexpr
-;(def ^:private rexprs-map-to-jit (atom {})) ;; TODO remove
-
-;(def ^:private rexpr-convert-to-jit-functions (atom {})) ;; TODO remove
-
-;(def ^:private rexpr-convert-to-jit-functions-hash-group (atom {}))
 (def ^:private rexpr-map-to-jit-hash-group (atom {}))
 
 (declare ^:private is-bound-jit?)
 (println "TODO: jit-local-variable-rexpr should also be \"allowed\" to be a normal variable as long as it is projected out")
-(defrecord jit-local-variable-rexpr [local-var-symbol]
-  ;; These variables are not exposed externally.  These variables are projected
-  ;; out before they reach the top.  We are going to give these variables a name
-  ;; when we synthize the R-expr such that we will be able to track them in the
-  ;; context of the program
-  RexprValueVariable
-  (get-value [this] (???))
-  (get-value-in-context [this ctx] (???))
-  (set-value! [this value] (???))
-  (set-value-in-context! [this ctx value] (???))
-  (is-bound? [this] (is-bound-jit? this))
-  (is-bound-in-context? [this ctx] (???))
-  (all-variables [this] #{this})
-  (get-representation-in-context [this ctx]
-    (???))
-  Object
-  (toString [this] (str "(jit-local-variable " local-var-symbol ")")))
-
-(defrecord jit-expression-variable-rexpr [cljcode]
-  RexprValueVariable
-  (get-value [this] (???))
-  (get-value-in-context [this ctx] (???))
-  (set-value! [this value] (???))
-  (set-value-in-context! [this ctx value] (???))
-  (is-bound? [this] true)
-  (is-bound-in-context? [this ctx] true)
-  (all-variables [this] #{})
-  (get-representation-in-context [this ctx]
-    (???))
-  Object
-  (toString [this] (str "(jit-expression-variable " cljcode ")")))
-
-
-(defmethod print-method jit-local-variable-rexpr [^jit-local-variable-rexpr this ^java.io.Writer w]
-  (.write w (.toString this)))
-
-(defrecord jit-exposed-variable-rexpr [exposed-name]
-  ;; For variables which are exposed on the current synthized R-expr.  These
-  ;; variables can be access by doing `(. rexpr ~exposed-name) to read a field
-  ;; off of the R-expr
-  RexprValueVariable
-  (get-value [this] (???))
-  (get-value-in-context [this ctx] (???))
-  (set-value! [this value] (???))
-  (set-value-in-context! [this ctx value] (???))
-  (is-bound? [this] (???))
-  (is-bound-in-context? [this ctx] (???))
-  (all-variables [this] #{this})
-  (get-representation-in-context [this ctx]
-    this)
-  Object
-  (toString [this] (str "(jit-exposed-variable-rexpr " exposed-name ")")))
-
-
-(defrecord jit-hidden-variable-rexpr [hidden-name]
-  ;; if there is a variable which is projected out, but still used by one of our
-  ;; holes.  Then that variable is a hidden variable as the name of the variable
-  ;; could change depending on the hole, but it is still not exposed out
-  RexprValueVariable
-  (get-value [this] (???))
-  (get-value-in-context [this ctx] (???))
-  (set-value! [this value] (???))
-  (set-value-in-context! [this ctx value] (???))
-  (is-bound? [this] (???))
-  (is-bound-in-context? [this ctx])
-  (all-variables [this] #{this})
-  (get-representation-in-context [this ctx] this)
-  Object
- (toString [this] (str "(jit-hidden-variable-rexpr " hidden-name ")")))
-
-(defmethod print-method jit-exposed-variable-rexpr [^jit-exposed-variable-rexpr this ^java.io.Writer w]
-  (.write w (.toString this)))
-
-#_(defrecord jit-placeholder-variable-rexpr [^RexprValueVariable wrapped]
-  RexprValueVariable
-  (get-value [this] (get-value wrapped))
-  (get-value-in-context [this ctx] (get-value-in-context wrapped ctx))
-  (set-value! [this value] (set-value! wrapped value))
-  (set-value-in-context! [this ctx value] (set-value-in-context! wrapped ctx value))
-  (is-bound? [this] (is-bound? wrapped))
-  (is-bound-in-context? [thix ctx] (is-bound-in-context? wrapped ctx))
-  (all-variables [this] #{wrapped})
-  (get-representation-in-context [this ctx] (get-representation-in-context wrapped ctx))
-  Object
-  (toString [this] (str "(jit-placeholder-variable-rexpr " wrapped ")")))
-
-;; the iterables should be something like which variables and their orders can be
-(def-base-rexpr jit-placeholder [:unchecked external-name ;; non-nil if accessed via the passed in rexpr
-                                 :unchecked local-name ;; if partially rewritten, and now held in a local variable, then non-nil
-                                 :var-list placeholder-vars
-                                 ]
-  #_(exposed-variables [this]
-                       (set (map ->jit-placeholder-variable-rexpr (filter is-variable? (vals placeholder-vars)))))
-  (rexpr-jittype-hash [this] 0) ;; the jit placeholder most likely goes in the place of a disjunct, so we want to use the same hash-code for this as disjuncts
-
-  )
-
-(def-base-rexpr aggregator-op-partial-result [:var partial-var
-                                              :var-list group-vars
-                                              :rexpr remains])
-
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -234,6 +125,126 @@
 (def ^{:private true :dynamic true} *jit-inside-disjunct* false)
 
 (def ^{:private true :dynamic true} *jit-consider-current-value* true)
+
+(def ^{:private true :dynamic true} *jit-variable-types-work-normally* false)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(declare ^:private get-current-value jit-evaluate-cljform)
+
+
+(defrecord jit-local-variable-rexpr [local-var-symbol]
+  ;; These variables are not exposed externally.  These variables are projected
+  ;; out before they reach the top.  We are going to give these variables a name
+  ;; when we synthize the R-expr such that we will be able to track them in the
+  ;; context of the program
+  RexprValueVariable
+  (get-value [this] (if-not *jit-variable-types-work-normally*
+                      (???)
+                      (get-current-value (jit-evaluate-cljform `(get-value ~this)))))
+  (get-value-in-context [this ctx] (if-not *jit-variable-types-work-normally*
+                                     (???)
+                                     (get-current-value (jit-evaluate-cljform `(get-value ~this)))))
+  (set-value! [this value] (???))
+  (set-value-in-context! [this ctx value] (???))
+  (is-bound? [this] (is-bound-jit? this))
+  (is-bound-in-context? [this ctx] (is-bound-jit? this))
+  (all-variables [this] #{this})
+  (get-representation-in-context [this ctx]
+    (???))
+  Object
+  (toString [this] (str "(jit-local-variable " local-var-symbol ")")))
+
+(defrecord jit-expression-variable-rexpr [cljcode]
+  RexprValueVariable
+  (get-value [this] (if-not *jit-variable-types-work-normally*
+                      (???)
+                      (get-current-value (jit-evaluate-cljform `(get-value ~this)))))
+  (get-value-in-context [this ctx] (if-not *jit-variable-types-work-normally*
+                                     (???)
+                                     (get-current-value (jit-evaluate-cljform `(get-value ~this)))))
+  (set-value! [this value] (???))
+  (set-value-in-context! [this ctx value] (???))
+  (is-bound? [this] true)
+  (is-bound-in-context? [this ctx] true)
+  (all-variables [this] #{})
+  (get-representation-in-context [this ctx]
+    (???))
+  Object
+  (toString [this] (str "(jit-expression-variable " cljcode ")")))
+
+
+(defmethod print-method jit-local-variable-rexpr [^jit-local-variable-rexpr this ^java.io.Writer w]
+  (.write w (.toString this)))
+
+(defrecord jit-exposed-variable-rexpr [exposed-name]
+  ;; For variables which are exposed on the current synthized R-expr.  These
+  ;; variables can be access by doing `(. rexpr ~exposed-name) to read a field
+  ;; off of the R-expr
+  RexprValueVariable
+  (get-value [this] (if-not *jit-variable-types-work-normally*
+                      (???)
+                      (get-current-value (jit-evaluate-cljform `(get-value ~this)))))
+  (get-value-in-context [this ctx] (if-not *jit-variable-types-work-normally*
+                                     (???)
+                                     (get-current-value (jit-evaluate-cljform `(get-value ~this)))))
+  (set-value! [this value] (???))
+  (set-value-in-context! [this ctx value] (???))
+  (is-bound? [this] (get-current-value (jit-evaluate-cljform `(is-bound? ~this))))
+  (is-bound-in-context? [this ctx] (get-current-value (jit-evaluate-cljform `(is-bound? ~this))))
+  (all-variables [this] #{this})
+  (get-representation-in-context [this ctx]
+    this)
+  Object
+  (toString [this] (str "(jit-exposed-variable-rexpr " exposed-name ")")))
+
+
+(defrecord jit-hidden-variable-rexpr [hidden-name]
+  ;; if there is a variable which is projected out, but still used by one of our
+  ;; holes.  Then that variable is a hidden variable as the name of the variable
+  ;; could change depending on the hole, but it is still not exposed out
+  RexprValueVariable
+  (get-value [this] (???))
+  (get-value-in-context [this ctx] (???))
+  (set-value! [this value] (???))
+  (set-value-in-context! [this ctx value] (???))
+  (is-bound? [this] (???))
+  (is-bound-in-context? [this ctx])
+  (all-variables [this] #{this})
+  (get-representation-in-context [this ctx] this)
+  Object
+ (toString [this] (str "(jit-hidden-variable-rexpr " hidden-name ")")))
+
+(defmethod print-method jit-exposed-variable-rexpr [^jit-exposed-variable-rexpr this ^java.io.Writer w]
+  (.write w (.toString this)))
+
+#_(defrecord jit-placeholder-variable-rexpr [^RexprValueVariable wrapped]
+  RexprValueVariable
+  (get-value [this] (get-value wrapped))
+  (get-value-in-context [this ctx] (get-value-in-context wrapped ctx))
+  (set-value! [this value] (set-value! wrapped value))
+  (set-value-in-context! [this ctx value] (set-value-in-context! wrapped ctx value))
+  (is-bound? [this] (is-bound? wrapped))
+  (is-bound-in-context? [thix ctx] (is-bound-in-context? wrapped ctx))
+  (all-variables [this] #{wrapped})
+  (get-representation-in-context [this ctx] (get-representation-in-context wrapped ctx))
+  Object
+  (toString [this] (str "(jit-placeholder-variable-rexpr " wrapped ")")))
+
+;; the iterables should be something like which variables and their orders can be
+(def-base-rexpr jit-placeholder [:unchecked external-name ;; non-nil if accessed via the passed in rexpr
+                                 :unchecked local-name ;; if partially rewritten, and now held in a local variable, then non-nil
+                                 :var-list placeholder-vars
+                                 ]
+  #_(exposed-variables [this]
+                       (set (map ->jit-placeholder-variable-rexpr (filter is-variable? (vals placeholder-vars)))))
+  (rexpr-jittype-hash [this] 0) ;; the jit placeholder most likely goes in the place of a disjunct, so we want to use the same hash-code for this as disjuncts
+
+  )
+
+(def-base-rexpr aggregator-op-partial-result [:var partial-var
+                                              :var-list group-vars
+                                              :rexpr remains])
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -903,7 +914,8 @@
       (fn [inner] (f (partial r inner))))))
 
 (defn- can-generate-code? []
-  (not (nil? *jit-generate-functions*)))
+  (and (not (nil? *jit-generate-functions*))
+       (not= () *jit-generate-functions*)))
 
 (defn- add-to-generation! [value]
   (cond (fn? value)
@@ -2342,6 +2354,7 @@
                                            (if (contains? (:kw-args rr) :check) -200000 0) ;; checks should go earlier
                                            (if (contains? (:kw-args rr) :assigns-variable) -100000 0) ;; then assignments of variables
                                            (if (:jit-hole-embed rr false) -10000 0) ;; if we can make the JIT state larger by embedding something inside
+                                           (if (:aggregator-iterators (:kw-args rr) false) 10000 0) ;; avoid running the iterators if there is something else we can do as this will expand the expression at lot
                                            (case (:run-at (:kw-args rr))
                                              :construction -5000 ;; if this only runs at construction, it should go quickly first
                                              :inference 5000 ;; if this is more expensive inference, therefore run it later
@@ -2686,43 +2699,51 @@
 
 (defn- find-iterators-cljcode [rexpr]
   ;; return the find iterator code, if there are no iterators, then this will just retun nil.
-  (let [iters-source (get @rexpr-iterators-source (type rexpr))]
-    (when-not (empty? iters-source)
-      (let [iter-matches (binding [*locally-bound-variables* {'rexpr {:type :rexpr
-                                                                      :cljcode-expr `(bad-gen "should not generate R-expr")
-                                                                      :rexpr-type rexpr}}
-                                   *jit-consider-current-value* false]
-                           (doall (for [[kw-args body def-ns] iters-source
-                                        [runtime-checks bound-vars] (binding [*rewrite-ns* def-ns]
-                                                                      (generate-nogencheck-match-cljcode rexpr (:match kw-args)))]
-                                    (assoc kw-args
-                                           :iter-body body
-                                           :runtime-checks runtime-checks
-                                           :bound-vars bound-vars
-                                           :namespace def-ns))))]
-        ;; then we are going to generate some union between all of the different iterator methods, which means that this should figure out which of the methods will have that this
-        (when-not (empty? iter-matches)
-          (let [i-clj (for [i iter-matches]
-                              (binding [*locally-bound-variables* (merge {'rexpr {:type :rexpr
-                                                                                  :cljcode-expr `(bad-gen "should not generate R-expr")
-                                                                                  :rexpr-type rexpr}}
-                                                                         (:bound-vars i))
-                                        *rewrite-ns* (:namespace i)
-                                        *jit-consider-current-value* false]
-                                ;; the when check is going to come after whatever happens from the jit-evaluate-cljform code does
-                                ;; if the
-                                (let [c (:cljcode-expr (jit-evaluate-cljform (:iter-body i)))
-                                      checks (remove (partial = true) (:runtime-checks i))]
-                                  (if-not (empty? checks)
-                                    `(when (and ~@checks)
-                                       ~c)
-                                    c))))
-                r (if (> (count i-clj) 1)
-                    `(union #{} ~@i-clj)
-                    (first i-clj))]
-            ;; (println r)
-            ;; (debug-repl "has some way to construct an iterator" false)
-            r))))))
+  (if (is-jit-placeholder? rexpr)
+    (let []
+      ;; it needs to construct a nested context, and then call the standard "find iterators" on the nested jit-placeh
+      (debug-repl "TODO need to construct context")
+      `(find-iterators ~(if (:external-name rexpr)
+                          `(. ~(with-meta 'rexpr {:tag (jit-generating-rewrite-for-rexpr-type)})
+                              ~(:external-name rexpr))
+                          (:local-name rexpr))))
+    (let [iters-source (get @rexpr-iterators-source (type rexpr))]
+      (when-not (empty? iters-source)
+        (let [iter-matches (binding [*locally-bound-variables* {'rexpr {:type :rexpr
+                                                                        :cljcode-expr `(bad-gen "should not generate R-expr")
+                                                                        :rexpr-type rexpr}}
+                                     *jit-consider-current-value* false]
+                             (doall (for [[kw-args body def-ns] iters-source
+                                          [runtime-checks bound-vars] (binding [*rewrite-ns* def-ns]
+                                                                        (generate-nogencheck-match-cljcode rexpr (:match kw-args)))]
+                                      (assoc kw-args
+                                             :iter-body body
+                                             :runtime-checks runtime-checks
+                                             :bound-vars bound-vars
+                                             :namespace def-ns))))]
+          ;; then we are going to generate some union between all of the different iterator methods, which means that this should figure out which of the methods will have that this
+          (when-not (empty? iter-matches)
+            (let [i-clj (for [i iter-matches]
+                          (binding [*locally-bound-variables* (merge {'rexpr {:type :rexpr
+                                                                              :cljcode-expr `(bad-gen "should not generate R-expr")
+                                                                              :rexpr-type rexpr}}
+                                                                     (:bound-vars i))
+                                    *rewrite-ns* (:namespace i)
+                                    *jit-consider-current-value* false]
+                            ;; the when check is going to come after whatever happens from the jit-evaluate-cljform code does
+                            ;; if the
+                            (let [c (:cljcode-expr (jit-evaluate-cljform (:iter-body i)))
+                                  checks (remove (partial = true) (:runtime-checks i))]
+                              (if-not (empty? checks)
+                                `(when (and ~@checks)
+                                   ~c)
+                                c))))
+                  r (if (> (count i-clj) 1)
+                      `(union #{} ~@i-clj)
+                      (first i-clj))]
+              ;; (println r)
+              ;; (debug-repl "has some way to construct an iterator" false)
+              r)))))))
 
 (set-jit-method
  #'find-iterators
@@ -2953,68 +2974,101 @@
                    :matching-vars []
                    :simplify-call-counter @*jit-simplify-call-counter*
                    :aggregator-pass-value true
-                   :kw-args {:agg-inner true}}]
-      (when (is-multiplicity? R)
+                   :kw-args {:agg-inner true}}
+          iters (binding [*jit-variable-types-work-normally* true ;; make it so that we can use the existing find iterator code with jit var placeholders
+                          *jit-generate-functions* (if (nil? *jit-generate-functions*) nil ())]
+                  (find-iterators R))]
+      (if (is-multiplicity? R)
         (vswap! *jit-simplify-rewrites-found* conj [(tlocal *current-simplify-stack*)
-                                                    self-id]))
+                                                    self-id])
+        (when-not (empty? iters)
+          (let [conj-iterator (iterators/make-conjunction-iterator iters)
+                what-bound (iter-what-variables-bound conj-iterator)
+                bound-order (iter-variable-binding-order conj-iterator)]
+            ;(debug-repl "has iters")
+            (vswap! *jit-simplify-rewrites-found* conj [(tlocal *current-simplify-stack*)
+                                                        (assoc-in self-id [:kw-args :aggregator-iterators] true)]))))
       (let [body (simplify R)]
-        (if (*jit-simplify-rewrites-picked-to-run* self-id)
-          (if *jit-compute-unification-failure*
-            (make-multiplicity 0)
-            (let [;; vvv (when-not (is-bound-jit? incoming)
-                  ;;       (debug-repl "incoming"))
-                  incoming-val (jit-evaluate-cljform `(get-value ~incoming))
-                  local-agg (bound? #'*jit-aggregator-info*)]
-              (assert (can-generate-code?))
-              (assert (and (is-multiplicity? body) (= 1 (:mult body)))) ;; TODO: this needs to handle higher mult
-              (if local-agg
-                (let [out-var (aggregator-out-var)
-                      combine-fn (jit-evaluate-cljform `(. ~operator combine-ignore-nil))
-                      path (map jit-evaluate-cljform (:group-vars @*jit-aggregator-info*))
-                      ]
-                  (add-to-generation!
-                   (if (empty? path)
-                     `(vswap! ~out-var ~(:cljcode-expr combine-fn) ~(:cljcode-expr incoming-val))
-                     `(vswap! ~out-var update-in [~@(map :cljcode-expr path)]
-                              ~(:cljcode-expr combine-fn) ~(:cljcode-expr incoming-val))))
-                  (if (empty? path)
-                    (vswap! (:current-out-var @*jit-aggregator-info*) (. operator combine-ignore-nil) (get-current-value incoming-val))
-                    (vswap! (:current-out-var @*jit-aggregator-info*) update-in (map get-current-value path)
-                            (. operator combine-ignore-nil)
-                            (get-current-value incoming-val)))
-                  (make-multiplicity 0) ;; this aggregator is done, so we just return the aggregator with value zero
-                  )
-                (let [agg-contrib-result (gensym 'agg-contrib-res)]
-                  ;; any binding to external variables will have to be set into the context
-                  ;; but that should already have happened.  If there is something which might have that this will
-                  ;; result in some of the values will work with it find that there
-                  ;; the path value will also have to become set
+        (cond (*jit-simplify-rewrites-picked-to-run* self-id)
+              (if *jit-compute-unification-failure*
+                (make-multiplicity 0)
+                (let [ ;; vvv (when-not (is-bound-jit? incoming)
+                      ;;       (debug-repl "incoming"))
+                      incoming-val (jit-evaluate-cljform `(get-value ~incoming))
+                      local-agg (bound? #'*jit-aggregator-info*)]
+                  (assert (can-generate-code?))
+                  (assert (and (is-multiplicity? body) (= 1 (:mult body)))) ;; TODO: this needs to handle higher mult
+                  (if local-agg
+                    (let [out-var (aggregator-out-var)
+                          combine-fn (jit-evaluate-cljform `(. ~operator combine-ignore-nil))
+                          path (map jit-evaluate-cljform (:group-vars @*jit-aggregator-info*))
+                          ]
+                      (add-to-generation!
+                       (if (empty? path)
+                         `(vswap! ~out-var ~(:cljcode-expr combine-fn) ~(:cljcode-expr incoming-val))
+                         `(vswap! ~out-var update-in [~@(map :cljcode-expr path)]
+                                  ~(:cljcode-expr combine-fn) ~(:cljcode-expr incoming-val))))
+                      (if (empty? path)
+                        (vswap! (:current-out-var @*jit-aggregator-info*) (. operator combine-ignore-nil) (get-current-value incoming-val))
+                        (vswap! (:current-out-var @*jit-aggregator-info*) update-in (map get-current-value path)
+                                (. operator combine-ignore-nil)
+                                (get-current-value incoming-val)))
+                      (make-multiplicity 0) ;; this aggregator is done, so we just return the aggregator with value zero
+                      )
+                    (let [agg-contrib-result (gensym 'agg-contrib-res)]
+                      ;; any binding to external variables will have to be set into the context
+                      ;; but that should already have happened.  If there is something which might have that this will
+                      ;; result in some of the values will work with it find that there
+                      ;; the path value will also have to become set
 
-                  ;; if there are some values
-                  (when *jit-inside-disjunct*
-                    (debug-repl "need to handle assignments inside of disjunct")
-                    (???))
-                  (assert (is-multiplicity? body))
-                  (add-to-generation!
-                   (fn [inner]
-                     `(let [~agg-contrib-result ((tlocal aggregator-op-contribute-value) ~(:cljcode-expr incoming-val) ~(:mult body))]
-                        ;; if this is a non-empty R-expr, then we are going to have to handle this via some other mechnism.
-                        ;; I suppose that this could become a hole, in which case it would likely become a zero value
-                        (assert (is-empty-rexpr? ~agg-contrib-result)) ;; if there are external variables, those need to get aligned here
-                        ~(inner)
-                        )))
-                  ;; this can have that some R-expr will get returned, in which case it will have to handle the returned value
+                      ;; if there are some values
+                      (when *jit-inside-disjunct*
+                        (debug-repl "need to handle assignments inside of disjunct")
+                        (???))
+                      (assert (is-multiplicity? body))
+                      (add-to-generation!
+                       (fn [inner]
+                         `(let [~agg-contrib-result ((tlocal aggregator-op-contribute-value) ~(:cljcode-expr incoming-val) ~(:mult body))]
+                            ;; if this is a non-empty R-expr, then we are going to have to handle this via some other mechnism.
+                            ;; I suppose that this could become a hole, in which case it would likely become a zero value
+                            (assert (is-empty-rexpr? ~agg-contrib-result)) ;; if there are external variables, those need to get aligned here
+                            ~(inner)
+                            )))
+                      ;; this can have that some R-expr will get returned, in which case it will have to handle the returned value
 
-                  ;(debug-repl "value pass for external call")
-                  (let [r (make-jit-placeholder nil agg-contrib-result [])
-                        rm (jit-metadata r)]
-                    ;; just assume that the result is zero, in which case there would be nothing to do here.  This will realistically
-                    (vswap! rm assoc :current-rexpr (make-multiplicity 0))
-                    r)))))
-          (if (is-empty-rexpr? body)
-            body
-            (do
-              (make-no-simp-aggregator-op-inner operator incoming projected-vars body))))))))
+                                        ;(debug-repl "value pass for external call")
+                      (let [r (make-jit-placeholder nil agg-contrib-result [])
+                            rm (jit-metadata r)]
+                        ;; just assume that the result is zero, in which case there would be nothing to do here.  This will realistically
+                        (vswap! rm assoc :current-rexpr (make-multiplicity 0))
+                        r)))))
+
+              (and (not (empty? iters)) (*jit-simplify-rewrites-picked-to-run* (assoc-in self-id [:kw-args :aggregator-iterators] true)))
+              (if *jit-compute-unification-failure*
+                (make-multiplicity 0)
+                (let [find-iter-cljcode (find-iterators-cljcode body)
+                      body-exposed (exposed-variables body)
+                      zzz (debug-repl "zz") ;;
+                      inner-body-rexpr-cljcode (generate-cljcode-to-materalize-rexpr body :simplify-result false)]
+                  ;; this is going to have to get the iterators from the object.  But we are going to have to figure out which variables
+                  ;; we can iterate.  It might be that we already want to have to decied that when the variables
+                  ;; which can be bound are decied.  But if there are multiple nested iterators, then we want to figure out
+                  ;; which of them can actually work
+
+                  ;; this should take the body, and generate some R-expr wihch can then represent the steps which will happen when it binds to particular values
+
+                  ;; the order in which the variables can be bound should consider which of the
+
+                  (debug-repl "choose to run iterator" false)
+                  (???)
+                  ))
+
+
+              :else
+              (if (is-empty-rexpr? body)
+                body
+                (do
+                  (make-no-simp-aggregator-op-inner operator incoming projected-vars body))))))))
 
 #_(def-rewrite
   :match (aggregator-op-inner operator (:any incoming) (:any-list projected-vars) (:rexpr R))

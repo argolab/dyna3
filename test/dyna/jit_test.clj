@@ -218,7 +218,8 @@
         rr (make-conjunct [(make-unify (make-variable 'X) (make-constant 10))
                            synth-rexpr])
         ctx (context/make-empty-context rr)
-        res (context/bind-context-raw ctx (simplify-fully rr))]
+        res (tbinding [generate-new-jit-rewrites true]
+                      (context/bind-context-raw ctx (simplify-fully rr)))]
     (debug-repl "need iter result")
     ))
 
