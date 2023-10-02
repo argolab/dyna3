@@ -21,8 +21,7 @@
   (:import [dyna.rexpr proj-rexpr simple-function-call-rexpr conjunct-rexpr disjunct-rexpr])
   (:import [dyna.rexpr_aggregators_optimized aggregator-op-outer-rexpr aggregator-op-inner-rexpr])
   (:import [dyna.rexpr_aggregators Aggregator])
-  (:import [dyna RexprValue RexprValueVariable Rexpr DynaJITRuntimeCheckFailed StatusCounters UnificationFailure])
-  (:import [dyna ContextHandle ThreadVar RContext]))
+  (:import [dyna RexprValue RexprValueVariable Rexpr DynaJITRuntimeCheckFailed StatusCounters UnificationFailure DIterator ContextHandle ThreadVar RContext]))
 
 ;; this is going to want to cache the R-expr when there are no arguments which are "variables"
 ;; so something like multiplicy can be just a constant value
@@ -35,6 +34,10 @@
 
 (declare ^:private is-bound-jit?)
 (println "TODO: jit-local-variable-rexpr should also be \"allowed\" to be a normal variable as long as it is projected out")
+
+(defn- check-argument-diterator [x]
+  (or (not (is-constant? x))
+      (instance? DIterator (get-value x))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -246,6 +249,14 @@
                                               :var-list group-vars
                                               :rexpr remains])
 
+(def-base-rexpr jit-run-iterator [:diterator iterator
+                                  :var-list iterator-order
+                                  :rexpr body]
+  (exposed-variables [this] (union (exposed-variables body)
+                                   (set iterator-order)
+                                   (when (is-variable? iterator)
+                                     #{iterator}))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
@@ -380,6 +391,7 @@
                    (or (instance? jit-exposed-variable-rexpr v)
                        (instance? jit-local-variable-rexpr v)
                        (instance? jit-hidden-variable-rexpr v)
+                       ;(instance? jit-expression-variable-rexpr v)
                        (is-constant? v)
                        ) v ;; no change
 
@@ -3046,10 +3058,37 @@
               (and (not (empty? iters)) (*jit-simplify-rewrites-picked-to-run* (assoc-in self-id [:kw-args :aggregator-iterators] true)))
               (if *jit-compute-unification-failure*
                 (make-multiplicity 0)
-                (let [find-iter-cljcode (find-iterators-cljcode body)
+                (let [find-iter-var (gensym 'find-iter)
+                      conj-iter-var (gensym 'conj-iter)
+                      diterator-var (gensym 'diterator)
+
+                      conj-iterator (iterators/make-conjunction-iterator iters)
+                      what-bound (iter-what-variables-bound conj-iterator)
+                      bound-order (iter-variable-binding-order conj-iterator)
+
+                      find-iter-cljcode (find-iterators-cljcode body)
+
+                      new-body (make-jit-run-iterator (jit-expression-variable-rexpr. diterator-var)
+                                                      []
+                                                      body)
+                      new-self (make-no-simp-aggregator-op-inner operator incoming projected-vars new-body)
                       body-exposed (exposed-variables body)
-                      zzz (debug-repl "zz") ;;
-                      inner-body-rexpr-cljcode (generate-cljcode-to-materalize-rexpr body :simplify-result false)]
+                      new-with-iter-cljcode (generate-cljcode-to-materalize-rexpr new-self :simplify-result false)
+                      zzz (debug-repl "zz" false) ;;
+                      ;inner-body-rexpr-cljcode (generate-cljcode-to-materalize-rexpr body :simplify-result false)
+                      ;; If there is some variable which is local variable, then it might be that this can not project that in
+                      ;; this representation, as this a fractional part of the R-expr.  So I suppose that this is similar to the constraints
+                      ;; of the R-expr to when the iterator currently runs, which is when all of the variables are bound
+
+                      ]
+                  (add-to-generation! (fn [inner]
+                                        `(let [~find-iter-var ~find-iter-cljcode]
+                                           (when (empty? ~find-iter-var)
+                                             ;; if there are no iterators, then this rewrite will not work
+                                             (throw (DynaJITRuntimeCheckFailed.)))
+                                           (let [~conj-iter-var (iterators/make-conjunction-iterator ~find-iter-var)]
+                                             ;; we are going to have to start the iterator and
+                                             ~(inner)))))
                   ;; this is going to have to get the iterators from the object.  But we are going to have to figure out which variables
                   ;; we can iterate.  It might be that we already want to have to decied that when the variables
                   ;; which can be bound are decied.  But if there are multiple nested iterators, then we want to figure out
