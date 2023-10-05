@@ -9,7 +9,7 @@
   (:require [clojure.set :refer [subset? union]])
   (:import [dyna.rexpr disjunct-rexpr])
   (:import [dyna.prefix_trie PrefixTrie])
-  (:import [dyna UnificationFailure DIterable DIterator DIteratorInstance ClojureUnorderedVector]))
+  (:import [dyna UnificationFailure DIterable DIterator DIteratorInstance ClojureUnorderedVector IteratorBadBindingOrder]))
 
 (def ^:dynamic *disjunct-op-remove-if-single* true)
 
@@ -471,7 +471,8 @@
               ret))
           (iter-variable-binding-order [this] [dj-vars])
           (iter-create-iterator [this which-binding]
-            (assert (.contains (iter-variable-binding-order this) which-binding))
+            (when-not(.contains (iter-variable-binding-order this) which-binding)
+              (throw (IteratorBadBindingOrder.)))
             (let [ret (trie-diterator-instance (count dj-vars) trie-root dj-vars)]
               ;(debug-repl "creating iterator from trie")
               ret)))})))

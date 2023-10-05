@@ -15,7 +15,7 @@
   (:require [dyna.rexpr-aggregators-optimized])
   (:require [dyna.rexpr-disjunction :refer [trie-diterator-instance]])
   (:require [clojure.set :refer [union difference]])
-  (:import [dyna DynaUserError IDynaAgendaWork DynaTerm InvalidAssumption UnificationFailure DIterable DynaAgenda ClojureUnorderedVector ClojureHashMap])
+  (:import [dyna DynaUserError IDynaAgendaWork DynaTerm InvalidAssumption UnificationFailure DIterable DynaAgenda ClojureUnorderedVector ClojureHashMap IteratorBadBindingOrder])
   (:import [dyna.assumptions Watcher Assumption])
   (:import [dyna.prefix_trie PrefixTrie])
   (:import [clojure.lang IFn]))
@@ -252,6 +252,8 @@
                           ;; this is using the same code as the optimized disjunct to create an iterator, as they are both just looping through
                           ;; the values of the prefix trie
                           ;(debug-repl "create memo iterator")
+                          (when (not= variables which-binding)
+                            (throw (IteratorBadBindingOrder.)))
                           (trie-diterator-instance (count variables) (.root ^PrefixTrie memoized-values) variables)))}))
                 (do
                   ;; then we have not computed this key yet.

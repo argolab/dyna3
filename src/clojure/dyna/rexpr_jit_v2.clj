@@ -17,11 +17,11 @@
   (:require [dyna.prefix-trie :as trie])
   (:require [dyna.iterators :as iterators])
   (:require [clojure.walk :refer [macroexpand-all]])
-  (:require [clojure.set :refer [union]])
+  (:require [clojure.set :refer [union subset?]])
   (:import [dyna.rexpr proj-rexpr simple-function-call-rexpr conjunct-rexpr disjunct-rexpr])
   (:import [dyna.rexpr_aggregators_optimized aggregator-op-outer-rexpr aggregator-op-inner-rexpr])
   (:import [dyna.rexpr_aggregators Aggregator])
-  (:import [dyna RexprValue RexprValueVariable Rexpr DynaJITRuntimeCheckFailed StatusCounters UnificationFailure DIterator ContextHandle ThreadVar RContext]))
+  (:import [dyna RexprValue RexprValueVariable Rexpr DynaJITRuntimeCheckFailed StatusCounters UnificationFailure DIterator ContextHandle ThreadVar RContext IteratorBadBindingOrder]))
 
 ;; this is going to want to cache the R-expr when there are no arguments which are "variables"
 ;; so something like multiplicy can be just a constant value
@@ -158,6 +158,11 @@
   Object
   (toString [this] (str "(jit-local-variable " local-var-symbol ")")))
 
+(defmethod print-dup jit-local-variable-rexpr [^jit-local-variable-rexpr j ^java.io.Writer w]
+  (.write w "(dyna.rexpr_jit_v2.jit-local-variable-rexpr. (quote ")
+  (print-dup (.local-var-symbol j) w)
+  (.write w "))"))
+
 (defrecord jit-expression-variable-rexpr [cljcode]
   RexprValueVariable
   (get-value [this] (if-not *jit-variable-types-work-normally*
@@ -175,6 +180,11 @@
     (???))
   Object
   (toString [this] (str "(jit-expression-variable " cljcode ")")))
+
+(defmethod print-dup jit-expression-variable-rexpr [^jit-expression-variable-rexpr j ^java.io.Writer w]
+  (.write w (str "(dyna.rexpr_jit_v2.jit-expression-variable-rexpr. (quote "
+                 (.cljcode j)
+                 " ))")))
 
 
 (defmethod print-method jit-local-variable-rexpr [^jit-local-variable-rexpr this ^java.io.Writer w]
@@ -201,6 +211,14 @@
   Object
   (toString [this] (str "(jit-exposed-variable-rexpr " exposed-name ")")))
 
+(defmethod print-dup jit-exposed-variable-rexpr [^jit-exposed-variable-rexpr j ^java.io.Writer w]
+  (.write w "(dyna.rexpr_jit_v2.jit-exposed-variable-rexpr. (quote ")
+  (print-dup (.exposed-name j) w)
+  (.write w " ))"))
+
+(defmethod print-method jit-exposed-variable-rexpr [^jit-exposed-variable-rexpr this ^java.io.Writer w]
+  (.write w (.toString this)))
+
 
 (defrecord jit-hidden-variable-rexpr [hidden-name]
   ;; if there is a variable which is projected out, but still used by one of our
@@ -216,23 +234,25 @@
   (all-variables [this] #{this})
   (get-representation-in-context [this ctx] this)
   Object
- (toString [this] (str "(jit-hidden-variable-rexpr " hidden-name ")")))
+  (toString [this] (str "(jit-hidden-variable-rexpr " hidden-name ")")))
 
-(defmethod print-method jit-exposed-variable-rexpr [^jit-exposed-variable-rexpr this ^java.io.Writer w]
-  (.write w (.toString this)))
+(defmethod print-dup jit-hidden-variable-rexpr [^jit-hidden-variable-rexpr j ^java.io.Writer w]
+  (.write w "(dyna.rexpr_jit_v2.jit-hidden-variable-rexpr. (quote ")
+  (print-dup (.hidden-name j) w)
+  (.write w " ))"))
 
 #_(defrecord jit-placeholder-variable-rexpr [^RexprValueVariable wrapped]
-  RexprValueVariable
-  (get-value [this] (get-value wrapped))
-  (get-value-in-context [this ctx] (get-value-in-context wrapped ctx))
-  (set-value! [this value] (set-value! wrapped value))
-  (set-value-in-context! [this ctx value] (set-value-in-context! wrapped ctx value))
-  (is-bound? [this] (is-bound? wrapped))
-  (is-bound-in-context? [thix ctx] (is-bound-in-context? wrapped ctx))
-  (all-variables [this] #{wrapped})
-  (get-representation-in-context [this ctx] (get-representation-in-context wrapped ctx))
-  Object
-  (toString [this] (str "(jit-placeholder-variable-rexpr " wrapped ")")))
+    RexprValueVariable
+    (get-value [this] (get-value wrapped))
+    (get-value-in-context [this ctx] (get-value-in-context wrapped ctx))
+    (set-value! [this value] (set-value! wrapped value))
+    (set-value-in-context! [this ctx value] (set-value-in-context! wrapped ctx value))
+    (is-bound? [this] (is-bound? wrapped))
+    (is-bound-in-context? [thix ctx] (is-bound-in-context? wrapped ctx))
+    (all-variables [this] #{wrapped})
+    (get-representation-in-context [this ctx] (get-representation-in-context wrapped ctx))
+    Object
+    (toString [this] (str "(jit-placeholder-variable-rexpr " wrapped ")")))
 
 ;; the iterables should be something like which variables and their orders can be
 (def-base-rexpr jit-placeholder [:unchecked external-name ;; non-nil if accessed via the passed in rexpr
@@ -912,7 +932,7 @@
 
 (defn jit-metadata
   ([rexpr]
-   (let [r (get @*jit-rexpr-rewrite-metadata* rexpr )]
+   (let [r (get @*jit-rexpr-rewrite-metadata* rexpr)]
      (if (nil? r)
        (get (vswap! *jit-rexpr-rewrite-metadata* assoc rexpr (volatile! {})) rexpr)
        r)))
@@ -956,31 +976,39 @@
   ;; seralized state, whereas for an ending state, we might just want to return
   ;; it, as it should go back into the control flow of "other" stuff
   (cond (is-empty-rexpr? rexpr)
-        `(make-multiplicity 0) ;; we can not throw here as there are multiple nested try-caches which could catch it by accident, so return 0
+        {:type :rexpr
+         :rexpr-type rexpr
+         :cljcode-expr `(make-multiplicity 0)} ;; we can not throw here as there are multiple nested try-caches which could catch it by accident, so return 0
         (is-jit-placeholder? rexpr)
         (if (:external-name rexpr)
-          `(. ~(with-meta 'rexpr {:tag (jit-generating-rewrite-for-rexpr-type)})
-              ~(:external-name rexpr))
-          (:local-name rexpr))
+          {:type :rexpr
+           :rexpr-type ((keyword (:external-name rexpr)) *jit-generating-rewrite-for-rexpr*)
+           :cljcode-expr `(. ~(with-meta 'rexpr {:tag (jit-generating-rewrite-for-rexpr-type)})
+                             ~(:external-name rexpr))}
+          {:type :rexpr
+           :rexpr-type (strict-get @(jit-metadata rexpr) :current-rexpr)
+           :cljcode-expr (:local-name rexpr)})
         :else
         (let [re (if-not (is-composit-rexpr? rexpr)
                    (let [local-vars-bound @*local-variable-names-for-variable-values*]
                      ;; this is a simple primitive R-expr type (like multiplicity or builtin
                      ;; like add) there is no reason to generate a more complex R-expr type for
                      ;; this.  So we are going to just generate something which generates this type directly
-                     `(~(symbol "dyna.rexpr-constructors" (str "make-" (rexpr-name rexpr)))
-                       ~@(for [arg (get-arguments rexpr)]
-                           (cond (number? arg) arg
-                                 (is-constant? arg) `(make-constant ~(get-value arg))
-                                 (instance? jit-exposed-variable-rexpr arg)
-                                 (if (contains? local-vars-bound arg)
-                                   `(make-constant ~(strict-get (local-vars-bound arg) :var-name))
-                                   `(. ~(with-meta 'rexpr {:tag (jit-generating-rewrite-for-rexpr-type)})
-                                       ~(:exposed-name arg)))
-                                 (and (instance? jit-local-variable-rexpr arg) (is-bound-jit? arg))
-                                 `(make-constant ~(strict-get (local-vars-bound arg) :var-name))
-                                 :else (do (debug-repl "arg type")
-                                           (???))))))
+                     {:type :rexpr
+                      :rexpr-type rexpr
+                      :cljcode-expr `(~(symbol "dyna.rexpr-constructors" (str "make-" (rexpr-name rexpr)))
+                                      ~@(for [arg (get-arguments rexpr)]
+                                          (cond (number? arg) arg
+                                                (is-constant? arg) `(make-constant ~(get-value arg))
+                                                (instance? jit-exposed-variable-rexpr arg)
+                                                (if (contains? local-vars-bound arg)
+                                                  `(make-constant ~(strict-get (local-vars-bound arg) :var-name))
+                                                  `(. ~(with-meta 'rexpr {:tag (jit-generating-rewrite-for-rexpr-type)})
+                                                      ~(:exposed-name arg)))
+                                                (and (instance? jit-local-variable-rexpr arg) (is-bound-jit? arg))
+                                                `(make-constant ~(strict-get (local-vars-bound arg) :var-name))
+                                                :else (do (debug-repl "arg type")
+                                                          (???)))))})
                    (let [local-vars-bound @*local-variable-names-for-variable-values*
                          exposed (exposed-variables rexpr)
                          remapped-locals (into {} (for [v exposed
@@ -994,59 +1022,36 @@
                          rvarmap (:variable-name-mapping-rev new-synth)
                          target-r ((:conversion-function new-synth) rexpr)]
                      (dyna-assert (not (nil? target-r))) ;; if this is nil, then that means this is not a matching R-expr
-                     #_`(~(symbol "dyna.rexpr-constructors" (str "make-" (:generated-name new-synth)))
-                         ~@(for [v (:variable-order new-synth)
-                                 :let [lv (rvarmap v)
-                                       arg (get rlocal-map lv lv)]]
-                             (cond (instance? jit-exposed-variable-rexpr arg)
-                                   (if (contains? local-vars-bound arg)
-                                     `(make-constant ~(strict-get (local-vars-bound arg) :var-name))
-                                     `(. ~(with-meta 'rexpr {:tag (jit-generating-rewrite-for-rexpr-type)})
-                                         ~(:exposed-name arg)))
-                                   (and (instance? jit-local-variable-rexpr arg) (is-bound-jit? arg))
-                                   `(make-constant ~(strict-get (local-vars-bound arg) :var-name))
-                                   (instance? jit-expression-variable-rexpr arg)
-                                   `(make-constant ~(:cljcode arg))
-                                   (is-jit-placeholder? arg)
-                                   (let []
+                     {:type :rexpr
+                      :rexpr-type target-r
+                      :cljcode-expr `(~(symbol "dyna.rexpr-constructors" (str "make-no-simp-" (:generated-name new-synth)))
+                                      ~@(for [arg (get-arguments target-r)]
+                                          (cond (instance? jit-exposed-variable-rexpr arg)
+                                                (if (contains? local-vars-bound arg)
+                                                  `(make-constant ~(strict-get (local-vars-bound arg) :var-name))
+                                                  `(. ~(with-meta 'rexpr {:tag (jit-generating-rewrite-for-rexpr-type)})
+                                                      ~(:exposed-name arg)))
+                                                (and (instance? jit-local-variable-rexpr arg) (is-bound-jit? arg))
+                                                `(make-constant ~(strict-get (local-vars-bound arg) :var-name))
+                                                (instance? jit-expression-variable-rexpr arg)
+                                                `(make-constant ~(:cljcode arg))
+                                                (is-jit-placeholder? arg)
+                                                (let []
+                                                  (if (:external-name arg)
+                                                    `(. ~(with-meta 'rexpr {:tag (jit-generating-rewrite-for-rexpr-type)})
+                                                        ~(:external-name arg))
+                                                    (do
+                                                      (assert (:local-name arg))
+                                                      (:local-name arg))))
 
-                                     (if (:external-name arg)
-                                       `(. ~(with-meta 'rexpr {:tag (jit-generating-rewrite-for-rexpr-type)})
-                                           ~(:external-name arg))
-                                       (do
-                                         (assert (:local-name arg))
-                                         (:local-name arg))))
-
-                                   :else (do (debug-repl "arg type")
-                                             (???)))))
-                     `(~(symbol "dyna.rexpr-constructors" (str "make-no-simp-" (:generated-name new-synth)))
-                       ~@(for [arg (get-arguments target-r)]
-                           (cond (instance? jit-exposed-variable-rexpr arg)
-                                 (if (contains? local-vars-bound arg)
-                                   `(make-constant ~(strict-get (local-vars-bound arg) :var-name))
-                                   `(. ~(with-meta 'rexpr {:tag (jit-generating-rewrite-for-rexpr-type)})
-                                       ~(:exposed-name arg)))
-                                 (and (instance? jit-local-variable-rexpr arg) (is-bound-jit? arg))
-                                 `(make-constant ~(strict-get (local-vars-bound arg) :var-name))
-                                 (instance? jit-expression-variable-rexpr arg)
-                                 `(make-constant ~(:cljcode arg))
-                                 (is-jit-placeholder? arg)
-                                 (let []
-                                   (if (:external-name arg)
-                                     `(. ~(with-meta 'rexpr {:tag (jit-generating-rewrite-for-rexpr-type)})
-                                         ~(:external-name arg))
-                                     (do
-                                       (assert (:local-name arg))
-                                       (:local-name arg))))
-
-                                 :else (do (debug-repl "arg type")
-                                           (???)))))))]
-          (if (and simplify-result (not (is-multiplicity? rexpr)))
+                                                :else (do (debug-repl "arg type")
+                                                          (???)))))}))]
+          (if (and simplify-result not (is-multiplicity? rexpr))
             `(~'simplify ~re)
             re))))
 
 (defn- add-return-rexpr-checkpoint! [rexpr]
-  (let [materalize-code (generate-cljcode-to-materalize-rexpr rexpr :simplify-result true)
+  (let [materalize-code (:cljcode-expr (generate-cljcode-to-materalize-rexpr rexpr :simplify-result true))
         status-counter (and system/status-counters (not @*jit-incremented-status-counter*))]
     (when status-counter (vreset! *jit-incremented-status-counter* true))
     (add-to-generation! (fn [inner]
@@ -1059,7 +1064,7 @@
                                ~materalize-code))))))
 
 (defn- add-unification-failure-checkpoint! [rexpr]
-  (let [materalize-code (generate-cljcode-to-materalize-rexpr rexpr :simplify-result true)] ;; we want to simplify the result here, as this might be some internal branch has failed instead of the whole expression
+  (let [materalize-code (:cljcode-expr (generate-cljcode-to-materalize-rexpr rexpr :simplify-result true))] ;; we want to simplify the result here, as this might be some internal branch has failed instead of the whole expression
     (add-to-generation! (fn [inner]
                           `(try
                              ~(inner)
@@ -1074,7 +1079,7 @@
        (try
          (do ~((generate-cljcode (persistent! *jit-generate-functions*))
                (fn []
-                 (generate-cljcode-to-materalize-rexpr final-rexpr)
+                 (:cljcode-expr (generate-cljcode-to-materalize-rexpr final-rexpr))
                  ;; TODO: the inner expression needs to return an R-expr which corresponds with the state of the JITted code after it has performed many steps
                  ;; either this should already be put into the JITted code here, or it should have already been generated somewhere else
                                         ;`(???)
@@ -2337,15 +2342,17 @@
                                      (f rexpr simplify-jit-internal-rexpr)))))]
           (if (or (nil? ret) (= ret rexpr))
             rexpr
-            (let [m (get @*jit-rexpr-rewrite-metadata* rexpr)]
+            (let [m (get @*jit-rexpr-rewrite-metadata* rexpr)
+                  c (get @*jit-rexpr-rewrite-metadata* ret)]
               ;; track the metadata as the R-expr is changed
-              (when-not (nil? m)
-                (vswap! *jit-rexpr-rewrite-metadata* assoc ret m))
+              (cond (and (not (nil? m)) (nil? c)) (vswap! *jit-rexpr-rewrite-metadata* assoc ret m) ;; keep the same structure but assoc with the new-rexpr
+                    (and (not (nil? m)) (not (nil? c))) (vreset! c (merge @c @m)) ;; merge the old metadata into the new object
+                    )
               ret))))))))
 
 
 
-(defn- simplify-jit-internal-rexpr-once [r]
+(defn- simplify-jit-internal-rexpr-once [r & {:keys [simplify-count] :or {simplify-count 0}}]
   (let [top-conjuncts (all-conjunctive-rexprs r)
         possible-rewrites (binding [*jit-simplify-call-counter* (volatile! 0)
                                     *jit-simplify-rewrites-found* (volatile! #{})
@@ -2422,12 +2429,13 @@
   (loop [r (if (rexpr? rexpr)
              rexpr
              (do (assert (= :rexpr (:type rexpr)))
-                 (:rexpr-type rexpr)))]
+                 (:rexpr-type rexpr)))
+         count 0]
     (if (is-jit-placeholder? r)
       r ;; if this is a placeholder, then just stop as it will be returned directly (unwrapping the JIT state)
-      (let [nr (simplify-jit-internal-rexpr-once r)]
+      (let [nr (simplify-jit-internal-rexpr-once r :simplify-count count)]
         (if (not= r nr)
-          (recur nr)
+          (recur nr (+ count 1))
           nr)))))
 
 ()
@@ -2482,19 +2490,13 @@
                 ;; then there is something that we can generate, and we are going to want to run that generation and then evaluate it against the current R-expr
                 (let [gen-fn (generate-cljcode-fn result)
                       __ (println gen-fn)
-                      ;__ (debug-repl "pr0" false)
+                      __ (debug-repl "pr0" false)
                       fn-evaled (binding [*ns* dummy-namespace]
                                   (eval `(do
                                            (ns dyna.rexpr-jit-v2)
                                            (def-rewrite-direct ~(:generated-name jinfo) [:standard] ~gen-fn))))]
-                  fn-evaled
-                                        ;(debug-repl "pr1" false)
-                  #_(let [rr (try (fn-evaled rexpr simplify-method)
-                                (catch UnificationFailure _ (make-multiplicity 0)))]
-                    (when (is-empty-rexpr? rr)
-                      (debug-repl "pr2" false))
-                    (assert (not= rexpr rr)) ;; otherwise there was no rewriting done, and the generated rewrite failed for some reason
-                    rr))
+                  (debug-repl "pr1" false)
+                  fn-evaled)
                 simplify-identity ;; if nothing was generated, then we are just going to return an identity function which does not do any rewriting
                 )))))
         ;; evaluate the function here so that we clear all of the bindings which are specific to the JIT.   This should get back to whatever is the JIT's
@@ -2912,10 +2914,10 @@
                                                      :aggregator-assign-value true
                                                      :kw-args {:agg-final true}}]))
       (if (*jit-simplify-rewrites-picked-to-run* {:runtime-checks []
-                                                      :matching-vars []
-                                                      :simplify-call-counter @*jit-simplify-call-counter*
-                                                      :aggregator-assign-value true
-                                                      :kw-args {:agg-final true}})
+                                                  :matching-vars []
+                                                  :simplify-call-counter @*jit-simplify-call-counter*
+                                                  :aggregator-assign-value true
+                                                  :kw-args {:agg-final true}})
             (if *jit-compute-unification-failure*
               (make-multiplicity 0)
               (let [] ;; this is the rewrite which assigns the value to the output
@@ -2998,8 +3000,9 @@
                 what-bound (iter-what-variables-bound conj-iterator)
                 bound-order (iter-variable-binding-order conj-iterator)]
             ;(debug-repl "has iters")
-            (vswap! *jit-simplify-rewrites-found* conj [(tlocal *current-simplify-stack*)
-                                                        (assoc-in self-id [:kw-args :aggregator-iterators] true)]))))
+            (when-not (empty? what-bound) ;; if there is nothing bound, then the iterator is not useful
+              (vswap! *jit-simplify-rewrites-found* conj [(tlocal *current-simplify-stack*)
+                                                          (assoc-in self-id [:kw-args :aggregator-iterators] true)])))))
       (let [body (simplify R)]
         (cond (*jit-simplify-rewrites-picked-to-run* self-id)
               (if *jit-compute-unification-failure*
@@ -3061,15 +3064,18 @@
                 (let [find-iter-var (gensym 'find-iter)
                       conj-iter-var (gensym 'conj-iter)
                       diterator-var (gensym 'diterator)
+                      hole-rexpr-var (gensym 'iter-hole)
 
                       conj-iterator (iterators/make-conjunction-iterator iters)
                       what-bound (iter-what-variables-bound conj-iterator)
                       bound-order (iter-variable-binding-order conj-iterator)
 
+                      picked-bound-order (first bound-order)
+
                       find-iter-cljcode (find-iterators-cljcode body)
 
                       new-body (make-jit-run-iterator (jit-expression-variable-rexpr. diterator-var)
-                                                      []
+                                                      (vec picked-bound-order)
                                                       body)
                       new-self (make-no-simp-aggregator-op-inner operator incoming projected-vars new-body)
                       body-exposed (exposed-variables body)
@@ -3087,8 +3093,18 @@
                                              ;; if there are no iterators, then this rewrite will not work
                                              (throw (DynaJITRuntimeCheckFailed.)))
                                            (let [~conj-iter-var (iterators/make-conjunction-iterator ~find-iter-var)]
-                                             ;; we are going to have to start the iterator and
-                                             ~(inner)))))
+                                             ;; we are going to have to start the iterator.  This means checking that the iterator matches what we expect and supports what we want
+                                             (when-not (subset? ~what-bound (iter-what-variables-bound ~conj-iter-var))
+                                               (throw (DynaJITRuntimeCheckFailed.)))
+                                             (let [~diterator-var (try (iter-create-iterator ~conj-iter-var ~picked-bound-order)
+                                                                       (catch IteratorBadBindingOrder ~'_
+                                                                         (throw (DynaJITRuntimeCheckFailed.))))]
+                                               (when (nil? ~diterator-var)
+                                                 (throw (DynaJITRuntimeCheckFailed.)))
+                                               (debug-repl "before hole value")
+                                               (let [~hole-rexpr-var ~(:cljcode-expr new-with-iter-cljcode)]
+
+                                                 ~(inner)))))))
                   ;; this is going to have to get the iterators from the object.  But we are going to have to figure out which variables
                   ;; we can iterate.  It might be that we already want to have to decied that when the variables
                   ;; which can be bound are decied.  But if there are multiple nested iterators, then we want to figure out
@@ -3098,9 +3114,12 @@
 
                   ;; the order in which the variables can be bound should consider which of the
 
-                  (debug-repl "choose to run iterator" false)
-                  (???)
-                  ))
+
+                  (let [ret (make-jit-placeholder nil hole-rexpr-var (vec (exposed-variables rexpr)))
+                        md (jit-metadata ret)]
+                    (vswap! md assoc :current-rexpr (:rexpr-type new-with-iter-cljcode))
+                    (debug-repl "choose to run iterator" false)
+                    ret)))
 
 
               :else
@@ -3162,6 +3181,39 @@
                                         ;(debug-repl "more to do in aggregator")
             ret))))))
 
+
+(def-rewrite
+  :match (jit-run-iterator iterator iterator-order body)
+  :run-at :jit-compiler
+  (do
+    (vswap! *jit-simplify-call-counter* inc)
+    (let [run-iter-rewrite-id {:runtime-checks []
+                               :matching-vars []
+                               :simplify-call-counter @*jit-simplify-call-counter*
+                               :iterator-run true
+                               :iterator-input-var iterator
+                               :iterator-order iterator-order
+                               :kw-args {:iterator-run true}}
+          new-body (simplify body)]
+      (vswap! *jit-simplify-rewrites-found* conj [(tlocal *current-simplify-stack*)
+                                                  run-iter-rewrite-id])
+      (if (*jit-simplify-rewrites-picked-to-run* run-iter-rewrite-id)
+        (let [iter-value (jit-evaluate-cljform `(get-value ~iterator)) ;; the iter will get passed in as a variable
+              ]
+          (debug-repl "run iterator")
+          ;; this is going to need to do the binding for the iterator.
+          ;; the iterator should only be allowed when it is the first rewrite to run?
+          ;; but the rewrite should have that there is something which can allow for it
+
+
+          (add-to-generation! (fn [inner]
+                                `(let [iter-value ]
+
+                                   (doseq [next-iter (iter-run-iterable )]))))
+
+          (???))
+        (jit-run-iterator iterator iterator-order new-body)))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def-rewrite
@@ -3175,7 +3227,7 @@
         parent-variable-name-bindings *local-variable-names-for-variable-values*
         changed (volatile! false)]
     #_(when (contains? @metadata :disjunct-bindings)
-      (debug-repl "handle disjunct bindings"))
+        (debug-repl "handle disjunct bindings"))
 
     (doseq [[c prev-bind] (zipseq-longest children (:disjunct-bindings @metadata))]
       (let [new-binding (volatile! @parent-variable-name-bindings)]
@@ -3267,15 +3319,20 @@
                  (bound? #'*jit-aggregator-info*))
         ;; make sure the out var is pre populated, otherwise this is going to have that this will result in nothing
         (aggregator-out-var)))
-    (when (and *jit-consider-expanding-placeholders* ;; if the placeholder is something that we are willing to embed into the R-expr
-               (>= (:num-simplifies-done @metadata 0) 1)
-               (or (not (is-composit-rexpr? current-value)) ;; we will embed things which do not have recursive nested R-exprs.
-                   (contains? (rexpr-jit-info current-value) :generated-name)) ;; if it is another JITted type, then we can also embed it
-               )
-      ;; then we have already done one rewrite, and the current nested R-expr is a JIT type.  This means that we can merge the two JIT type R-exprs together
-      ;; the reason that we are oging to check if the rewrite
-      (vswap! *jit-simplify-rewrites-found* conj [(tlocal *current-simplify-stack*)
-                                                  (assoc rewrite-sig :jit-hole-embed true)]))
+    (let [hole-jinfo (rexpr-jit-info current-value)]
+      (when (and *jit-consider-expanding-placeholders* ;; if the placeholder is something that we are willing to embed into the R-expr
+                 (>= (:num-simplifies-done @metadata 0) 1)
+                 (if (contains? hole-jinfo :generated-name)
+                   ;; if this is a JITted expression, then we just need to check if tihs does not have something that needs to run an iterator, as that can do lots of expansion
+                   (not (some is-jit-run-iterator? (all-conjunctive-rexprs (:prim-rexpr hole-jinfo))))
+
+                   ;; if not JITted, just make sure that this is a "simple" R-expr without more nested values
+                   (and (not (is-composit-rexpr? current-value))  ;; we will embed things which do not have recursive nested R-exprs.
+                        (not (is-user-call? current-value)))))
+        ;; then we have already done one rewrite, and the current nested R-expr is a JIT type.  This means that we can merge the two JIT type R-exprs together
+        ;; the reason that we are oging to check if the rewrite
+        (vswap! *jit-simplify-rewrites-found* conj [(tlocal *current-simplify-stack*)
+                                                    (assoc rewrite-sig :jit-hole-embed true)])))
 
     (cond
       (*jit-simplify-rewrites-picked-to-run* rewrite-sig)

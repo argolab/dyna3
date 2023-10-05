@@ -10,7 +10,7 @@
   (:require [dyna.context :as context])
   (:require [dyna.rexpr-pretty-printer :refer [rexpr-printer]])
   (:import [dyna.rexpr unify-structure-rexpr])
-  (:import [dyna DynaTerm DIterable DIterator DIteratorInstance UnificationFailure DynaMap]))
+  (:import [dyna DynaTerm DIterable DIterator DIteratorInstance UnificationFailure DynaMap IteratorBadBindingOrder]))
 
 ;(in-ns 'dyna.rexpr)
 
@@ -558,6 +558,8 @@
         (iter-what-variables-bound [this] #{Out})
         (iter-variable-binding-order [this] [[Out]])
         (iter-create-iterator [this which-binding]
+          (when (not= which-binding [Out])
+            (throw (IteratorBadBindingOrder.)))
           (reify DIterator
             (iter-run-cb [this cb-fn] (doseq [v (iter-run-iterable this)] (cb-fn v)))
             (iter-run-iterable [this]

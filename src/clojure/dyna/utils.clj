@@ -469,7 +469,7 @@
                                  (when-not (contains? tlocal-vars k2)
                                    (println "variable " k2 " not found")
                                    (println tlocal-vars)
-                                   (assert false))
+                                   (throw (IllegalArgumentException. (str "not a valid tlocal variable: " k2))))
                                  [k2 (gensym (str "stash-" k2))])))]
     `(let* [~@(apply concat (for [[k s] stash-names] ;; cache all of the old values
                               [s `(. ^ThreadVar ~thread-var ~k)]))

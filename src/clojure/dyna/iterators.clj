@@ -5,8 +5,7 @@
   (:require [dyna.context :as context])
   (:require [dyna.system :refer [should-stop-processing?]])
   (:require [clojure.set :refer [union intersection subset? difference]])
-  ;(:require [clojure.tools.macro :refer [macrolet]])
-  (:import [dyna DIterable DIterator DIteratorInstance UnificationFailure]))
+  (:import [dyna DIterable DIterator DIteratorInstance UnificationFailure IteratorBadBindingOrder]))
 
 ;; iterators are going to allow for there to efficiently loop over the values which are assigned to variables
 
@@ -32,7 +31,8 @@
       (iter-what-variables-bound [this] #{variable})
       (iter-variable-binding-order [this] [[variable]])
       (iter-create-iterator [this which-binding]
-        (assert (or (= which-binding [variable])))
+        (when-not (or (= which-binding [variable]))
+          (throw (IteratorBadBindingOrder.)))
         (reify DIterator
           (iter-run-cb [this cb-fun]
             (cb-fun (reify DIteratorInstance
