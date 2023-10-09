@@ -153,7 +153,7 @@
         rname (str name "-rexpr")
         flags (into #{} (filter keyword? optional))
         opt (if (not (nil? optional)) (vec (filter #(not (keyword? %)) optional)) [])
-        auto-create-new-rewrites false]
+        auto-create-new-rewrites (.startsWith ^String (str name) "jit-rexpr")]
     `(do
        (swap! rexpr-containers-signature (fn ~'[x]
                                            (assert (not (contains? ~'x '~name))) ;; make sure that we do not define two R-exprs with the same names
@@ -1329,7 +1329,8 @@
                                                                                 :jit-compiler "simplify-jit-compilation-step-")
                                                                               functor-name))
                               {:tag "dyna.SimplifyRewriteCollection"})
-                           ~rewrite-func-var))))))
+                           ~rewrite-func-var)))
+       ~rewrite-func-var)))
 
 (defmacro def-rewrite [& args]
   (let [kw-args (apply hash-map (if (= (mod (count args) 2) 0)

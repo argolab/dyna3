@@ -59,5 +59,6 @@ public final class SimplifyRewriteCollection extends AFn {
         return doRewrite((Rexpr)r, (IFn)simplify_method);
     }
 
-    private static Var jit_create_rewrite = RT.var("dyna.rexpr", "simplify-jit-create-rewrite");
+    private static Var jit_create_rewrite = RT.var("dyna.rexpr-jit-v2", "simplify-jit-attempt-create-rewrite-for-jittype");
+        //RT.var("dyna.rexpr", "simplify-jit-create-rewrite");
 }

@@ -14,7 +14,7 @@
   (:import [dyna.rexpr proj-rexpr disjunct-rexpr aggregator-rexpr])
   (:import [dyna.rexpr_disjunction disjunct-op-rexpr])
   (:import [dyna.prefix_trie PrefixTrie])
-  (:import [dyna UnificationFailure ClojureUnorderedVector ClojureHashMap]))
+  (:import [dyna UnificationFailure ClojureUnorderedVector ClojureHashMap RexprValueVariableForceExposed]))
 
 
 (def-base-rexpr aggregator-op-outer [:unchecked operator
@@ -29,18 +29,24 @@
                                      :rexpr body]
   (exposed-variables [this]
                      (cache-field cached-exposed-variables
-                                  (difference (exposed-variables body)
-                                              (into #{incoming} projected))))
+                                  (let [r (difference (exposed-variables body)
+                                                      (into #{incoming} projected))]
+                                    (if (instance? RexprValueVariableForceExposed incoming)
+                                      (union r #{incoming})
+                                      r))))
   (remap-variables [this variable-map]
                    ;; this is going to have to perform remapping of the body
                    ;(dyna-assert (not (some (into #{incoming} projected) (keys variable-map))))
                    (let [ret
-                         (let [variable-map (apply dissoc variable-map incoming projected)]
+                         (let [variable-map (apply dissoc variable-map incoming projected)
+                               new-incoming (if (instance? RexprValueVariableForceExposed incoming)
+                                              (get variable-map incoming incoming)
+                                              incoming)]
                            (if (empty? variable-map)
                              this
                              (debug-tbinding
                               [current-simplify-stack (conj (tlocal *current-simplify-stack*) this)]
-                              (make-aggregator-op-inner operator incoming projected
+                              (make-aggregator-op-inner operator new-incoming projected
                                                         (remap-variables body
                                                                          (apply dissoc variable-map incoming projected))))))]
                      ret))
