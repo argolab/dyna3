@@ -59,8 +59,11 @@ public interface Rexpr {
 
     Object check_rexpr_basecases(Object stack);
 
-    Rexpr simplify_fast_rexprl(IFn simplify);
+    SimplifyRewriteCollection rexpr_simplify_fast_collection();
 
-    Rexpr simplify_inference_rexprl(IFn simplify);
+    SimplifyRewriteCollection rexpr_simplify_construct_collection();
 
+    SimplifyRewriteCollection rexpr_simplify_inference_collection();
+
+    SimplifyRewriteCollection rexpr_jit_compilation_step_collection();
 }

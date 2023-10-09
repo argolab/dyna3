@@ -21,7 +21,7 @@
   (:import [dyna.rexpr proj-rexpr simple-function-call-rexpr conjunct-rexpr disjunct-rexpr])
   (:import [dyna.rexpr_aggregators_optimized aggregator-op-outer-rexpr aggregator-op-inner-rexpr])
   (:import [dyna.rexpr_aggregators Aggregator])
-  (:import [dyna RexprValue RexprValueVariable Rexpr DynaJITRuntimeCheckFailed StatusCounters UnificationFailure DIterator ContextHandle ThreadVar RContext IteratorBadBindingOrder]))
+  (:import [dyna RexprValue RexprValueVariable Rexpr DynaJITRuntimeCheckFailed StatusCounters UnificationFailure DIterator ContextHandle ThreadVar RContext IteratorBadBindingOrder SimplifyRewriteCollection]))
 
 ;; this is going to want to cache the R-expr when there are no arguments which are "variables"
 ;; so something like multiplicy can be just a constant value
@@ -2334,7 +2334,7 @@
           (debug-repl "need to perform rewrite")
           (???))))))
 
-(defn- simplify-jit-internal-rexpr [rexpr-in]
+#_(defn- simplify-jit-internal-rexpr [rexpr-in]
   (vswap! *jit-simplify-call-counter* inc)
   (let [rexpr (if (rexpr? rexpr-in)
                 rexpr-in
@@ -2361,6 +2361,31 @@
                     )
               ret))))))))
 
+(defn- simplify-jit-internal-rexpr [rexpr-in]
+  (vswap! *jit-simplify-call-counter* inc)
+  (let [rexpr (if (rexpr? rexpr-in)
+                rexpr-in
+                (do (assert (= :rexpr (:type rexpr-in)))
+                    (:rexpr-type rexpr-in)))]
+    (binding [*jit-currently-rewriting* rexpr]
+      (tbinding
+       [current-simplify-stack (conj (tlocal *current-simplify-stack*) rexpr)]
+       (debug-tbinding
+        [current-simplify-running simplify-jit-internal-rexpr]
+        (let [^SimplifyRewriteCollection jit-rewrite-collection (rexpr-jit-compilation-step-collection rexpr)
+              ret (if (nil? (.getRewriteListHead jit-rewrite-collection))
+                    (simplify-jit-internal-rexpr-generic-rewrites rexpr)
+                    (jit-rewrite-collection rexpr simplify-jit-internal-rexpr))]
+          (if (or (nil? ret) (= ret rexpr))
+            rexpr
+            (let [m (get @*jit-rexpr-rewrite-metadata* rexpr)
+                  c (get @*jit-rexpr-rewrite-metadata* ret)]
+              ;; track the metadata as the R-expr is changed
+              (cond (and (not (nil? m)) (nil? c)) (vswap! *jit-rexpr-rewrite-metadata* assoc ret m) ;; keep the same structure but assoc with the new-rexpr
+                    (and (not (nil? m)) (not (nil? c))) (vreset! c (merge @c @m)) ;; merge the old metadata into the new object
+                    )
+              ret))))))))
+
 
 
 (defn- simplify-jit-internal-rexpr-once [r & {:keys [simplify-count] :or {simplify-count 0}}]
@@ -2376,7 +2401,7 @@
                               @*jit-simplify-rewrites-found*))]
     (if (empty? possible-rewrites)
       (do
-        ;(debug-repl "no possible rewrites" false)
+                                        ;(debug-repl "no possible rewrites" false)
         r) ;; then we are "done" and we just return this R-expr unrewritten
       (loop [picked-rr-order (sort-by (fn [[simplify-stack rr]]
                                         (+ (* 1000 (count simplify-stack)) ;; prefer things at the top of the stack
@@ -2393,7 +2418,7 @@
                                            (:simplify-call-counter rr)))
                                       possible-rewrites)]
         (when (> (count picked-rr-order) 1)
-          ;(debug-repl "multiple possible rewrites")
+                                        ;(debug-repl "multiple possible rewrites")
           (println "multiple possible"))
         (if (empty? picked-rr-order)
           (do
@@ -2429,7 +2454,7 @@
                                                     ~@set-extern-values
                                                     ~(inner)))))
                          (add-return-rexpr-checkpoint! nr)
-                         ;(debug-repl "result of doing rewrite" false)
+                                        ;(debug-repl "result of doing rewrite" false)
                          nr
                          )))]
             (if (not= nr r)

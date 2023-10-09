@@ -10,7 +10,7 @@
   (:require [clojure.set :refer [union difference subset?]])
   (:require [clojure.string :refer [trim join]])
   (:require [aprint.core :refer [aprint]])
-  (:import [dyna UnificationFailure DynaTerm StatusCounters Rexpr RexprValue RexprValueVariable RContext]))
+  (:import [dyna UnificationFailure DynaTerm StatusCounters Rexpr RexprValue RexprValueVariable RContext SimplifyRewriteCollection]))
 
 (defn simplify-identity [a b] a)
 
@@ -46,9 +46,9 @@
 
 (def rexpr-rewrites-during-jit-compilation (atom {}))
 
-(def rexpr-rewrites-func (atom {}))
-(def rexpr-rewrites-construct-func (atom {}))
-(def rexpr-rewrites-inference-func (atom {}))
+;; (def rexpr-rewrites-func (atom {}))
+;; (def rexpr-rewrites-construct-func (atom {}))
+;; (def rexpr-rewrites-inference-func (atom {}))
 
 ;; a map of functor type types to a list of rewrite rules bodies.  This is can be used by the JIT to combine rules
 (def rexpr-rewrites-source (atom {}))
@@ -145,11 +145,15 @@
 (defn construct-rexpr [name & args]
   (apply (get @rexpr-constructors name) args))
 
+(defn- make-simplify-rewrite-collection [can-make-new-rewrites]
+  (SimplifyRewriteCollection/create can-make-new-rewrites))
+
 (defmacro def-base-rexpr [name args & optional]
   (let [vargroup (partition 2 args)
         rname (str name "-rexpr")
         flags (into #{} (filter keyword? optional))
-        opt (if (not (nil? optional)) (vec (filter #(not (keyword? %)) optional)) [])]
+        opt (if (not (nil? optional)) (vec (filter #(not (keyword? %)) optional)) [])
+        auto-create-new-rewrites false]
     `(do
        (swap! rexpr-containers-signature (fn ~'[x]
                                            (assert (not (contains? ~'x '~name))) ;; make sure that we do not define two R-exprs with the same names
@@ -157,18 +161,24 @@
        (declare ~(symbol (str "make-" name))
                 ~(symbol (str "make-no-simp-" name)) ;; this should really be something that is "require context"
                 ~(symbol (str "is-" name "?")))
-       (intern 'dyna.rexpr-constructors '~(symbol (str "simplify-" name)) simplify-identity)
-       (intern 'dyna.rexpr-constructors '~(symbol (str "simplify-construct-" name)) simplify-identity)
-       (intern 'dyna.rexpr-constructors '~(symbol (str "simplify-inference-" name)) simplify-identity)
+       (intern 'dyna.rexpr-constructors '~(symbol (str "simplify-" name)) (~make-simplify-rewrite-collection ~auto-create-new-rewrites))
+       (intern 'dyna.rexpr-constructors '~(symbol (str "simplify-construct-" name)) (~make-simplify-rewrite-collection false))
+       (intern 'dyna.rexpr-constructors '~(symbol (str "simplify-inference-" name)) (~make-simplify-rewrite-collection ~auto-create-new-rewrites))
+       (intern 'dyna.rexpr-constructors '~(symbol (str "simplify-jit-compilation-step-" name)) (~make-simplify-rewrite-collection false))
+
+
+       ;; (intern 'dyna.rexpr-constructors '~(symbol (str "simplify-" name)) simplify-identity)
+       ;; (intern 'dyna.rexpr-constructors '~(symbol (str "simplify-construct-" name)) simplify-identity)
+       ;; (intern 'dyna.rexpr-constructors '~(symbol (str "simplify-inference-" name)) simplify-identity)
 
        ;; used by the JIT compiler when it is rewriting the state of an R-expr for the purpose of matching some rewrite
-       (intern 'dyna.rexpr-constructors '~(symbol (str "simplify-jit-compilation-step-" name)) simplify-identity)
+                                        ;(intern 'dyna.rexpr-constructors '~(symbol (str "simplify-jit-compilation-step-" name)) simplify-identity)
 
-       (alter-meta! (var ~(symbol "dyna.rexpr-constructors" (str "simplify-" name))) assoc :redef true)
-       (alter-meta! (var ~(symbol "dyna.rexpr-constructors" (str "simplify-construct-" name))) assoc :redef true)
-       (alter-meta! (var ~(symbol "dyna.rexpr-constructors" (str "simplify-inference-" name))) assoc :redef true)
+       ;; (alter-meta! (var ~(symbol "dyna.rexpr-constructors" (str "simplify-" name))) assoc :redef true)
+       ;; (alter-meta! (var ~(symbol "dyna.rexpr-constructors" (str "simplify-construct-" name))) assoc :redef true)
+       ;; (alter-meta! (var ~(symbol "dyna.rexpr-constructors" (str "simplify-inference-" name))) assoc :redef true)
 
-       (alter-meta! (var ~(symbol "dyna.rexpr-constructors" (str "simplify-jit-compilation-step-" name))) assoc :redef true)
+       ;; (alter-meta! (var ~(symbol "dyna.rexpr-constructors" (str "simplify-jit-compilation-step-" name))) assoc :redef true)
 
 
        (deftype-with-overrides ~(symbol rname) ~(vec (concat (quote [^int cached-hash-code
@@ -194,7 +204,7 @@
                                 r))
          Rexpr
          ~'(primitive-rexpr [this] this) ;; this is a primitive expression so we are going to just always return ourselves
-         ;~'(primitive-rexpr-jit-placeholder [this] (primitive-rexpr this))
+                                        ;~'(primitive-rexpr-jit-placeholder [this] (primitive-rexpr this))
          ~'(is-constraint? [this] false) ;; if this is going to return a multiplicity of at most 1
          ~'(variable-functional-dependencies [this] nil) ;; if this is a constraint where there is some known functional dependencies between vars
          ;; return as a map of sets to sets
@@ -223,7 +233,7 @@
                               `(~idx ~(cdar var))))
             (throw (RuntimeException. "invalid index for get-argument"))))
 
-         ;(~'get-argument ~'[this n] (nth ~(vec (map cdar vargroup)) ~'n))
+                                        ;(~'get-argument ~'[this n] (nth ~(vec (map cdar vargroup)) ~'n))
          (~'get-arguments ~'[this] ~(vec (map cdar vargroup)))
 
          ;; (~'get-arguments-map ~'[this] {~@(apply concat (for [v vargroup]
@@ -271,7 +281,7 @@
          (~'remap-variables ~'[this variable-map]
           (debug-tbinding
            [current-simplify-stack (conj (tlocal *current-simplify-stack*) ~'this)]
-           (context/bind-no-context  ;; this is annoying, this will want to be
+           (context/bind-no-context ;; this is annoying, this will want to be
             ;; something that we can avoid doing
             ;; multiple times.  Which rewrites that we
             ;; can perform should be something that is
@@ -323,8 +333,8 @@
                                                                                [~'kk (~'remap-function ~'vv)]))))
                                           :call-parent-map `(into {} (for [~'[nn ss] ~(cdar v)]
                                                                        [~'nn (into #{} (for [~'ee ~'ss]
-                                                                                        (into {} (for [~'[kk vv] ~'ee]
-                                                                                                   [~'kk (~'remap-function ~'vv)]))))]))
+                                                                                         (into {} (for [~'[kk vv] ~'ee]
+                                                                                                    [~'kk (~'remap-function ~'vv)]))))]))
                                           :rexpr `(~'remap-variables-func ~(cdar v) ~'remap-function)
                                           :rexpr-list `(vec (map #(~'remap-variables-func % ~'remap-function) ~(cdar v)))
                                           (cdar v) ;; default to just keep it the same
@@ -354,9 +364,9 @@
               ;; this might want to use the simplification method on the returned result.  That will let it get the at construction
               ;; time rewrites
               (~(symbol (str "make-" name)) ~@(for [v vargroup]
-                                                        (if (contains? #{:rexpr :rexpr-list} (car v))
-                                                          (symbol (str "new-" (cdar v)))
-                                                          (cdar v))))
+                                                (if (contains? #{:rexpr :rexpr-list} (car v))
+                                                  (symbol (str "new-" (cdar v)))
+                                                  (cdar v))))
               )))
 
          (~'rewrite-rexpr-children-no-simp ~'[this remap-function]
@@ -387,7 +397,7 @@
                                           ~@(apply concat (for [v vargroup]
                                                             (when (= :hidden-var (car v))
                                                               [(cdar v) `(make-variable (gensym ~(str "remap-hidden-" name "-" (cdar v))))]))))
-                                  'variable-map-in  ;; there is nothing new for this, so can't use assoc
+                                  'variable-map-in ;; there is nothing new for this, so can't use assoc
                                   )]
             (let ~(vec (apply concat (for [v vargroup]
                                        [(symbol (str "new-" (cdar v)))
@@ -410,11 +420,11 @@
               (let [result# (~(symbol (str "make-" name)) ~@(for [v vargroup]
                                                               (symbol (str "new-" (cdar v)))))]
                 (if (= result# ~'this) ;; because something internal might need
-                                       ;; to rename its variables, we can't stop
-                                       ;; early, but we can check that the
-                                       ;; result is different before we return
-                                       ;; something new, so hopefully avoid
-                                       ;; creating too many similar objects
+                  ;; to rename its variables, we can't stop
+                  ;; early, but we can check that the
+                  ;; result is different before we return
+                  ;; something new, so hopefully avoid
+                  ;; creating too many similar objects
                   ~'this
                   result#)))))
 
@@ -438,14 +448,27 @@
                        :when (#{:rexpr-list} (car v))]
                    `(apply min (map #(check-rexpr-basecases % ~'stack) ~(cdar v))))))
 
-         (~'simplify-fast-rexprl ~'[this simplify]
-          ;; TODO: this should directly call the right method, or return a base pointer to the right type
-          ;; I suppose that in the case that this is doing the call internally, then it will have that this does not
-          ;; have
-          (???))
+         ;; (~'simplify-fast-rexprl ~'[this simplify]
+         ;;  ;; TODO: this should directly call the right method, or return a base pointer to the right type
+         ;;  ;; I suppose that in the case that this is doing the call internally, then it will have that this does not
+         ;;  ;; have
+         ;;  (???))
 
-         (~'simplify-inference-rexprl ~'[this simplify]
-          (???))
+         ;; (~'simplify-inference-rexprl ~'[this simplify]
+         ;;  (???))
+
+         (~'rexpr-simplify-fast-collection ~'[this]
+          ~(symbol "dyna.rexpr-constructors" (str "simplify-" name)))
+
+         (~'rexpr-simplify-construct-collection ~'[this]
+          ~(symbol "dyna.rexpr-constructors" (str "simplify-construct-" name)))
+
+         (~'rexpr-simplify-inference-collection ~'[this]
+          ~(symbol "dyna.rexpr-constructors" (str "simplify-inference-" name)))
+
+         (~'rexpr-jit-compilation-step-collection ~'[this]
+          ~(symbol "dyna.rexpr-constructors" (str "simplify-jit-compilation-step-" name)))
+
 
          (~'rexpr-jittype-hash ~'[this]
           (when (= 0 ~'cached-jittype-hash-code)
@@ -461,7 +484,7 @@
                                                           :rexpr-list `(unchecked-add-int
                                                                         (reduce bit-xor 0 (map rexpr-jittype-hash ~var))
                                                                         (count ~var))
-                                                          :var-list `(count ~var)  ;; the names will not matter, but the number of variables could change what we are doing
+                                                          :var-list `(count ~var) ;; the names will not matter, but the number of variables could change what we are doing
                                                           :str `(hash ~var)
                                                           :mult var
                                                           :boolean `(if ~var 7 11)
@@ -470,11 +493,11 @@
 
          Object
          (~'equals ~'[this other]
-           (or (identical? ~'this ~'other)
-               (and (instance? ~(symbol rname) ~'other)
-                    (= (hash ~'this) (hash ~'other))
-                    ~@(for [[var idx] (zipseq vargroup (range))]
-                        `(= ~(cdar var) (get-argument ~'other ~idx))))))
+          (or (identical? ~'this ~'other)
+              (and (instance? ~(symbol rname) ~'other)
+                   (= (hash ~'this) (hash ~'other))
+                   ~@(for [[var idx] (zipseq vargroup (range))]
+                       `(= ~(cdar var) (get-argument ~'other ~idx))))))
 
          (~'hashCode [this] ~'cached-hash-code) ;; is this something that should only be computed on demand instead of when it is constructed?
          (~'toString ~'[this] (trim (str (as-list ~'this)))))
@@ -496,7 +519,7 @@
                                   (hash rname)
                                   (for [[var idx] (zipseq vargroup (range))]
                                     `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
-          0 ; the jittype hash cache
+          0                             ; the jittype hash cache
           nil                           ; the cached unique variables
           ~@(if system/track-where-rexpr-constructed `[(Throwable.) (last (tlocal *current-simplify-stack*))])
           ~@(map cdar vargroup))
@@ -507,20 +530,20 @@
           :rexpr-constructor-type ~(symbol rname)}
          ~(vec (map cdar vargroup))
          ~@(when system/check-rexpr-arguments
-            (map (fn [x] `(if (not (~(resolve (symbol (str "check-argument-" (symbol (car x))))) ~(cdar x)))
-                            (do (debug-repl ~(str "check argument " (car x)))
-                                (assert false)))) vargroup))
+             (map (fn [x] `(if (not (~(resolve (symbol (str "check-argument-" (symbol (car x))))) ~(cdar x)))
+                             (do (debug-repl ~(str "check argument " (car x)))
+                                 (assert false)))) vargroup))
          ~(if system/status-counters `(StatusCounters/rexpr_created))
          (simplify-construct (~(symbol (str rname "."))
                               ;; this might do the computation as a big value, would be nice if this could be forced to use a small int value
                               ;; I suppose that we could write this in java and call out to some static function if that really became necessary
                               ;; this hash implementation needs to match the one above....
                               (unchecked-int ~(reduce (fn [a b] `(unchecked-add-int ~a ~b))
-                                  (hash rname)
-                                  (for [[var idx] (zipseq vargroup (range))]
-                                    `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
-                              0 ;; the cached jittype hash
-                              nil       ; the cached unique variables
+                                                      (hash rname)
+                                                      (for [[var idx] (zipseq vargroup (range))]
+                                                        `(unchecked-multiply-int (hash ~(cdar var)) ~(+ 3 idx)))))
+                              0   ;; the cached jittype hash
+                              nil ; the cached unique variables
                               ~@(if system/track-where-rexpr-constructed `[(Throwable.) (do
                                                                                           ;; (when-not (or (not (nil? dyna.rexpr/*current-matched-rexpr*))
                                                                                           ;;               (empty?  dyna.rexpr/*current-simplify-stack*))
@@ -536,24 +559,24 @@
          (assert (not (nil? ~'w)))
          (aprint (as-list ~'this) ~'w))
        #_~(when (some #(= % :rexpr) (map car vargroup))
-          `(def-deep-equals ~(symbol name) ~'[a b]
-             (and (instance? ~(symbol rname) ~'b)
-                  ;; check the non-rexprs first as those should be faster
-                  ~@(for [[var-type vname] vargroup
-                          :when (not= var-type :rexpr)]  ;; this is going to end up handling lists, which likely aren't going to be equal to each other
-                      `(= (~(keyword vname) ~'a) (~(keyword vname) ~'b)))
-                  ~@(for [[var-type vname] vargroup
-                          :when (= :rexpr var-type)]
-                      `(deep-equals (~(keyword vname) ~'a) (~(keyword vname) ~'b))))))
-       ;(intern 'dyna.rexpr-constructors '~(symbol (str "make-" name)) ~(symbol (str "make-" name)))
-       ;(intern 'dyna.rexpr-constructors '~(symbol (str "make-no-simp-" name)) ~(symbol (str "make-no-simp-" name)))
-       ;(intern 'dyna.rexpr-constructors '~(symbol (str "is-" name "?")) ~(symbol (str "is-" name "?")))
+            `(def-deep-equals ~(symbol name) ~'[a b]
+               (and (instance? ~(symbol rname) ~'b)
+                    ;; check the non-rexprs first as those should be faster
+                    ~@(for [[var-type vname] vargroup
+                            :when (not= var-type :rexpr)] ;; this is going to end up handling lists, which likely aren't going to be equal to each other
+                        `(= (~(keyword vname) ~'a) (~(keyword vname) ~'b)))
+                    ~@(for [[var-type vname] vargroup
+                            :when (= :rexpr var-type)]
+                        `(deep-equals (~(keyword vname) ~'a) (~(keyword vname) ~'b))))))
+                                        ;(intern 'dyna.rexpr-constructors '~(symbol (str "make-" name)) ~(symbol (str "make-" name)))
+                                        ;(intern 'dyna.rexpr-constructors '~(symbol (str "make-no-simp-" name)) ~(symbol (str "make-no-simp-" name)))
+                                        ;(intern 'dyna.rexpr-constructors '~(symbol (str "is-" name "?")) ~(symbol (str "is-" name "?")))
        (expose-globally ~(symbol (str "make-" name)))
        (expose-globally ~(symbol (str "make-no-simp-" name)))
        (expose-globally ~(symbol (str "is-" name "?")))
-       (swap! rexpr-rewrites-func           assoc ~(symbol rname) (fn ~'[a b] (~(symbol "dyna.rexpr-constructors" (str "simplify-" name)) ~'a ~'b)))
-       (swap! rexpr-rewrites-construct-func assoc ~(symbol rname) (fn ~'[a b] (~(symbol "dyna.rexpr-constructors" (str "simplify-construct-" name)) ~'a ~'b)))
-       (swap! rexpr-rewrites-inference-func assoc ~(symbol rname) (fn ~'[a b] (~(symbol "dyna.rexpr-constructors" (str "simplify-inference-" name)) ~'a ~'b)))
+       ;; (swap! rexpr-rewrites-func           assoc ~(symbol rname) (fn ~'[a b] (~(symbol "dyna.rexpr-constructors" (str "simplify-" name)) ~'a ~'b)))
+       ;; (swap! rexpr-rewrites-construct-func assoc ~(symbol rname) (fn ~'[a b] (~(symbol "dyna.rexpr-constructors" (str "simplify-construct-" name)) ~'a ~'b)))
+       ;; (swap! rexpr-rewrites-inference-func assoc ~(symbol rname) (fn ~'[a b] (~(symbol "dyna.rexpr-constructors" (str "simplify-inference-" name)) ~'a ~'b)))
        (swap! rexpr-containers-class-name assoc (quote ~(symbol name)) (.getName ~(symbol rname)))
 
        ;; (swap! rexpr-rewrites-func assoc ~(symbol (str name "-rexpr")) identity)
@@ -1260,7 +1283,7 @@
                             (make-multiplicity 0)))
     :else body))
 
-(defmacro def-rewrite-direct [functor-name runs-at function]
+#_(defmacro def-rewrite-direct-old [functor-name runs-at function]
   ;; use like (def-rewrite-direct foo [:standard] (fn [rexpr simplify] ...))
   ;; The function is always called, so it needs to do its own pattern matching
   ;; internally
@@ -1293,6 +1316,20 @@
                                                                   functor-name))
                           combined-func#)))))
        ~rewrite-func-var)))
+
+(defmacro def-rewrite-direct [functor-name runs-at function]
+  (let [rewrite-func-var (gensym 'rewrite-func)]
+    `(let [~rewrite-func-var ~function]
+       (locking dyna.rexpr-constructors/modification-lock
+         ~@(for [run-at (if (seqable? runs-at) runs-at [runs-at])]
+             `(.addRewrite ~(with-meta (symbol "dyna.rexpr-constructors" (str (case run-at
+                                                                                :standard "simplify-"
+                                                                                :construction "simplify-construct-"
+                                                                                :inference "simplify-inference-"
+                                                                                :jit-compiler "simplify-jit-compilation-step-")
+                                                                              functor-name))
+                              {:tag "dyna.SimplifyRewriteCollection"})
+                           ~rewrite-func-var))))))
 
 (defmacro def-rewrite [& args]
   (let [kw-args (apply hash-map (if (= (mod (count args) 2) 0)
@@ -1398,18 +1435,19 @@
 (def-tlocal simplify-with-inferences)
 (def-tlocal simplify-looking-for-fast-fail-only)
 
-(defn simplify-fast [rexpr]
+(defn simplify-fast [^Rexpr rexpr]
   (debug-tbinding
    [current-simplify-stack (conj (tlocal *current-simplify-stack*) rexpr)
     current-simplify-running simplify]
    (assert (context/has-context))
    ;(ctx-add-rexpr! rexpr)
-   (let [ret ((get @rexpr-rewrites-func (type rexpr) simplify-identity) rexpr simplify)]
+   ((rexpr-simplify-fast-collection rexpr) rexpr simplify-fast)
+   #_(let [ret ((get @rexpr-rewrites-func (type rexpr) simplify-identity) rexpr simplify)]
      (if (or (nil? ret) (= ret rexpr))
        rexpr ;; if not changed, don't do anything
        (do
          (dyna-assert (rexpr? ret))
-         ;(ctx-add-rexpr! (context/get-context) ret)
+                                        ;(ctx-add-rexpr! (context/get-context) ret)
          ret)))))
 
 (def simplify simplify-fast)
@@ -1419,24 +1457,26 @@
        'simplify-fast (fn [] simplify-fast))
 
 
-(defn simplify-construct [rexpr]
+(defn simplify-construct [^Rexpr rexpr]
   (debug-tbinding
    [current-simplify-stack (conj (tlocal *current-simplify-stack*) rexpr)
     current-simplify-running simplify-construct]
-   (let [ret ((get @rexpr-rewrites-construct-func (type rexpr) simplify-identity) rexpr simplify-construct)]
+   ((rexpr-simplify-construct-collection rexpr) rexpr simplify-construct)
+   #_(let [ret ((get @rexpr-rewrites-construct-func (type rexpr) simplify-identity) rexpr simplify-construct)]
      (if (nil? ret)
        rexpr
        (do
          (dyna-assert (rexpr? ret))
          ret)))))
 
-(defn simplify-inference [rexpr]
+(defn simplify-inference [^Rexpr rexpr]
   (debug-tbinding
    [current-simplify-stack (conj (tlocal *current-simplify-stack*) rexpr)
     current-simplify-running simplify-inference]
    (let [ctx (context/get-context)]
      (ctx-add-rexpr! ctx rexpr)
-     (let [ret ((get @rexpr-rewrites-inference-func (type rexpr) simplify-identity) rexpr simplify-inference)]
+     ((rexpr-simplify-inference-collection rexpr) rexpr simplify-inference)
+     #_(let [ret ((get @rexpr-rewrites-inference-func (type rexpr) simplify-identity) rexpr simplify-inference)]
        (if (nil? ret)
          rexpr
          (do (dyna-assert (rexpr? ret))
@@ -1651,13 +1691,9 @@
   :match (unify (:iterate A) (:ground B))
   (iterators/make-unit-iterator A (get-value B)))
 
-
-;; (def-rewrite
-;;   :match (unify-structure (:any out) (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:any-list arguments))
-;;   ;:run-at :inference
-;;   (do
-;;     (debug-repl "uifi")
-;;     nil))
+;; TODO: there is a bidrectional binding iterator that could be added here.  Something like A and B are both ungrounded, and if it managed to ground either of the values, then the other will become ground.
+;; This should also exist in the case of the unify-structure, where if all of the arguments are ground, then it could ground the other values, or if it can ground the initial value, then it can ground all of the output variables.
+;; How will those variables figure out which
 
 
 (def-rewrite
@@ -1671,7 +1707,7 @@
     ;;     (debug-repl "uf1"))
     sterm
     #_(let [res (make-unify out (make-constant sterm))]
-      res)))
+        res)))
 
 (def-rewrite
   :match (unify-structure (:ground out) (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:any-list arguments))

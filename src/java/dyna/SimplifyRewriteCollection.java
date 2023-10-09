@@ -7,7 +7,7 @@ import clojure.lang.RT;
 
 public final class SimplifyRewriteCollection extends AFn {
 
-    private static class RewriteList {
+    public static class RewriteList {
         final IFn rewrite_func;
         final RewriteList next;
         private RewriteList(IFn rewrite_func, RewriteList next) {
@@ -17,6 +17,17 @@ public final class SimplifyRewriteCollection extends AFn {
     }
 
     private RewriteList head = null;
+    private final boolean make_new_rewrites;
+
+    public RewriteList getRewriteListHead() { return head; }
+
+    private SimplifyRewriteCollection(boolean make_new_rewrites) {
+        this.make_new_rewrites = make_new_rewrites;
+    }
+
+    static public SimplifyRewriteCollection create(boolean make_new_rewrites) {
+        return new SimplifyRewriteCollection(make_new_rewrites);
+    }
 
     public Rexpr doRewrite(Rexpr r, IFn simplify_method) {
         RewriteList h = head;
@@ -33,7 +44,10 @@ public final class SimplifyRewriteCollection extends AFn {
     }
 
     public Rexpr makeNewRewrites(Rexpr r, IFn simplify_method) {
-        return (Rexpr)jit_create_rewrite.invoke(r);
+        if(make_new_rewrites)
+            return (Rexpr)jit_create_rewrite.invoke(r);
+        else
+            return r;
     }
 
     public synchronized void addRewrite(IFn rewrite_func) {
