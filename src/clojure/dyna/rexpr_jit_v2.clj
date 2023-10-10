@@ -2496,7 +2496,7 @@
 (defn- simplify-jit-internal-rexpr-loop [rexpr]
   (loop [r (if (rexpr? rexpr)
              rexpr
-             (do (assert (= :rexpr (:type rexpr)))
+             (do (dyna-assert (= :rexpr (:type rexpr)))
                  (:rexpr-type rexpr)))
          count 0]
     (if (is-jit-placeholder? r)
@@ -2544,6 +2544,9 @@
             ;; restart these values, as we are running a nested version of simplify for ourselves
             [current-simplify-running nil]
             (let [prim-r (:prim-rexpr-placeholders jinfo)
+                  ffff (when (nil? prim-r)
+                         (debug-repl "nil prim r")
+                         (???))
                   result (simplify-jit-internal-rexpr-loop prim-r)]
               (when (is-jit-placeholder? result)
                 (let [v (if (:external-name result)
@@ -2855,7 +2858,9 @@
          ]
      (if (or (nil? ret) (= ret rexpr))
        (let [jinfo (rexpr-jit-info rexpr)]
-         (if-not (nil? jinfo)
+         (if (and (not (nil? jinfo))
+                  (contains? jinfo :generated-name) ;; if there is no generated name, then this is not a jitted R-expr
+                  )
            (do
              (vreset! *has-jit-rexpr-in-expression* true) ;; record that we found something that could be generated, even if we don't end up doing the generation
              (maybe-create-rewrite (context/get-context) rexpr jinfo simplify-jit-create-rewrites-fast))
@@ -3388,6 +3393,7 @@
                                                ;; and then we can extend
                                                ;; base-context-binding# (assoc {}
                                                ;;                              ~@(apply concat ))
+                                               ;;iter-run-log# (transient [])
                                                ]
                                            (doseq [~iter-binding (iter-run-iterable ~(:cljcode-expr iter-val))]
                                              (let [new-r# ~(:cljcode-expr new-self-cljcode)
@@ -3395,8 +3401,11 @@
                                                    result-r# (context/bind-context nested-context#
                                                                                    (try (~'simplify new-r#)
                                                                                         (catch UnificationFailure ~'_ (make-multiplicity 0))))]
-                                               (when (is-non-empty-rexpr? result-r#)
-                                                 (conj! ~iter-run-result result-r#))))
+                                               (when-not (is-empty-rexpr? result-r#)
+                                                 (conj! ~iter-run-result result-r#))
+                                               ;(conj! iter-run-log# [new-r# nested-context# result-r# ~iter-binding])
+                                               ))
+                                           (debug-repl "after ran iterator")
                                            (let [r# (persistent! ~iter-run-result)]
                                              (if (empty? r#)
                                                (make-multiplicity 0)
