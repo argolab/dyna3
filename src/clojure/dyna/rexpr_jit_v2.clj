@@ -301,23 +301,37 @@
          (cond (is-proj? rexpr) (let [new-var (gensym 'projvar)]
                                   `(let [~new-var (make-variable (Object.))]
                                      (make-no-simp-proj ~new-var ~(primitive-rexpr-cljcode (assoc varmap (:var rexpr) new-var) (:body rexpr)))))
-               (is-aggregator-op-inner? rexpr) (let [new-incoming (gensym 'aggin)
-                                                     new-projs (vec (for [_ (:projected rexpr)]
-                                                                      (gensym 'aggproj)))
-                                                     new-varmap (merge varmap
-                                                                       {(:incoming rexpr) new-incoming}
-                                                                       (zipmap (:projected rexpr) new-projs))
-                                                     body (primitive-rexpr-cljcode new-varmap (:body rexpr))
-                                                     ret
-                                                     `(let [~new-incoming (make-variable (Object.))
-                                                            ~@(apply concat (for [v new-projs]
-                                                                              [v `(make-variable (Object.))]))]
-                                                        (make-no-simp-aggregator-op-inner
-                                                         ~(primitive-rexpr-cljcode new-varmap (:operator rexpr) :unchecked)
-                                                         ~new-incoming
-                                                         [~@new-projs]
-                                                         ~body))]
-                                                 ret)
+               (is-aggregator-op-inner? rexpr) (if (and (instance? RexprValueVariableForceExposed (:incoming rexpr)) (contains? varmap (:incoming rexpr)))
+                                                 (let [new-projs (vec (for [_ (:projected rexpr)]
+                                                                        (gensym 'aggproj)))
+                                                       new-varmap (merge varmap
+                                                                         (zipmap (:projected rexpr) new-projs))
+                                                       body (primitive-rexpr-cljcode new-varmap (:body rexpr))
+                                                       ret `(let [~@(apply concat (for [v new-projs]
+                                                                                    [v `(make-variable (Object.))]))]
+                                                              (make-no-simp-aggregator-op-inner
+                                                               ~(primitive-rexpr-cljcode new-varmap (:operator rexpr) :unchecked)
+                                                               ~(primitive-rexpr-cljcode new-varmap (:incoming rexpr) :var)
+                                                               [~@new-projs]
+                                                               ~body))]
+                                                   ret)
+                                                 (let [new-incoming (gensym 'aggin)
+                                                       new-projs (vec (for [_ (:projected rexpr)]
+                                                                        (gensym 'aggproj)))
+                                                       new-varmap (merge varmap
+                                                                         {(:incoming rexpr) new-incoming}
+                                                                         (zipmap (:projected rexpr) new-projs))
+                                                       body (primitive-rexpr-cljcode new-varmap (:body rexpr))
+                                                       ret
+                                                       `(let [~new-incoming (make-variable (Object.))
+                                                              ~@(apply concat (for [v new-projs]
+                                                                                [v `(make-variable (Object.))]))]
+                                                          (make-no-simp-aggregator-op-inner
+                                                           ~(primitive-rexpr-cljcode new-varmap (:operator rexpr) :unchecked)
+                                                           ~new-incoming
+                                                           [~@new-projs]
+                                                           ~body))]
+                                                   ret))
 
                (is-jit-placeholder? rexpr) (let []
                                              ;; this is generating the primitive code for the current R-expr
@@ -365,7 +379,9 @@
                          (let [incoming (:incoming v)
                                proj-out (:projected v)
                                new-args (loop [a args
-                                               vs (cons incoming proj-out)]
+                                               vs (if (and (instance? RexprValueVariableForceExposed incoming) (contains? new-arg-names incoming))
+                                                    proj-out
+                                                    (cons incoming proj-out))]
                                           (if (empty? vs)
                                             a
                                             (let [vv (first vs)]
@@ -376,7 +392,10 @@
                                                   (recur (assoc a vv lvar)
                                                          (rest vs)))))))
                                body (rf :rexpr (:body v) new-args)
-                               ret (make-no-simp-aggregator-op-inner (:operator v) (get new-args incoming incoming) (vec (map #(get new-args % %) proj-out)) body)
+                               ret (make-no-simp-aggregator-op-inner (:operator v)
+                                                                     (get new-args incoming incoming)
+                                                                     (vec (map #(get new-args % %) proj-out))
+                                                                     body)
                                ]
                            ret)
 
@@ -3147,7 +3166,7 @@
                       new-with-iter-cljcode (generate-cljcode-to-materalize-rexpr new-self
                                                                                   :simplify-result false
                                                                                   :attempt-variable-read-values true)
-                      zzz (debug-repl "zz" false) ;;
+                      ;zzz (debug-repl "zz" false) ;;
                                         ;inner-body-rexpr-cljcode (generate-cljcode-to-materalize-rexpr body :simplify-result false)
                       ;; If there is some variable which is local variable, then it might be that this can not project that in
                       ;; this representation, as this a fractional part of the R-expr.  So I suppose that this is similar to the constraints
@@ -3333,13 +3352,13 @@
                                                            (vec (remove #{getting-bound} projected-vars))
                                                            new-body)
 
-                rr (debug-repl "rr")
+                ;rr (debug-repl "rr")
 
                 new-self-cljcode (generate-cljcode-to-materalize-rexpr new-self
                                                                        :simplify-result false
                                                                        :attempt-variable-read-values true)
                 ]
-            (debug-repl "new self cljcode" false)
+            ;(debug-repl "new self cljcode" false)
 
             ;; this is going to construct a sub-rexpr and then run the iterator and simplification.  The hole will become a disjunct
             ;; of all the resulting R-exprs.  Ideally the hole should become filled with R-exprs which correspond with 0-mult.  In which case the
@@ -3375,7 +3394,7 @@
             (let [ret (make-jit-placeholder nil iter-jhole-result (vec (exposed-variables rexpr)))
                   md (jit-metadata ret)]
               (vswap! md assoc :current-rexpr (make-multiplicity 0)) ;; this should just become a zero as we are hoping that it will internally fully run all of the loops
-              (debug-repl "run iterator with aggregator")
+              ;(debug-repl "run iterator with aggregator")
               ret)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
