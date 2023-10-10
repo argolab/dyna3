@@ -2007,7 +2007,7 @@
                                                (eval f)))))
 
 (defn- compute-match
-  [rexpr matcher1]
+  [rexpr1 matcher1]
   (let [matcher (if (map? matcher1) matcher1 {:rexpr matcher1})
         runtime-checks (volatile! [])
         currently-bound-variables (volatile! {})
@@ -2242,8 +2242,8 @@
                               (jit-evaluate-cljform matcher))]
                 (when (get-current-value success)
                   (when-not (:constant-value success)
-                    (vswap! runtime-checks conj (gen-precondition-to-check (:cljcode-expr success)))
-                    (list true)))))
+                    (vswap! runtime-checks conj (gen-precondition-to-check (:cljcode-expr success))))
+                  (list true))))
             (match-top [matcher rexpr]
               (assert (every? #{:rexpr :context :check} (keys matcher))) ;; this is checked in rexpr.clj, but check again here as it could otherwise become forgotten
               (for [_ (match-rexpr (:rexpr matcher) rexpr)
@@ -2255,7 +2255,7 @@
                         (match-check (:check matcher))
                         (list true))]
                 true))]
-      (doall (for [_ (match-top matcher rexpr)]
+      (doall (for [_ (match-top matcher rexpr1)]
                [@runtime-checks @currently-bound-variables])))))
 
 
@@ -2365,6 +2365,8 @@
                                                      rewrites)))]
     (doseq [mr matching-rewrites]
       (vswap! *jit-simplify-rewrites-found* conj [(tlocal *current-simplify-stack*) mr]))
+    #_(when (is-unify? rexpr)
+      (debug-repl "generic unify"))
     (let [picked (filter *jit-simplify-rewrites-picked-to-run* matching-rewrites)]
       (if (empty? picked)
         nil
@@ -2372,10 +2374,10 @@
           (make-multiplicity 0)
           (simplify-perform-generic-rewrite rexpr (first picked)))
         #_(do
-          ;; going to perform the rewrite, which means that
+            ;; going to perform the rewrite, which means that
 
-          (debug-repl "need to perform rewrite")
-          (???))))))
+            (debug-repl "need to perform rewrite")
+            (???))))))
 
 #_(defn- simplify-jit-internal-rexpr [rexpr-in]
   (vswap! *jit-simplify-call-counter* inc)
@@ -3093,10 +3095,8 @@
                           *jit-generate-functions* (if (nil? *jit-generate-functions*) nil ())]
                   (find-iterators R))]
       (if (is-multiplicity? R)
-        (do
-          (debug-repl "agg op mult inner")
-          (vswap! *jit-simplify-rewrites-found* conj [(tlocal *current-simplify-stack*)
-                                                      self-id]))
+        (vswap! *jit-simplify-rewrites-found* conj [(tlocal *current-simplify-stack*)
+                                                    self-id])
         (when-not (empty? iters)
           (let [conj-iterator (iterators/make-conjunction-iterator iters)
                 what-bound (iter-what-variables-bound conj-iterator)
