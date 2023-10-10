@@ -18,7 +18,7 @@
   (:require [dyna.iterators :as iterators])
   (:require [clojure.walk :refer [macroexpand-all]])
   (:require [clojure.set :refer [union subset?]])
-  (:import [dyna.rexpr proj-rexpr simple-function-call-rexpr conjunct-rexpr disjunct-rexpr])
+  (:import [dyna.rexpr proj-rexpr simple-function-call-rexpr conjunct-rexpr disjunct-rexpr constant-value-rexpr])
   (:import [dyna.rexpr_aggregators_optimized aggregator-op-outer-rexpr aggregator-op-inner-rexpr])
   (:import [dyna.rexpr_aggregators Aggregator])
   (:import [dyna RexprValue RexprValueVariable Rexpr DynaJITRuntimeCheckFailed StatusCounters UnificationFailure DIterator ContextHandle ThreadVar RContext IteratorBadBindingOrder SimplifyRewriteCollection RexprValueVariableForceExposed]))
@@ -1022,6 +1022,8 @@
                                                              z)))
                                                        (and (instance? jit-local-variable-rexpr arg) (is-bound-jit? arg))
                                                        `(make-constant ~(strict-get (local-vars-bound arg) :var-name))
+                                                       (instance? jit-expression-variable-rexpr arg)
+                                                       `(constant-value-rexpr. ~(:cljcode arg))
                                                        :else (do (debug-repl "arg type")
                                                                  (???))))))})
                    (let [local-vars-bound @*local-variable-names-for-variable-values*
@@ -1056,7 +1058,7 @@
                                                        (and (instance? jit-local-variable-rexpr arg) (is-bound-jit? arg))
                                                        `(make-constant ~(strict-get (local-vars-bound arg) :var-name))
                                                        (instance? jit-expression-variable-rexpr arg)
-                                                       `(make-constant ~(:cljcode arg))
+                                                       `(constant-value-rexpr. ~(:cljcode arg))
                                                        (is-jit-placeholder? arg)
                                                        (let []
                                                          (if (:external-name arg)
@@ -1799,7 +1801,7 @@
    (let [valj (jit-evaluate-cljform val)
          c (make-constant (get-current-value valj))]
      {:type :rexpr-value
-      :matched-variable c
+      ;:matched-variable c
       (if (contains? valj :constant-value) :constant-value :current-value) c
       :cljcode-expr `(make-constant ~(:cljcode-expr valj))})))
 
@@ -1807,11 +1809,17 @@
  #'make-constant-bool
  (fn [[_ val]]
    (let [valj (jit-evaluate-cljform val)
-         c (make-constant-bool (get-current-value valj))]
+         b (if (get-current-value valj) true false)
+         c (make-constant b)
+      ;   e (jit-expression-variable-rexpr. `(if ~(:cljcode-expr valj) true false))
+         ]
+     ;; this is going to add a check that this is the same value
+     (add-to-generation! (if b
+                           `(jit-precondition-to-check ~(:cljcode-expr valj))
+                           `(jit-precondition-to-check (not ~(:cljcode-expr valj)))))
      {:type :rexpr-value
-      :matched-variable c
-      (if (contains? valj :constant-value) :constant-value :current-value) c
-      :cljcode-expr `(make-constant-bool ~(:cljcode-expr valj))})))
+      :constant-value c
+      :cljcode-expr `(make-constant ~b)})))
 
 (set-jit-method
  #'make-variable
@@ -2313,6 +2321,7 @@
             (let [b (:rewrite rewrite)
                   r (jit-evaluate-cljform b)]
               (assert (= :rexpr (:type r)))
+             ; (add-to-generation! (:cljcode-expr r)) ;; if there are conditions on the R-exprs, that could be partially encoded here
               (debug-repl "perform generic rewrite")
               (:rexpr-type r))))
     #_(if (contains? :assigns-variable kw-args)
@@ -3014,7 +3023,7 @@
                                       @(:current-out-var @metadata)
                                       (get-in @(:current-out-var @metadata) (map get-current-value path)))
                         ]
-                    (debug-repl "pick agg")
+                    (debug-repl "pick agg out lower")
                     (add-to-generation! (fn [inner]
                                           `(let [~agg-out-var ~agg-lower]
                                              (debug-repl "jitted agg out")
@@ -3068,8 +3077,10 @@
                           *jit-generate-functions* (if (nil? *jit-generate-functions*) nil ())]
                   (find-iterators R))]
       (if (is-multiplicity? R)
-        (vswap! *jit-simplify-rewrites-found* conj [(tlocal *current-simplify-stack*)
-                                                    self-id])
+        (do
+          (debug-repl "agg op mult inner")
+          (vswap! *jit-simplify-rewrites-found* conj [(tlocal *current-simplify-stack*)
+                                                      self-id]))
         (when-not (empty? iters)
           (let [conj-iterator (iterators/make-conjunction-iterator iters)
                 what-bound (iter-what-variables-bound conj-iterator)
@@ -3358,7 +3369,7 @@
                                                                        :simplify-result false
                                                                        :attempt-variable-read-values true)
                 ]
-            ;(debug-repl "new self cljcode" false)
+            (debug-repl "new self cljcode" false)
 
             ;; this is going to construct a sub-rexpr and then run the iterator and simplification.  The hole will become a disjunct
             ;; of all the resulting R-exprs.  Ideally the hole should become filled with R-exprs which correspond with 0-mult.  In which case the
@@ -3382,7 +3393,8 @@
                                              (let [new-r# ~(:cljcode-expr new-self-cljcode)
                                                    nested-context# (context/make-context-jit new-r# {})  ;; we should not need to add any variables here as everything will just get passed as constant values into the new-r above
                                                    result-r# (context/bind-context nested-context#
-                                                                                   (~'simplify new-r#))]
+                                                                                   (try (~'simplify new-r#)
+                                                                                        (catch UnificationFailure ~'_ (make-multiplicity 0))))]
                                                (when (is-non-empty-rexpr? result-r#)
                                                  (conj! ~iter-run-result result-r#))))
                                            (let [r# (persistent! ~iter-run-result)]
