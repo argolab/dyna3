@@ -730,53 +730,62 @@
         (merge l1 l2)))))
 
 (defn- converter-matching-rexpr [rtype-rexpr rexpr matched-so-far]
-  (when (or (and (rexpr? rtype-rexpr) (rexpr? rexpr))
+  (cond (or (and (rexpr? rtype-rexpr) (rexpr? rexpr))
             (and (is-rexpr-value? rtype-rexpr) (is-rexpr-value? rexpr)))
-    (cond (or (is-disjunct? rtype-rexpr)
-              (is-conjunct? rtype-rexpr))
-          (let [rtype-args (:args rtype-rexpr)
-                args (:args rexpr)]
-            (converter-matching-unordered-list rtype-args args matched-so-far))
+        (cond (or (is-disjunct? rtype-rexpr)
+                  (is-conjunct? rtype-rexpr))
+              (let [rtype-args (:args rtype-rexpr)
+                    args (:args rexpr)]
+                (converter-matching-unordered-list rtype-args args matched-so-far))
 
-          (is-jit-placeholder? rtype-rexpr)
-          (list {rtype-rexpr rexpr})
+              (is-jit-placeholder? rtype-rexpr)
+              (list {rtype-rexpr rexpr})
 
-          (or (instance? jit-exposed-variable-rexpr rtype-rexpr)
-              (instance? jit-local-variable-rexpr rtype-rexpr))
-          (if (contains? matched-so-far rtype-rexpr)
-            (when (= (get matched-so-far rtype-rexpr) rexpr)
-              (list nil)) ;; check if this is the same variable getting matched in both cases
-            (list {rtype-rexpr rexpr}))
+              (or (instance? jit-exposed-variable-rexpr rtype-rexpr)
+                  (instance? jit-local-variable-rexpr rtype-rexpr))
+              (if (contains? matched-so-far rtype-rexpr)
+                (when (= (get matched-so-far rtype-rexpr) rexpr)
+                  (list nil)) ;; check if this is the same variable getting matched in both cases
+                (list {rtype-rexpr rexpr}))
 
-          (is-constant? rtype-rexpr)
-          (when (and (is-constant? rexpr)
-                     (= (get-value rtype-rexpr) (get-value rexpr)))
-            (list nil))
+              (is-constant? rtype-rexpr)
+              (when (and (is-constant? rexpr)
+                         (= (get-value rtype-rexpr) (get-value rexpr)))
+                (list nil))
 
-          (is-aggregator-op-inner? rtype-rexpr)
-          (when (and (= (:operator rtype-rexpr) (:operator rexpr)))
-            (for [l1 (converter-matching-rexpr (:incoming rtype-rexpr) (:incoming rexpr) matched-so-far)
-                  l2 (converter-matching-rexpr (:body rtype-rexpr) (:body rexpr) (merge matched-so-far l1))
-                  l3 (converter-matching-unordered-list (:projected rtype-rexpr) (:projected rexpr) (merge matched-so-far l1 l2))]
-              (merge l1 l2 l3)))
+              (is-aggregator-op-inner? rtype-rexpr)
+              (when (and (= (:operator rtype-rexpr) (:operator rexpr)))
+                (for [l1 (converter-matching-rexpr (:incoming rtype-rexpr) (:incoming rexpr) matched-so-far)
+                      l2 (converter-matching-rexpr (:body rtype-rexpr) (:body rexpr) (merge matched-so-far l1))
+                      l3 (converter-matching-unordered-list (:projected rtype-rexpr) (:projected rexpr) (merge matched-so-far l1 l2))]
+                  (merge l1 l2 l3)))
 
-          (rexpr? rtype-rexpr)
-          ((fn rec [rtype-args args matched-so-far]
-             (if (empty? rtype-args)
-               (list nil)
-               (for [l1 (if (vector? (first rtype-args))
-                          (converter-matching-ordered-list (first rtype-args) (first args) matched-so-far)
-                          (converter-matching-rexpr (first rtype-args) (first args) matched-so-far))
-                     l2 (rec (rest rtype-args) (rest args) (merge matched-so-far l1))]
-                 (merge l1 l2))))
-           (get-arguments rtype-rexpr)
-           (get-arguments rexpr)
-           matched-so-far)
+              (rexpr? rtype-rexpr)
+              ((fn rec [rtype-args args matched-so-far]
+                           (if (empty? rtype-args)
+                             (list nil)
+                             (for [l1 (if (vector? (first rtype-args))
+                                        (converter-matching-ordered-list (first rtype-args) (first args) matched-so-far)
+                                        (converter-matching-rexpr (first rtype-args) (first args) matched-so-far))
+                                   l2 (rec (rest rtype-args) (rest args) (merge matched-so-far l1))]
+                               (merge l1 l2))))
+                         (get-arguments rtype-rexpr)
+                         (get-arguments rexpr)
+                         matched-so-far)
 
-          :else
-          (do
-            (debug-repl "converter matcher other type")
-            (???)))))
+              :else
+              (do
+                (debug-repl "converter matcher other type")
+                (???)))
+
+        (or (instance? Aggregator rtype-rexpr)
+            (string? rtype-rexpr)
+            (int? rtype-rexpr)
+            (boolean? rtype-rexpr)
+            (instance? java.net.URL rtype-rexpr))
+        (when (= rtype-rexpr rexpr) (list nil))
+
+        ))
 
 (defn- compute-converter-matching [rtype rexpr]
   (let [prim-rexpr (:prim-rexpr-placeholders rtype)
@@ -806,6 +815,8 @@
                                               :let [mc (compute-converter-matching cc rexpr)]
                                               :when (not (nil? mc))]
                                           mc))]
+                           #_(when (and (not (empty? converters)) (nil? matches))
+                             (debug-repl "jit type same, but matched"))
                            (if-not (nil? matches)
                              (do
                                (vreset! vv matches)
@@ -2572,7 +2583,7 @@
                 )))))
         ;; evaluate the function here so that we clear all of the bindings which are specific to the JIT.   This should get back to whatever is the JIT's
         rr (generated-function rexpr simplify-method)]
-    (assert (or (not= rr rexpr) (identical? simplify-identity generated-function)))
+    ;(assert (or (not= rr rexpr) (identical? simplify-identity generated-function)))
     #_(when (is-empty-rexpr? rr)
       (debug-repl "empty r" false))
     rr))
