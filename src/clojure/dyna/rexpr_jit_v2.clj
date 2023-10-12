@@ -730,7 +730,7 @@
         (merge l1 l2)))))
 
 (defn- converter-matching-rexpr [rtype-rexpr rexpr matched-so-far]
-  (cond (or (and (rexpr? rtype-rexpr) (rexpr? rexpr))
+  (cond (or (and (rexpr? rtype-rexpr) (= (type  rexpr) (type rtype-rexpr)))
             (and (is-rexpr-value? rtype-rexpr) (is-rexpr-value? rexpr)))
         (cond (or (is-disjunct? rtype-rexpr)
                   (is-conjunct? rtype-rexpr))
@@ -797,6 +797,11 @@
                               [(:exposed-name a) b]
                               (is-jit-placeholder? a)
                               [(:external-name a) b]
+                              (instance? jit-local-variable-rexpr a)
+                              (do
+                                ;; this does not have a conversion between these variables as they are not exposed
+                                (assert (instance? jit-local-variable-rexpr b))
+                                nil)
                               :else (do
                                       (debug-repl "convert matching???")
                                       (???)))))))))
@@ -1886,14 +1891,14 @@
      (case (:type varj)
        :rexpr-list varj  ;; these will just pass through unchecked, as they are giong to end up handled by something else
        :rexpr-value-list varj
-       :value (merge {:type :value}
-                     (when (contains? :current-value varj)
-                       {:current-value (vec (:current-value varj))})
-                     :cljcode-expr
-                     (let [cc (:cljcode-expr varj)]
-                       (if (and (seqable? cc) (not (vector? cc)) (= 'list (first cc)))
-                         `[~@(rest cc)] ;; this is like `(list 1 2 3) and change it to be `[1 2 3]
-                         `(vec ~cc))))))))
+       :value (merge {:type :value
+                      :cljcode-expr
+                      (let [cc (:cljcode-expr varj)]
+                        (cond (vector? cc) cc
+                              (and (seqable? cc) (#{'list 'clojure.core/list clojure.core/list} (first cc))) `[~@(rest cc)]  ;; this would be like (vec (list 1 2 3)), so just shortcut this to be [1 2 3]
+                              :else `(vec ~cc)))}
+                     (when (contains? varj :current-value)
+                       {:current-value (vec (:current-value varj))}))))))
 
 (set-jit-method
  #'apply
@@ -2658,40 +2663,12 @@
                                   :cljcode-expr (vec (map #(-> % jit-evaluate-cljform :cljcode-expr) arg))
                                         ;`(bad-gen "rexpr value list 2") ;; we can not directly generate this representation?  Though the individual variables should still be accessable?
                                         ;:matched-variable arg
-                                  :current-value arg #_(vec (for [z arg]
-                                                              (cond (instance? jit-exposed-variable-rexpr z)
-                                                                    {:type :rexpr-value
-                                                                     :current-value (*current-assignment-to-exposed-vars* (:exposed-name z))
-                                                                     :cljcode-expr `(. ~(with-meta 'rexpr {:tag (jit-generating-rewrite-for-rexpr-type)})
-                                                                                       (:exposed-name z))
-                                                                     :matched-variable z}
-
-                                                                    (instance? jit-local-variable-rexpr z)
-                                                                    (if (contains? @*local-variable-names-for-variable-values* z)
-                                                                      (let [x (@*local-variable-names-for-variable-values* z)]
-                                                                        {:type :rexpr-value
-                                                                         :matched-variable z
-                                                                         :current-value (strict-get x :current-value)
-                                                                         :cljcode-expr `(bad-gen)})
-                                                                      {:type :rexpr-value
-                                                                       :matched-variable arg})
-
-                                                                    :else (let []
-                                                                            (debug-repl "TODO")
-                                                                            (???)))))}
-
-                                 ;; (is-variable? arg)
-                                 ;; {:type :rexpr-value
-                                 ;;  :current-value arg
-                                 ;;  }
+                                  :current-value arg }
 
                                  (instance? Aggregator arg)
                                  {:type :value
                                   :cljcode-expr (symbol "dyna.rexpr-aggregators" (str "defined-aggregator-" (:name arg)))
                                   :constant-value arg}
-
-                                 ;; (= t :unknown)
-                                 ;; {:type }
 
                                  :else
                                  (let []
@@ -2736,7 +2713,9 @@
                               (if (nil? pv)
                                 (vswap! currently-bound-variables assoc (cdar matcher) curval)
                                 (vswap! runtime-checks conj `(= ~(:cljcode-expr curval) ~(:cljcode-expr pv)))))
-                            (list true))))
+                            (when (or (not (contains? match-success :constant-value))
+                                      (get-current-value match-success))
+                              (list true)))))
 
                       (contains? @rexpr-containers-signature (car matcher))
                       (let [rx (:rexpr-type curval)]

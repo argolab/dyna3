@@ -437,7 +437,7 @@
               result#)))
 
          (~'is-empty-rexpr? ~'[this] false)
-         (~'is-non-empty-rexpr? [this] false)
+         (~'is-non-empty-rexpr? [this] false)  ;; if this has _PROVEN_ that is non-empty (Something like 1+R).  Something that is
 
          (~'check-rexpr-basecases ~'[this stack]
           (min 3 ;; this is the default for intersection
@@ -1886,7 +1886,7 @@
   :match (disjunct (:rexpr-list children))
   (let [all-iters (vec (map find-iterators children))]
     ;; this has to intersect the iterators for the same variables
-    (when (every? #(not (empty? %)) all-iters)
+    (when (every? not-empty all-iters)
       (iterators/make-disjunct-iterator all-iters))))
 
 (def-rewrite
