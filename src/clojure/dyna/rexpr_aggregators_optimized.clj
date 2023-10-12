@@ -239,6 +239,7 @@
 (def-rewrite
   :match {:rexpr (aggregator-op-inner operator (:any incoming) (:any-list projected-vars) (:rexpr R))
           :check (not (or (is-constant? incoming)
+                          (is-empty-rexpr? R)
                           (some #{incoming} (exposed-variables R))
                           (tlocal is-generating-jit-rewrite)))}
   :is-debug-check-rewrite true

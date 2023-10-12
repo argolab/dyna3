@@ -1856,7 +1856,7 @@
                               children))]
     (if (not= @cnt 0)
       (make-disjunct (conj others (make-multiplicity @cnt)))
-      (make-disjunct others))))
+      (make-disjunct (vec others)))))
 
 
 (def-rewrite
