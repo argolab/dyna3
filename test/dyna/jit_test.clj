@@ -179,8 +179,8 @@
                                synth-rexpr])
             ctx (context/make-empty-context rr)]
         (tbinding [generate-new-jit-rewrites true]
-          (let [res2 (context/bind-context-raw ctx (simplify-fully rr))]
-            (is (= y (ctx-get-value ctx (make-variable 'result))))))))))
+                  (let [res2 (context/bind-context-raw ctx (simplify-fully rr))]
+                    (is (= y (ctx-get-value ctx (make-variable 'result))))))))))
 
 (deftest basic-jit9
   (let [rexpr (make-aggregator "+=" (make-variable 'result) (make-variable 'incoming) true
@@ -195,7 +195,7 @@
             ctx (context/make-empty-context rr)]
         (tbinding [generate-new-jit-rewrites true]
                   (let [res2 (context/bind-context-raw ctx (simplify-fully rr))]
-                    (debug-repl "test")
+                    ;(debug-repl "test")
                     (is (= (/ (* i (+ i 1)) 2) (ctx-get-value ctx (make-variable 'result))))))))))
 
 (deftest basic-jit10

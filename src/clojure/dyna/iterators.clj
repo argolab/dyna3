@@ -596,7 +596,7 @@
 
 ;; TODO: can-bind-variables can be removed now I think..
 #_(defn- run-iterator-fn1 [picked-iterator picked-binding-order can-bind-variables rexpr ctx callback-fn simplify-fn]
-  ((fn rec [iter bind-order rexpr]
+    ((fn rec [iter bind-order rexpr]
      (if (empty? bind-order)
        ;; then we have reached the end of this expression, so we are going to callback
        (callback-fn rexpr)

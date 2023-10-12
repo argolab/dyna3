@@ -857,7 +857,7 @@
                         (context/bind-no-context
                          (make-disjunct (vec (map #(remap-variables-func % remap-function) args)))))
   (is-non-empty-rexpr? [this] (some is-non-empty-rexpr? args))
-  (rexpr-jit-info [this] {:jittable false})
+  ;(rexpr-jit-info [this] {:jittable false})
   (rexpr-jittype-hash [this] 0))
 
 (defmethod rexpr-printer disjunct-rexpr [r]

@@ -39,6 +39,10 @@
   (or (not (is-constant? x))
       (instance? DIterator (get-value x))))
 
+(defn- assoc-make-binding-map
+  ([] {})
+  ([a b] {a b})
+  ([a b & args] (assoc (assoc-make-binding-map args) a b)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -653,7 +657,6 @@
                               (~'rexpr-jittype-hash [this] ~jittype-hash))
                             (defmethod rexpr-printer ~(symbol (str new-rexpr-name "-rexpr")) ~'[r]
                               (rexpr-printer (primitive-rexpr ~'r))))
-                                        ;zzz (debug-repl "zzz")
         conversion-function-expr `(fn [~root-rexpr]
                                     (first
                                      ~(generate-conversion-function-matcher root-rexpr
@@ -808,122 +811,131 @@
 
 (defn- synthize-rexpr [rexpr]
   ;; this will identify if an R-expr already has a type which is synthized, and either return that type/conversion function
-  (let [jittype-hash (rexpr-jittype-hash rexpr)
-        rtype (let [vv (volatile! nil)]
-                ;; bit odd to have this under the swap!, as it is going to potentially cause this transform to happen multiple times if there are racing threads
-                ;; which might not be the best....
-                (swap! rexpr-map-to-jit-hash-group
-                       (fn [x]
-                         (let [converters (get x jittype-hash)
-                               matches (first
-                                        (for [cc converters
-                                              :let [mc (compute-converter-matching cc rexpr)]
-                                              :when (not (nil? mc))]
-                                          mc))]
-                           #_(when (and (not (empty? converters)) (nil? matches))
-                             (debug-repl "jit type same, but matched"))
-                           (if-not (nil? matches)
-                             (do
-                               (vreset! vv matches)
-                               x)
-                             (let [new-generated (synthize-rexpr-cljcode rexpr)
-                                   ;; we need to create a new converter and add it to the list
-                                   convert-function (try
-                                                      (binding [*ns* dummy-namespace]
-                                                        (eval `(do
-                                                                 (ns dyna.rexpr-jit-v2)
-                                                                 ~(:make-rexpr-type new-generated)
-                                                                 ~(:def-iterator-expr new-generated)
-                                                                 ~(:conversion-function-expr new-generated))))
-                                                      (catch Exception err (do
-                                                                             (debug-repl "convert fn" false)
-                                                                             (throw err))))
-                                   matches (assoc new-generated :conversion-function convert-function)]
-                               (vreset! vv matches)
-                               (assoc x jittype-hash (cons matches converters)))))))
-                @vv)
-        ret ((:conversion-function rtype) rexpr)]
-    (dyna-assert (not (nil? ret)))
-    [ret rtype]))
+  (if (is-jit-placeholder? rexpr)
+    (let []
+      (debug-repl "synth hole")
+      (???))
+    (let [jittype-hash (rexpr-jittype-hash rexpr)
+          rtype (let [vv (volatile! nil)]
+                  ;; bit odd to have this under the swap!, as it is going to potentially cause this transform to happen multiple times if there are racing threads
+                  ;; which might not be the best....
+                  (swap! rexpr-map-to-jit-hash-group
+                         (fn [x]
+                           (let [converters (get x jittype-hash)
+                                 matches (first
+                                          (for [cc converters
+                                                :let [mc (compute-converter-matching cc rexpr)]
+                                                :when (not (nil? mc))]
+                                            mc))]
+                             #_(when (and (not (empty? converters)) (nil? matches))
+                                 (debug-repl "jit type same, but matched"))
+                             (if-not (nil? matches)
+                               (do
+                                 (vreset! vv matches)
+                                 x)
+                               (let [new-generated (synthize-rexpr-cljcode rexpr)
+                                     ;; we need to create a new converter and add it to the list
+                                     convert-function (try
+                                                        (binding [*ns* dummy-namespace]
+                                                          (eval `(do
+                                                                   (ns dyna.rexpr-jit-v2)
+                                                                   ~(:make-rexpr-type new-generated)
+                                                                   ~(:def-iterator-expr new-generated)
+                                                                   ~(:conversion-function-expr new-generated))))
+                                                        (catch Exception err (do
+                                                                               (println "FAILED TO GENERATE CODE")
+                                                                               (aprint new-generated)
+                                                                               (debug-repl "convert fn" false)
+                                                                               (throw err))))
+                                     matches (assoc new-generated :conversion-function convert-function)]
+                                 (vreset! vv matches)
+                                 (assoc x jittype-hash (cons matches converters)))))))
+                  @vv)
+          ret ((:conversion-function rtype) rexpr)]
+      (dyna-assert (not (nil? ret)))
+      [ret rtype])))
 
 (declare ^:private convert-to-jitted-rexpr-fn)
 
 (defn- convert-to-jitted-rexpr-inspect [rexpr]
   ;; look at the type of the primitive R-expr and figure out if we need to transform some of the sub units
-  (let [jinfo (rexpr-jit-info rexpr)]
-    (cond (contains? jinfo :generated-name) rexpr ;; this is already a jit compiled type.  There is nothing to do here.  Though I suppose that we could map its arguments?
+  (tbinding [use-optimized-disjunct false]
+            (let [jinfo (rexpr-jit-info rexpr)]
+              (cond (contains? jinfo :generated-name) rexpr ;; this is already a jit compiled type.  There is nothing to do here.  Though I suppose that we could map its arguments?
 
-          (is-aggregator? rexpr) (convert-to-jitted-rexpr-fn
-                                  (convert-basic-aggregator-to-op-aggregator rexpr))
+                    (is-aggregator? rexpr) (convert-to-jitted-rexpr-fn
+                                            (convert-basic-aggregator-to-op-aggregator rexpr))
 
-          (is-user-call? rexpr) rexpr ;; there is nothing that we can do for this
+                    (is-user-call? rexpr) rexpr ;; there is nothing that we can do for this
 
-          ;; figure out if this is a big disjunct or a small disjunct.  If it is a big disjunct, then it would become a hole with its sub units getting converted
-          ;; if this is a small disjunct, then we can convert it to a primitive R-expr type, and then JIT compile that
-          (is-disjunct-op? rexpr)
-          (let [trie (:rexprs rexpr)
-                vars (:disjunction-variables rexpr)
-                elems (take 11 (trie/trie-get-values trie nil))
-                all-ground (every? (fn [z] (every? #(not (nil? %)) z)) (map first elems))]
-            (if (> (count elems) 8)
-              ;; then we are going to rewrite the leafs of the R-exprs
-              (rewrite-rexpr-children rexpr convert-to-jitted-rexpr-fn)
-              (let [new-disjunct (vec (for [[vals rx] elems
-                                             :let [vals-r (vec (for [[val var] (zipseq vals vars)
-                                                                     :when (not (nil? val))]
-                                                                 (make-no-simp-unify var (make-constant val))))]]
-                                        (make-conjunct (conj vals-r rx))))
-                    ret (make-no-simp-disjunct new-disjunct)]
-                (convert-to-jitted-rexpr-fn ret))))
+                    ;; figure out if this is a big disjunct or a small disjunct.  If it is a big disjunct, then it would become a hole with its sub units getting converted
+                    ;; if this is a small disjunct, then we can convert it to a primitive R-expr type, and then JIT compile that
+                    (is-disjunct-op? rexpr)
+                    (let [trie (:rexprs rexpr)
+                          vars (:disjunction-variables rexpr)
+                          elems (take 11 (trie/trie-get-values trie nil))
+                          all-ground (every? (fn [z] (every? #(not (nil? %)) z)) (map first elems))]
+                      (if (> (count elems) 8)
+                        ;; then we are going to rewrite the leafs of the R-exprs
+                        (rewrite-rexpr-children rexpr convert-to-jitted-rexpr-fn)
+                        (let [new-disjunct (vec (for [[vals rx] elems
+                                                      :let [vals-r (vec (for [[val var] (zipseq vals vars)
+                                                                              :when (not (nil? val))]
+                                                                          (make-no-simp-unify var (make-constant val))))]]
+                                                  (make-conjunct (conj vals-r rx))))
+                              ret (make-no-simp-disjunct new-disjunct)]
+                          (convert-to-jitted-rexpr-fn ret))))
 
 
-          ;; This R-expr can be converted into the JIT, but it might have things inside of the R-expr which will need to get removed
-          ;; these things will have to get identified and converted into holes
-          :else
-          (let [pl (volatile! {}) ;; things go into holes
-                rp (fn rr [rexpr]
-                     (let [jinfo (rexpr-jit-info rexpr)]
-                       (if-not (:jittable jinfo true)
-                         (cond (is-aggregator? rexpr) (rr (convert-basic-aggregator-to-op-aggregator rexpr))
-                               (is-disjunct-op? rexpr)
-                               (let [trie (:rexprs rexpr)
-                                     vars (:disjunction-variables rexpr)
-                                     elems (take 11 (trie/trie-get-values trie nil))
-                                     all-ground (every? (fn [z] (every? #(not (nil? %)) z)) (map first elems))]
-                                 (if (> (count elems) 8)
-                                   (let [id (gensym 'jr)
-                                         exposed (exposed-variables rexpr)
-                                         new-disjunct (if (tlocal recursive-transformation-to-jit-state)
-                                                        (rewrite-rexpr-children rexpr convert-to-jitted-rexpr-fn)
-                                                        rexpr)]
-                                     (vswap! pl assoc id new-disjunct)
-                                     (make-jit-placeholder id nil (vec exposed)))
-                                   (let [new-disjunct (vec (for [[vals rx] elems
-                                                                 :let [vals-r (vec (for [[val var] (zipseq vals vars)
-                                                                                         :when (not (nil? val))]
-                                                                                     (make-no-simp-unify var (make-constant val))))]]
-                                                             (make-conjunct (conj vals-r
-                                                                                  (rr rx)))))
-                                         ret (make-no-simp-disjunct new-disjunct)]
-                                     ret)))
-                               :else
-                               (let [id (gensym 'jr)
-                                     exposed (exposed-variables rexpr)]
-                                 (vswap! pl assoc id rexpr)
-                                 (make-jit-placeholder id nil (vec exposed))))
-                         (rewrite-rexpr-children rexpr rr))))
-                nr (rp rexpr)
-                ;; QUESTION: should this always synthize or should there be something which will stop it.
-                ;; if we allow for merging of jitted types, then it would have that there is some expression between
-                ;; them.  But how would it allow for the different states to be encoded
-                ;;
-                ;; When this figures out which of the states are encoded, it will
-                [synthed _] (synthize-rexpr nr)]
-            (if-not (empty? @pl)
-              (rewrite-rexpr-children synthed (fn [r]
-                                                (assert (is-jit-placeholder? r))
-                                                (strict-get @pl (:external-name r))))
-              synthed)))))
+                    ;; This R-expr can be converted into the JIT, but it might have things inside of the R-expr which will need to get removed
+                    ;; these things will have to get identified and converted into holes
+                    :else
+                    (let [pl (volatile! {}) ;; things go into holes
+                          rp (fn rr [rexpr]
+                               (let [jinfo (rexpr-jit-info rexpr)]
+                                 (if-not (:jittable jinfo true)
+                                   (cond (is-aggregator? rexpr) (rr (convert-basic-aggregator-to-op-aggregator rexpr))
+                                         (is-disjunct-op? rexpr)
+                                         (let [trie (:rexprs rexpr)
+                                               vars (:disjunction-variables rexpr)
+                                               elems (take 11 (trie/trie-get-values trie nil))
+                                               all-ground (every? (fn [z] (every? #(not (nil? %)) z)) (map first elems))]
+                                           (if (> (count elems) 8)
+                                             (let [id (gensym 'jr)
+                                                   exposed (exposed-variables rexpr)
+                                                   new-disjunct (if (tlocal recursive-transformation-to-jit-state)
+                                                                  (rewrite-rexpr-children rexpr convert-to-jitted-rexpr-fn)
+                                                                  rexpr)]
+                                               (vswap! pl assoc id new-disjunct)
+                                               (make-jit-placeholder id nil (vec exposed)))
+                                             (let [new-disjunct (vec (for [[vals rx] elems
+                                                                           :let [vals-r (vec (for [[val var] (zipseq vals vars)
+                                                                                                   :when (not (nil? val))]
+                                                                                               (make-no-simp-unify var (make-constant val))))]]
+                                                                       (make-conjunct (conj vals-r
+                                                                                            (rr rx)))))
+                                                   ret (make-no-simp-disjunct new-disjunct)]
+                                               ret)))
+                                         :else
+                                         (let [id (gensym 'jr)
+                                               exposed (exposed-variables rexpr)]
+                                           (vswap! pl assoc id rexpr)
+                                           (make-jit-placeholder id nil (vec exposed))))
+                                   (rewrite-rexpr-children rexpr rr))))
+                          nr (rp rexpr)
+                          ;; QUESTION: should this always synthize or should there be something which will stop it.
+                          ;; if we allow for merging of jitted types, then it would have that there is some expression between
+                          ;; them.  But how would it allow for the different states to be encoded
+                          ;;
+                          ;; When this figures out which of the states are encoded, it will
+                          vvvv (when (is-jit-placeholder? nr)
+                                 (debug-repl "placeholder fail"))
+                          [synthed _] (synthize-rexpr nr)]
+                      (if-not (empty? @pl)
+                        (rewrite-rexpr-children synthed (fn [r]
+                                                          (assert (is-jit-placeholder? r))
+                                                          (strict-get @pl (:external-name r))))
+                        synthed))))))
 
 (defn- convert-to-jitted-rexpr-fn [rexpr]
   (if (or (not (tlocal system/generate-new-jit-states))
@@ -1358,7 +1370,6 @@
                                                                                      (debug-repl)
                                                                                      (???))
                                                                  ))]
-                                                    ;(debug-repl "make r-expr")
                                                     {:type :rexpr
                                                      :rexpr-type (apply (resolve sn) argg)}))}
                                        {:type :function
@@ -2338,7 +2349,7 @@
                   r (jit-evaluate-cljform b)]
               (assert (= :rexpr (:type r)))
              ; (add-to-generation! (:cljcode-expr r)) ;; if there are conditions on the R-exprs, that could be partially encoded here
-              (debug-repl "perform generic rewrite")
+              ;(debug-repl "perform generic rewrite")
               (:rexpr-type r))))
     #_(if (contains? :assigns-variable kw-args)
         (do
@@ -2579,12 +2590,12 @@
                 ;; then there is something that we can generate, and we are going to want to run that generation and then evaluate it against the current R-expr
                 (let [gen-fn (generate-cljcode-fn result)
                       __ (println gen-fn)
-                      __ (debug-repl "pr0" false)
+                      ;__ (debug-repl "pr0" false)
                       fn-evaled (binding [*ns* dummy-namespace]
                                   (eval `(do
                                            (ns dyna.rexpr-jit-v2)
                                            (def-rewrite-direct ~(:generated-name jinfo) [:standard] ~gen-fn))))]
-                  (debug-repl "pr1" false)
+                  ;(debug-repl "pr1" false)
                   fn-evaled)
                 simplify-identity ;; if nothing was generated, then we are just going to return an identity function which does not do any rewriting
                 )))))
@@ -2779,7 +2790,8 @@
   (if (is-jit-placeholder? rexpr)
     (let []
       ;; it needs to construct a nested context, and then call the standard "find iterators" on the nested jit-placeh
-      (debug-repl "TODO need to construct context")
+      (println "TODO need to construct context")
+      ;(debug-repl "TODO need to construct context")
       `(find-iterators ~(if (:external-name rexpr)
                           `(. ~(with-meta 'rexpr {:tag (jit-generating-rewrite-for-rexpr-type)})
                               ~(:external-name rexpr))
@@ -2902,7 +2914,7 @@
         (let [r (tbinding [current-simplify-running simplify-jit-create-rewrites-fast
                            generate-new-jit-rewrites false]
                           (maybe-create-rewrite (context/get-context) rexpr jinfo simplify-jit-create-rewrites-fast))]
-          (debug-repl "attempt create rewrite for jit type")
+          ;(debug-repl "attempt create rewrite for jit type")
           r)
         rexpr))))
 
@@ -3020,10 +3032,10 @@
                                       @(:current-out-var @metadata)
                                       (get-in @(:current-out-var @metadata) (map get-current-value path)))
                         ]
-                    (debug-repl "pick agg out lower")
+                    ;(debug-repl "pick agg out lower")
                     (add-to-generation! (fn [inner]
                                           `(let [~agg-out-var ~agg-lower]
-                                             (debug-repl "jitted agg out")
+                                             ;(debug-repl "jitted agg out")
                                              (when (nil? ~agg-out-var)
                                                (throw (UnificationFailure. "aggregator is over nothing")))
                                              ~(inner))))
@@ -3118,7 +3130,7 @@
                       ;; the path value will also have to become set
 
                       ;; if there are some values
-                      (when *jit-inside-disjunct*
+                      #_(when *jit-inside-disjunct*
                         (debug-repl "need to handle assignments inside of disjunct")
                         (???))
                       (assert (is-multiplicity? body))
@@ -3133,7 +3145,7 @@
                       ;; this can have that some R-expr will get returned, in which case it will have to handle the returned value
 
                                         ;(debug-repl "value pass for external call")
-                      (let [r (make-jit-placeholder nil agg-contrib-result [])
+                      (let [r (make-jit-placeholder nil agg-contrib-result (vec (exposed-variables rexpr)))
                             rm (jit-metadata r)]
                         ;; just assume that the result is zero, in which case there would be nothing to do here.  This will realistically
                         (vswap! rm assoc :current-rexpr (make-multiplicity 0))
@@ -3193,7 +3205,7 @@
                                                                          (throw (DynaJITRuntimeCheckFailed.))))]
                                                (when (nil? ~diterator-var)
                                                  (throw (DynaJITRuntimeCheckFailed.)))
-                                               (debug-repl "before hole value")
+                                               ;(debug-repl "before hole value")
                                                (let [~hole-rexpr-var ~(:cljcode-expr new-with-iter-cljcode)]
 
                                                  ~(inner)))))))
@@ -3210,7 +3222,7 @@
                   (let [ret (make-jit-placeholder nil hole-rexpr-var (vec (exposed-variables rexpr)))
                         md (jit-metadata ret)]
                     (vswap! md assoc :current-rexpr (:rexpr-type new-with-iter-cljcode))
-                    (debug-repl "choose to run iterator" false)
+                    ;(debug-repl "choose to run iterator" false)
                     ret)))
 
 
@@ -3300,7 +3312,7 @@
                     var-value (jit-evaluate-cljform `(get-value ~(first iterator-order)))
                     new-iter-name (gensym 'new-iter-bound)]
 
-                (debug-repl "make iter variable bound")
+                ;(debug-repl "make iter variable bound")
 
                 (add-to-generation! (fn [inner]
                                       `(let [~new-iter-name (iter-bind-value ~(:cljcode-expr iter-value) ~(:cljcode-expr var-value))]
@@ -3364,7 +3376,7 @@
                                                                        :simplify-result false
                                                                        :attempt-variable-read-values true)
                 ]
-            (debug-repl "new self cljcode" false)
+            ;(debug-repl "new self cljcode" false)
 
             ;; this is going to construct a sub-rexpr and then run the iterator and simplification.  The hole will become a disjunct
             ;; of all the resulting R-exprs.  Ideally the hole should become filled with R-exprs which correspond with 0-mult.  In which case the
@@ -3395,7 +3407,7 @@
                                                  (conj! ~iter-run-result result-r#))
                                                ;(conj! iter-run-log# [new-r# nested-context# result-r# ~iter-binding])
                                                ))
-                                           (debug-repl "after ran iterator")
+                                           ;(debug-repl "after ran iterator")
                                            (let [r# (persistent! ~iter-run-result)]
                                              (if (empty? r#)
                                                (make-multiplicity 0)
@@ -3591,23 +3603,24 @@
           (vswap! metadata assoc
                   :simplify-fixed-pointed (= rewritten-rexpr current-value)
                   :current-rexpr rewritten-rexpr)
-          (debug-repl "do jit placeholder rewrite" false)
+          ;(debug-repl "do jit placeholder rewrite" false)
           (add-to-generation! (fn [inner]
                                 `(let [~nested-context-var (context/make-context-jit ~current-cljcode
                                                                                      ;; using assoc here instead of a map {} because it is possible
                                                                                      ;; that a variable will be repeated
-                                                                                     (assoc {} ~@(apply concat
-                                                                                                        (for [v vars
-                                                                                                              :when (:bound v)]
-                                                                                                          [(:cljcode-expr (:clj-var v))
-                                                                                                           (:cljcode-expr (:current-value-clj v))]))))
+                                                                                     (assoc-make-binding-map
+                                                                                      ~@(apply concat
+                                                                                               (for [v vars
+                                                                                                     :when (:bound v)]
+                                                                                                 [(:cljcode-expr (:clj-var v))
+                                                                                                  (:cljcode-expr (:current-value-clj v))]))))
                                        ~new-local-name (tbinding-with-var ~'**threadvar**
                                                                           [ ;; this will need to have aggregators get set here
                                                                            ~@aggregator-func-bindings
                                                                            ]
                                                                           (context/bind-context ~nested-context-var
                                                                                                 (~'simplify ~current-cljcode)))]
-                                   (debug-repl "after placeholder simplify inner" false)
+                                   ;(debug-repl "after placeholder simplify inner" false)
                                    (when (is-empty-rexpr? ~new-local-name) ;; if this is expected to get zero, then we might not have something here?
                                      ;; or we might track if the result is zero, in which case it would have something else.
                                      (throw (UnificationFailure. "JIT nested simplify got zero")))
