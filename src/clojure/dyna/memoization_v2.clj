@@ -64,7 +64,7 @@
 (def-tlocal memoization-forward-placeholder-bindings)
 (def-base-rexpr memoization-filled-in-values-placeholder [:var-list variable-mapping]
   (rexpr-jit-info [this]
-                  (println "TODO: make the fill in values placeholder able to be jitted, this should be reading values from the context or something")
+                  (debug-print "TODO: make the fill in values placeholder able to be jitted, this should be reading values from the context or something")
                   {:jittable false}))
 
 (def-rewrite
@@ -327,7 +327,7 @@
                                                                      ;; this will mean that memoization will need to track
                                                                      ;; this information from when it is constructed?
                                                                      ;; or it will have to look at the origional R-expr and figure it out from there
-                                                                     (println "TODO: memoization needs to know which operator to add to the aggregator")
+                                                                     (debug-print "TODO: memoization needs to know which operator to add to the aggregator")
                                                                      (ClojureUnorderedVector/create
                                                                       [(make-aggregator-op-inner nil (make-constant x) [] (make-multiplicity 1))])))
             new-values (if (is-empty-rexpr? ret-rexpr)

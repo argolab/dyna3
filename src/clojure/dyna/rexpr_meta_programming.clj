@@ -152,7 +152,8 @@
           :context (unify-structure foo (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:any-list arguments2))
           }
   :run-at :inference
-  (let [args (concat arguments2 arguments)
+  (let [;vv (debug-repl "good mathc indirect")
+        args (concat arguments2 arguments)
         has-dynabase (not (and (is-bound? dynabase) (dnil? (get-value dynabase))))
         call-name (if has-dynabase
                     {:name name-str
@@ -165,3 +166,10 @@
                          (when has-dynabase {(make-variable "$self") dynabase})
                          {(make-variable (str "$" (count args))) result})]
     (make-user-call call-name value-map 0 {})))
+
+#_(def-rewrite
+  :match (indirect-user-call (:free call-ref) (:any-list arguments) (:any result))
+  :run-at :inference
+  (let []
+    (debug-repl "indirect inference")
+    nil))

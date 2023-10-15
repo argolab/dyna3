@@ -120,6 +120,7 @@ public final class DynaTerm implements ILookup {
         // to compare as equal with eachother.  As such, we can't just directly
         // hash the array/vec/etc as those would give different hash code
         // results
+
         if(hashcode_cache == 0) {
             int h = ((java.lang.Number)clojure_hash.invoke(name)).intValue();
             int count = arity();
@@ -128,7 +129,7 @@ public final class DynaTerm implements ILookup {
                 // .get does not work with a list
                 h = h * 31 + ((java.lang.Number)clojure_hash.invoke(clojure_nth.invoke(arguments, i))).intValue();
             }
-            if(dynabase != this) // the $nil term will have that it is its own dynabase
+            if(!null_term.equals(dynabase)) // the $nil term will have that it is its own dynabase
                 h ^= dynabase.hashCode();
             hashcode_cache = hash_scramble(h);
         }
@@ -216,6 +217,7 @@ public final class DynaTerm implements ILookup {
         arity_keyword = Clojure.var("clojure.core", "keyword").invoke("arity");
 
         null_term = new DynaTerm();//"$nil", new Object[]{});
+        null_term.hashCode();
     }
 
     public static DynaTerm create(String name, Object... args) {

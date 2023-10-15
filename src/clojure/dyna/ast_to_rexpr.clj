@@ -780,8 +780,9 @@ This is most likely not what you want."))))
                                                               "$functor_arity" (make-constant 0)
                                                               "$functor_filename" (make-constant (str source-file))}
                                                              (into {} (for [n all-variable-names] [n (make-variable n)])))
-                                rexpr (make-proj-many (vals variable-name-mapping)
-                                                      (convert-from-ast expression (make-constant true) variable-name-mapping source-file))
+                                rexpr (make-aggregator ":-" (make-constant true) (make-constant true) true
+                                                       (make-proj-many (vals variable-name-mapping)
+                                                                       (convert-from-ast expression (make-constant true) variable-name-mapping source-file)))
                                 run-agenda-zzz (system/maybe-run-agenda)
                                 result (system/converge-agenda
                                         (simplify-top rexpr))]

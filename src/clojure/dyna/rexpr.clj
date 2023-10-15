@@ -1474,9 +1474,13 @@
   (debug-tbinding
    [current-simplify-stack (conj (tlocal *current-simplify-stack*) rexpr)
     current-simplify-running simplify-inference]
-   (let [ctx (context/get-context)]
-     (ctx-add-rexpr! ctx rexpr)
-     ((rexpr-simplify-inference-collection rexpr) rexpr simplify-inference)
+   (let [ctx (context/get-context)
+         ret ((rexpr-simplify-inference-collection rexpr) rexpr simplify-inference)]
+     (if (nil? ret)
+       rexpr
+       (do
+         (ctx-add-rexpr! ctx ret)
+         ret))
      #_(let [ret ((get @rexpr-rewrites-inference-func (type rexpr) simplify-identity) rexpr simplify-inference)]
        (if (nil? ret)
          rexpr
