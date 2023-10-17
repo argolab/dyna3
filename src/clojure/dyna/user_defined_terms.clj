@@ -245,22 +245,26 @@
 
 (def-rewrite
   :match {:rexpr (user-call (:unchecked name) (:unchecked var-map) (#(< % @(tlocal system/user-recursion-limit)) call-depth) (:unchecked parent-call-arguments))
-          :check (not (tlocal *simplify-looking-for-fast-fail-only*))}
+          :check (and (not (tlocal *simplify-looking-for-fast-fail-only*))
+                      (tlocal *expand-user-calls*))}
   (let [ut (get-user-term name)]
-    #_(when (nil? ut)
-      (debug-repl "nil user term")
-      (dyna-warning (str "Did not find method " (:name name) "/" (:arity name) " from file " (:source-file name))))
+
+    ;; if it doesn't exist, then we are going to issue a warning to the user.  This will become mult0, but likely this is a typo or something
     (when (and (empty? (:rexprs ut)) (= :none (:memoization-mode ut)))
       (dyna-warning (str "Did not find method " (:name name) "/" (:arity name) " from file " (:source-file name))))
 
+    ;; check if this was already expanded on the stack
+    ;; this is done to prevent us from expanding a recursive call endlessly without making progress
+    ;; In the case of something like fibonacci (which expands 2^n times), even a depth limit of 30 will cause it to run out of memory
     (let [existing-parent-args (get parent-call-arguments name #{})
           local-map (into {} (for [[k v] var-map]
                                [k (get-value v)]))
           amapped (into #{} (for [s existing-parent-args]
                               (into {} (for [[k v] s]
                                          [k (get-value v)]))))]
-      ;; this should really be a warning or something in the case that it can't be found. Though we might also need to create some assumption that nothing is defined...
       (when (and ut (not (contains? amapped local-map)))
+
+
         (let [new-parent-args (assoc parent-call-arguments name (conj (get parent-call-arguments name #{})
                                                                       var-map))
               rexpr (user-rexpr-combined ut)
@@ -281,7 +285,7 @@
               [new-var-map with-key-var] (if (and (:has-with-key ut) (not (contains? var-map (make-variable "$do_not_use_with_key"))))
                                            (let [wkv (make-variable (gensym 'with-key-var))]
                                              [(assoc var-map (make-variable (str "$" (:arity name))) wkv) wkv])
-                                            [var-map nil])
+                                           [var-map nil])
               variable-map-rr (context/bind-no-context
                                (remap-variables-handle-hidden (rewrite-user-call-depth rexpr)
                                                               new-var-map))]
@@ -293,7 +297,7 @@
           (dyna-assert (or (= (set (filter is-variable? (vals new-var-map))) (set (exposed-variables variable-map-rr)))
                            (is-empty-rexpr? variable-map-rr)))
           #_(when (= "partition" (:name name))
-            (debug-repl "return partition"))
+              (debug-repl "return partition"))
           (if-not (nil? with-key-var)
             (let [result-var (get var-map (make-variable (str "$" (:arity name))))
                   value-call (make-user-call {:name "$value" :arity 1}

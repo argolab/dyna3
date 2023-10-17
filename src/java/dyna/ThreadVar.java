@@ -48,6 +48,7 @@ public final class ThreadVar {
     public boolean simplify_with_inferences = false;
     public boolean simplify_looking_for_fast_fail_only = false;
 
+    public boolean expand_user_calls = true;
 
     // memoization_v2.clj
     public boolean expand_memoization_placeholder = true;

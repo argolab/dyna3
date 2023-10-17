@@ -4,7 +4,8 @@
   (:require [dyna.base-protocols :refer :all])
   (:require [dyna.rexpr-constructors :refer :all])
   (:require [dyna.user-defined-terms :refer [user-rexpr-combined-no-memo]])
-  (:require [clojure.set :refer [union]]))
+  (:require [clojure.set :refer [union intersection]])
+  (:import [java.util IdentityHashMap]))
 
 
 ;; operations which work best when there is a bit of a higher level
@@ -60,9 +61,59 @@
   (???)
   )
 
+(defrecord redudant-constraint-var [id])
+(defn- redudant-constraints [parent-replace-map rexpr]
+  (let [conj-rexpr (all-conjunctive-rexprs rexpr)
+        det-var-map (group-by :rexpr-remapped
+                               (for [[projected-vars cr] conj-rexpr
+                                     :when (and (not (is-conjunct? cr)) (is-constraint? cr))
+                                     :let [vd (variable-functional-dependencies cr)]
+                                     [ground-vars free-vars] vd]
+                                 (let [i (volatile! 0)
+                                       m (volatile! {})
+                                       remapped (remap-variables-func cr (fn [v]
+                                                                           (if (contains? free-vars v)
+                                                                             (let [g (make-variable (redudant-constraint-var. (vswap! i inc)))]
+                                                                               (vswap! m assoc g v)
+                                                                               g)
+                                                                             v)))]
+                                   {:projected-vars projected-vars
+                                    :rexpr cr
+                                    :require-ground ground-vars
+                                    :free-vars free-vars
+                                    :rexpr-remapped remapped
+                                    :remap @m})))
+        replace-map (merge (into {} (for [[group-key all-constraints] det-var-map
+                                          :let [possible-picks (remove (fn [x] (not (empty? (intersection (:projected-vars x) (:free-vars x)))))
+                                                                       all-constraints)]
+                                          :when (not (empty? possible-picks))]
+                                      [group-key (first possible-picks)]))
+                           parent-replace-map ;; let the parent replace map work as an override so that if something already exists, we can still call it
+                           )
+        ^IdentityHashMap replace-rexprs (IdentityHashMap.)]
+    (doseq [[group-key all-constraints] det-var-map
+            :let [pick (get replace-map group-key)]
+            :when (not (nil? pick))
+            to-replace (remove (partial identical? pick) all-constraints)]
+      (assert (= (set (keys (:remap pick))) (set (keys (:remap to-replace)))))
+      (.put replace-rexprs
+            (:rexpr to-replace)
+            (make-conjunct (vec (for [k (keys (:remap pick))]
+                                  (make-no-simp-unify (strict-get (:remap pick) k)
+                                                      (strict-get (:remap to-replace) k)))))))
+    (letfn [(remap-fn [r]
+              (let [z (.get replace-rexprs r)]
+                (cond (not (nil? z)) z
+
+                      (is-disjunct? r) (rewrite-rexpr-children r (partial redudant-constraints replace-map))
+
+                      (is-disjunct-op? r) r
+
+                      :else (rewrite-rexpr-children r remap-fn))))]
+      (remap-fn rexpr))))
+
 (defn optimize-redudant-constraints [rexpr]
-  ;; calls to the same constraint should be optimized to only perform that call once
-  )
+  (redudant-constraints {} rexpr))
 
 
 (defn optimize-conjunct-of-disjuncts [rexpr]
