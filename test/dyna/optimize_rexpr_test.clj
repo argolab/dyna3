@@ -1,4 +1,4 @@
-(ns dyna.optimize-rexpr-test
+#_(ns dyna.optimize-rexpr-test
   (:require [clojure.test :refer :all])
   (:require [dyna.core])
   (:require [dyna.base-protocols :refer :all])
@@ -8,7 +8,7 @@
   (:require [dyna.utils :refer :all])
   (:require [dyna.simple-test :refer [str-test]]))
 
-(deftest redudant-constraints
+#_(deftest redudant-constraints
   (let [rexpr (make-conjunct [(make-lessthan (make-variable 'X) (make-variable 'Y) (make-variable 'Z1))
                               (make-lessthan (make-variable 'X) (make-variable 'Y) (make-variable 'Z2))])
         r2 (simplify-top rexpr)

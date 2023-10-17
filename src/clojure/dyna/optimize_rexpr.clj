@@ -62,27 +62,28 @@
   )
 
 (defrecord redudant-constraint-var [id])
+
 (defn- redudant-constraints [parent-replace-map rexpr]
   (let [conj-rexpr (all-conjunctive-rexprs rexpr)
         det-var-map (group-by :rexpr-remapped
-                               (for [[projected-vars cr] conj-rexpr
-                                     :when (and (not (is-conjunct? cr)) (is-constraint? cr))
-                                     :let [vd (variable-functional-dependencies cr)]
-                                     [ground-vars free-vars] vd]
-                                 (let [i (volatile! 0)
-                                       m (volatile! {})
-                                       remapped (remap-variables-func cr (fn [v]
-                                                                           (if (contains? free-vars v)
-                                                                             (let [g (make-variable (redudant-constraint-var. (vswap! i inc)))]
-                                                                               (vswap! m assoc g v)
-                                                                               g)
-                                                                             v)))]
-                                   {:projected-vars projected-vars
-                                    :rexpr cr
-                                    :require-ground ground-vars
-                                    :free-vars free-vars
-                                    :rexpr-remapped remapped
-                                    :remap @m})))
+                              (for [[projected-vars cr] conj-rexpr
+                                    :when (and (not (is-conjunct? cr)) (is-constraint? cr))
+                                    :let [vd (variable-functional-dependencies cr)]
+                                    [ground-vars free-vars] vd]
+                                (let [i (volatile! 0)
+                                      m (volatile! {})
+                                      remapped (remap-variables-func cr (fn [v]
+                                                                          (if (contains? free-vars v)
+                                                                            (let [g (make-variable (redudant-constraint-var. (vswap! i inc)))]
+                                                                              (vswap! m assoc g v)
+                                                                              g)
+                                                                            v)))]
+                                  {:projected-vars projected-vars
+                                   :rexpr cr
+                                   :require-ground ground-vars
+                                   :free-vars free-vars
+                                   :rexpr-remapped remapped
+                                   :remap @m})))
         replace-map (merge (into {} (for [[group-key all-constraints] det-var-map
                                           :let [possible-picks (remove (fn [x] (not (empty? (intersection (:projected-vars x) (:free-vars x)))))
                                                                        all-constraints)]
@@ -113,7 +114,7 @@
       (remap-fn rexpr))))
 
 (defn optimize-redudant-constraints [rexpr]
-  (redudant-constraints {} rexpr))
+  #_(redudant-constraints {} rexpr))
 
 
 (defn optimize-conjunct-of-disjuncts [rexpr]

@@ -274,7 +274,13 @@
                                                          ;; if we only allow for 1 value per line, then this could be lessthan rather than lessthan-eq
                                                          (make-lessthan-eq (make-constant line) linevar (make-constant true))])))))
   :add-to-out-rexpr (fn [current-value result-variable]
-                      (make-not-equals result-variable (make-constant colon-identity-elem) (make-constant true)))
+                      ;; the := aggregator can _never_ return the value `$null` as that is used as the value which indicates that nothing should be returned
+                      ;; so if someone does `$null = (:= f).` then we can shortcut this and stop evaluation of the expression
+                      (if (and (is-constant? result-variable) (= (get-value result-variable) colon-identity-elem))
+                        (make-multiplicity 0)
+                        (make-multiplicity 1))
+                      ;(make-not-equals result-variable (make-constant colon-identity-elem) (make-constant true))
+                      )
   :lower-value (fn [x]
                  (assert (= "$colon_line_tracking" (.name ^DynaTerm x)))
                  (let [[la va] (.arguments ^DynaTerm x)]
