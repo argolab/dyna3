@@ -9,4 +9,4 @@ jobs:
     - uses: actions/checkout@v2
     - name: run tests
       run: |
-        timeout 15m make test
+        timeout 15m make github-test

@@ -1488,24 +1488,46 @@
              (ctx-add-rexpr! ctx ret)
              ret))))))
 
+(if-not debug-statements
+  (defmacro rexpr-rewrite-loop [[rvar rin] & body]
+    `(loop [~rvar ~rin]
+       ~@body))
+  ;; the second version will check that we have not reencountered the same state before
+  ;; as that would mean that there is some bug in the rewrite rules which will cause this to loop forever
+  (defmacro rexpr-rewrite-loop [[rvar rin] & body]
+    (let [seen (gensym 'seen)
+          cnt (gensym 'cnt)]
+      `(loop [~rvar ~rin
+              ;~seen #{~rin}
+              ~cnt 0]
+         ~@(macrolet-expand
+            {'recur (fn [r] `(do
+                               #_(when (or (contains? ~seen ~r) (> (count ~seen) 100))
+                                 (debug-repl "repeating rexpr rewrites"))
+                               (recur ~r
+                                      ;(conj ~seen ~r)
+                                      (inc ~cnt))))}
+            body)))))
+
+
 (defn simplify-fully-no-guess [rexpr]
   (loop [cri rexpr]
     (system/should-stop-processing?)
-    (let [nri (loop [cr cri]
+    (let [nri (rexpr-rewrite-loop [cr cri]
                 (let [nr (debug-tbinding [current-top-level-rexpr cr]
-                                        (simplify-fast cr))]
+                                         (simplify-fast cr))]
                   (if (not= cr nr)
                     (recur nr)
                     nr)))
           nrif (debug-tbinding [current-top-level-rexpr nri]
-                              (tbinding [simplify-with-inferences true]
-                                (simplify-inference nri)))]
+                               (tbinding [simplify-with-inferences true]
+                                         (simplify-inference nri)))]
       (if (not= nrif nri)
         (recur nrif)
         nrif))))
 
 (defn simplify-fully-with-jit [rexpr]
-  (loop [cr rexpr]
+  (rexpr-rewrite-loop [cr rexpr]
     (let [nr (simplify-fully-no-guess cr)
           ;; simplify-jit will create new rewrites and perform those rewrites when applicable
           jr (simplify-jit-create-rewrites nr)]
@@ -1520,7 +1542,7 @@
 
 (defn simplify-fully [rexpr]
   (try
-    (loop [cri rexpr]
+    (rexpr-rewrite-loop [cri rexpr]
       (let [nri (simplify-fully-with-jit cri)
             nri2 (tbinding [memoization-make-guesses-handler (fn [memo-table variable variable-values]
                                                                 ;; it is possible that there are multiple *different* kinds of guesses which could be made
@@ -1913,7 +1935,7 @@
   :run-at :construction
   :is-debug-check-rewrite true
   (do
-    (when-not (contains? (exposed-variables R) A)
+    (when (and (not (contains? (exposed-variables R) A)) (not (is-empty-rexpr? R)))
       (debug-repl "proj var not in body")
       nil)))
 

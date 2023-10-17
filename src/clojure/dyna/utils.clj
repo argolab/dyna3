@@ -358,7 +358,7 @@
 ;; create macros which are local.  this is modeled after
 ;; clojure.tools.macro/macrolet but this version is simpler and does not do
 ;; recursive expansion of the macros.
-(defn- macrolet-expand [mm form]
+(defn macrolet-expand [mm form]
   (cond (and (seq? form) (contains? mm (first form))) (apply (mm (first form)) (rest form))
         (symbol? form) form
         (seq? form) (reverse (into () (map #(macrolet-expand mm %) form)))

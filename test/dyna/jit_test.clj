@@ -220,7 +220,6 @@
         ctx (context/make-empty-context rr)
         res (tbinding [generate-new-jit-rewrites true]
                       (context/bind-context-raw ctx (simplify-fully rr)))]
-    (debug-repl "need iter result")
     (is (= (ctx-get-value ctx (make-variable 'result)) (reduce + (range 10)))) ;; this should have the sum of 10 different values
     ))
 
