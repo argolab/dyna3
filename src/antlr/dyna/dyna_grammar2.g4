@@ -730,8 +730,8 @@ expression returns [DynaTerm rterm]
 compilerExpressionArgument returns [Object val]
     locals [ArrayList<Object> args=null]
     : p=primitive {$val=$p.v;}
-    | {$args=new ArrayList<>();} a=atom ('(' (ag=compilerExpressionArgument Comma {$args.add($ag.val);})*
-                                             (ag=compilerExpressionArgument Comma? {$args.add($ag.val);})?  ')' )?
+    | {$args=new ArrayList<>();} a=atom ('(' ((ag=compilerExpressionArgument Comma {$args.add($ag.val);})*
+                                              ag=compilerExpressionArgument Comma? {$args.add($ag.val);})?  ')' )?
       {$val = DynaTerm.create_arr($a.t, $args); }
     | '*' {$val = "*";}
     | '**' {$val = "**";}

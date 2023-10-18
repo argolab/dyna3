@@ -1489,23 +1489,37 @@
              ret))))))
 
 (if-not debug-statements
-  (defmacro rexpr-rewrite-loop [[rvar rin] & body]
-    `(loop [~rvar ~rin]
-       ~@body))
+  (do
+    #_(defmacro rexpr-rewrite-loop [[rvar rin] & body]
+      `(loop [~rvar ~rin]
+         ~@body))
+    (defmacro rexpr-rewrite-loop [[rvar rin] & body]
+      (let [cnt (gensym 'cnt)]
+        `(loop [~rvar ~rin
+                ~cnt 0]
+           ~@(macrolet-expand
+              {'recur (fn [r] `(do
+                                 (when (>= ~cnt 100)
+                                   (println "stuck in loop " ~cnt))
+                                 (recur ~r (inc ~cnt))))}
+              body)))))
+
   ;; the second version will check that we have not reencountered the same state before
   ;; as that would mean that there is some bug in the rewrite rules which will cause this to loop forever
   (defmacro rexpr-rewrite-loop [[rvar rin] & body]
     (let [seen (gensym 'seen)
           cnt (gensym 'cnt)]
       `(loop [~rvar ~rin
-              ;~seen #{~rin}
+                                        ;~seen #{~rin}
               ~cnt 0]
          ~@(macrolet-expand
             {'recur (fn [r] `(do
                                #_(when (or (contains? ~seen ~r) (> (count ~seen) 100))
-                                 (debug-repl "repeating rexpr rewrites"))
+                                   (debug-repl "repeating rexpr rewrites"))
+                               (when (> ~cnt 100)
+                                 (debug-repl "rewrite loop stuck"))
                                (recur ~r
-                                      ;(conj ~seen ~r)
+                                        ;(conj ~seen ~r)
                                       (inc ~cnt))))}
             body)))))
 

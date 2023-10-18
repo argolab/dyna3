@@ -288,7 +288,7 @@
     (or (is-disjunct-op? rexpr) (is-user-call? rexpr))
     (let []
       (debug-repl "bad rexpr")
-      (throw (IllegalArgumentException. (str "Can not covert " (rexpr-name rexpr) " to primitive for JIT, should have been a hole"))))
+      (throw (IllegalArgumentException. (str "Can not convert " (rexpr-name rexpr) " to primitive for JIT, should have been a hole"))))
 
     :else (rewrite-rexpr-children-no-simp (primitive-rexpr rexpr) convert-to-primitive-rexpr)))
 
@@ -3398,14 +3398,15 @@
                                                ;;iter-run-log# (transient [])
                                                ]
                                            (doseq [~iter-binding (iter-run-iterable ~(:cljcode-expr iter-val))]
+                                             (system/should-stop-processing?)
                                              (let [new-r# ~(:cljcode-expr new-self-cljcode)
-                                                   nested-context# (context/make-context-jit new-r# {})  ;; we should not need to add any variables here as everything will just get passed as constant values into the new-r above
+                                                   nested-context# (context/make-context-jit new-r# {}) ;; we should not need to add any variables here as everything will just get passed as constant values into the new-r above
                                                    result-r# (context/bind-context nested-context#
                                                                                    (try (~'simplify new-r#)
                                                                                         (catch UnificationFailure ~'_ (make-multiplicity 0))))]
                                                (when-not (is-empty-rexpr? result-r#)
                                                  (conj! ~iter-run-result result-r#))
-                                               ;(conj! iter-run-log# [new-r# nested-context# result-r# ~iter-binding])
+                                        ;(conj! iter-run-log# [new-r# nested-context# result-r# ~iter-binding])
                                                ))
                                            ;(debug-repl "after ran iterator")
                                            (let [r# (persistent! ~iter-run-result)]

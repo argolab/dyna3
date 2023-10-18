@@ -174,7 +174,8 @@
 
 ;; if there is a project nested inside of a conjunction, then we are going to pull that conjunct out
 (def-rewrite
-  :match {:rexpr (aggregator-op-inner operator (:any incoming) (:variable-list projected-vars) (conjunct (:rexpr-list Rs)))}
+  :match {:rexpr (aggregator-op-inner operator (:any incoming) (:variable-list projected-vars) (conjunct (:rexpr-list Rs)))
+          :check (some is-proj? Rs)}
   :run-at :construction
   (let [exposed (exposed-variables rexpr)
         pvs (into #{incoming} projected-vars)
@@ -403,6 +404,10 @@
                           rr)]
                 rr2))))))))
 
+(defn- simplify-fast-fail-only [r]
+  (tbinding [simplify-looking-for-fast-fail-only true]
+            (simplify-fast r)))
+
 ;; in the case that the disjunct is lifted out, it would be possible that
 ;; something which does not contain the proejcted vars and does not contain the
 ;; incoming-variables is also going to be lifted out.  Which means that this is
@@ -412,7 +417,7 @@
   :run-at [:standard :inference]
   (let [ctx (context/make-nested-context-aggregator-op-inner Rbody projected-vars incoming-variable)]
     #_(when (some is-bound? projected-vars)
-      (debug-repl "some bound"))
+        (debug-repl "some bound"))
     (context/bind-context-raw
      ctx
      (let [exposed (vec (exposed-variables rexpr)) ;; if all of the exposed are ground, then we should just go ahead and compute the value
@@ -421,7 +426,7 @@
                    (catch UnificationFailure e (make-multiplicity 0)))
            all-exposed-bound (every? is-bound? exposed)]
        (cond
-         (is-empty-rexpr? nR) nR ;(make-multiplicity 0)
+         (is-empty-rexpr? nR) nR        ;(make-multiplicity 0)
 
          (and (is-multiplicity? nR) (is-bound-in-context? incoming-variable ctx))
          (let [ret ((tlocal *aggregator-op-contribute-value*) (get-value-in-context incoming-variable ctx) (:mult nR))]
@@ -440,16 +445,17 @@
                            (find-iterators nR2))
                accumulator (volatile! nil)]
            ;; will loop over assignments to all of the variables
+           (assert (not (nil? nR2)))
            (try
              (run-iterator
               :iterators iterators
               :bind-all true
               :rexpr-in nR2
               :rexpr-result inner-r
-              :simplify #(tbinding [simplify-looking-for-fast-fail-only true] (simplify-fast %))
+              :simplify simplify-fast-fail-only
               (let [inner-r (if (or (not= inner-r nR)
                                     did-run-some-iterator)
-                              (simplify inner-r)  ;((if all-exposed-bound simplify-fully-internal simplify) inner-r)
+                              (simplify inner-r) ;((if all-exposed-bound simplify-fully-internal simplify) inner-r)
                               inner-r)]
                 ;; if this is not a multiplicity, then this expression has something that can not be handled
                 ;; in which case this will need to report an error, or return the R-expr while having that it can not be solved...
@@ -474,7 +480,7 @@
                                         ;zzz (dyna-assert (subset? (keys remapping-map) (exposed-variables inner-r)))
                           new-body
                           (debug-tbinding [current-simplify-stack (conj (tlocal *current-simplify-stack*) inner-r)]
-                                         (remap-variables inner-r remapping-map))
+                                          (remap-variables inner-r remapping-map))
                           other-constraints ((tlocal *aggregator-op-additional-constraints*) new-incoming)
                           ;; zzz (when (and *aggregator-op-should-eager-run-iterators* (not= parent-is-bound (map is-bound? exposed)))
                           ;;       (debug-repl "agg egg run"))
@@ -485,7 +491,7 @@
                       (vswap! accumulator update-in (map get-value exposed) conj rc))))))
              (catch Exception err
                (throw err)
-               ;(debug-repl "err")
+                                        ;(debug-repl "err")
                ))
 
            (if (empty? @accumulator)
@@ -515,20 +521,20 @@
 
          #_:else
          #_(let [zzz (debug-repl "else")
-               new-incoming (if (is-bound-in-context? incoming-variable ctx)
-                              (make-constant (get-value-in-context incoming-variable ctx))
-                              incoming-variable)
-               remapping-map (into {} (for [v (cons incoming-variable projected-vars)
-                                            :when (and (not (is-constant? v)) (is-bound-in-context? v ctx))]
-                                        [v (make-constant (get-value-in-context v ctx))]))
-               new-projected (vec (filter #(not (is-bound-in-context? % ctx)) projected-vars))
-               new-body (remap-variables nR remapping-map)
-               ret (make-aggregator-op-inner new-incoming new-projected new-body)]
-           #_(when (not= (map is-bound? exposed) parent-is-bound)
-               (debug-repl "bound in body"))
-           #_(when-not (subset? (remove is-bound? (exposed-variables rexpr)) (exposed-variables ret))
-             (debug-repl "diff exposed"))
-           ret))))))
+                 new-incoming (if (is-bound-in-context? incoming-variable ctx)
+                                (make-constant (get-value-in-context incoming-variable ctx))
+                                incoming-variable)
+                 remapping-map (into {} (for [v (cons incoming-variable projected-vars)
+                                              :when (and (not (is-constant? v)) (is-bound-in-context? v ctx))]
+                                          [v (make-constant (get-value-in-context v ctx))]))
+                 new-projected (vec (filter #(not (is-bound-in-context? % ctx)) projected-vars))
+                 new-body (remap-variables nR remapping-map)
+                 ret (make-aggregator-op-inner new-incoming new-projected new-body)]
+             #_(when (not= (map is-bound? exposed) parent-is-bound)
+                 (debug-repl "bound in body"))
+             #_(when-not (subset? (remove is-bound? (exposed-variables rexpr)) (exposed-variables ret))
+                 (debug-repl "diff exposed"))
+             ret))))))
 
 ;; these are only conjunctive, so if the body is zero, then the expression will also be zero
 (def-rewrite

@@ -8,6 +8,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * A hash map which will generate custom classes to quickly
+ *
+ * Not used currently
  */
 public class FastFlatMap {
     private FastFlatMap() {

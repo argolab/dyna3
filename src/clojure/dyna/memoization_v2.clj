@@ -930,7 +930,7 @@
                                                         (first (:memoization-modes dat2))
                                                         :complex)
                                                  dat3 (assoc dat2
-                                                             :memoization-mode mode
+                                                             :memoization-modes mode
                                                              :is-memoized-unk (if (and (:unk modes) (not (is-valid? (:is-memoized-unk dat2))))
                                                                                 (make-assumption)
                                                                                 (:is-memoized-unk dat2))
