@@ -14,6 +14,10 @@ public class StatusCounters {
 
     private StatusCounters() {}
 
+    public static long get_matches_attempted() { return matches_attempted; }
+    public static long get_rewrites_performed() { return rewrites_performed + jit_rewrites_performed; }
+    public static long get_rexpr_created() { return rexprs_created; }
+
     public static void print_counters() {
         String p = "----------------------------------------------------\n" +
             "Rewrites performed: " + (rewrites_performed+jit_rewrites_performed) + "\n";
@@ -42,5 +46,5 @@ public class StatusCounters {
         agenda_time_processing += time;
     }
 
-    public static final boolean run_counters = Boolean.parseBoolean(System.getProperty("dyna.status_counters", "true"));
+    public static final boolean run_counters = true;//Boolean.parseBoolean(System.getProperty("dyna.status_counters", "true"));
 }

@@ -33,7 +33,7 @@
 (def ^:private rexpr-map-to-jit-hash-group (atom {}))
 
 (declare ^:private is-bound-jit?)
-(println "TODO: jit-local-variable-rexpr should also be \"allowed\" to be a normal variable as long as it is projected out")
+;(println "TODO: jit-local-variable-rexpr should also be \"allowed\" to be a normal variable as long as it is projected out")
 
 (defn- check-argument-diterator [x]
   (or (not (is-constant? x))

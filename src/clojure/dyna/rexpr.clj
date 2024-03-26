@@ -1488,36 +1488,40 @@
              (ctx-add-rexpr! ctx ret)
              ret))))))
 
-(if-not debug-statements
+(def loop-global (volatile! 0))
+(if-not true;debug-statements
   (do
-    #_(defmacro rexpr-rewrite-loop [[rvar rin] & body]
-      `(loop [~rvar ~rin]
-         ~@body))
-    (defmacro rexpr-rewrite-loop [[rvar rin] & body]
+    #_(defmacro rexpr-rewrite-loop [[rvar rin] body]
+        `(loop [~rvar ~rin]
+           ~body))
+    (defmacro rexpr-rewrite-loop [[rvar rin] body]
       (let [cnt (gensym 'cnt)]
         `(loop [~rvar ~rin
                 ~cnt 0]
-           ~@(macrolet-expand
-              {'recur (fn [r] `(do
-                                 (when (>= ~cnt 100)
-                                   (println "stuck in loop " ~cnt))
+           ~(macrolet-expand
+              {'rexpr-rewrite-loop (fn [& args] `(rexpr-rewrite-loop ~@args))
+               'recur (fn [r] `(do
+                                 #_(when (>= ~cnt 100))
+                                 (println "DEBUGGING loop " ~cnt (vswap! loop-global inc))
                                  (recur ~r (inc ~cnt))))}
               body)))))
 
   ;; the second version will check that we have not reencountered the same state before
   ;; as that would mean that there is some bug in the rewrite rules which will cause this to loop forever
-  (defmacro rexpr-rewrite-loop [[rvar rin] & body]
+  (defmacro rexpr-rewrite-loop [[rvar rin] body]
     (let [seen (gensym 'seen)
           cnt (gensym 'cnt)]
       `(loop [~rvar ~rin
                                         ;~seen #{~rin}
               ~cnt 0]
-         ~@(macrolet-expand
-            {'recur (fn [r] `(do
+         ~(macrolet-expand
+            {'rexpr-rewrite-loop (fn [& args] `(rexpr-rewrite-loop ~@args))
+             'recur (fn [r] `(do
                                #_(when (or (contains? ~seen ~r) (> (count ~seen) 100))
                                    (debug-repl "repeating rexpr rewrites"))
                                (when (> ~cnt 100)
-                                 (debug-repl "rewrite loop stuck"))
+                                 (println "foo")
+                                 #_(debug-repl "rewrite loop stuck"))
                                (recur ~r
                                         ;(conj ~seen ~r)
                                       (inc ~cnt))))}
@@ -1525,20 +1529,23 @@
 
 
 (defn simplify-fully-no-guess [rexpr]
-  (loop [cri rexpr]
-    (system/should-stop-processing?)
-    (let [nri (rexpr-rewrite-loop [cr cri]
+  (rexpr-rewrite-loop
+   [cri rexpr]
+   (let []
+     (system/should-stop-processing?)
+     (let [nri (rexpr-rewrite-loop
+                [cr cri]
                 (let [nr (debug-tbinding [current-top-level-rexpr cr]
                                          (simplify-fast cr))]
                   (if (not= cr nr)
                     (recur nr)
                     nr)))
-          nrif (debug-tbinding [current-top-level-rexpr nri]
-                               (tbinding [simplify-with-inferences true]
-                                         (simplify-inference nri)))]
-      (if (not= nrif nri)
-        (recur nrif)
-        nrif))))
+           nrif (debug-tbinding [current-top-level-rexpr nri]
+                                (tbinding [simplify-with-inferences true]
+                                          (simplify-inference nri)))]
+       (if (not= nrif nri)
+         (recur nrif)
+         nrif)))))
 
 (defn simplify-fully-with-jit [rexpr]
   (rexpr-rewrite-loop [cr rexpr]

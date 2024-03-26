@@ -5,13 +5,15 @@
 ;; variables which control how the system runs
 
 (def check-rexpr-arguments
-  (Boolean/parseBoolean (System/getProperty "dyna.check_rexprs_args" "true")))
+  false;  (Boolean/parseBoolean (System/getProperty "dyna.check_rexprs_args" "false"))
+  )
 
 (def print-rewrites-performed
   (Boolean/parseBoolean (System/getProperty "dyna.print_rewrites_performed" "false")))
 
 (def track-where-rexpr-constructed
-  (Boolean/parseBoolean (System/getProperty "dyna.trace_rexpr_construction" "true")))
+  false;  (Boolean/parseBoolean (System/getProperty "dyna.trace_rexpr_construction" "false"))
+  )
 
 (def debug-statements
   (Boolean/parseBoolean (System/getProperty "dyna.debug" "true")))
@@ -157,7 +159,9 @@
        (let [r# (f#)]
          (if (.is_done ^DynaAgenda (tlocal work-agenda))
            r#
-           (recur))))))
+           (do
+             (println "DEBUGGING Rerunning because agenda work")
+             (recur)))))))
 
 (defn is-agenda-converged? []
   (.is_done ^DynaAgenda (tlocal work-agenda)))

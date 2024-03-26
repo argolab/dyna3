@@ -104,6 +104,9 @@
      :prompt #(print prompt "=> ")
      :eval (partial eval-with-locals all-bindings current-namespace))))
 
+(defmacro debug-repl-force [prompt]
+  `(~debug-repl-fn ~prompt (debugger-get-local-bindings) (Throwable. "Entering Debugger") false ~*ns*))
+
 (if (= (System/getProperty "dyna.debug_repl" "true") "false")
   (do (defn- debug-repl-fn [prompt local-bindings ^Throwable traceback print-bindings current-namespace])
       (defmacro debug-repl ([]) ([prompt]) ([prompt print-bindings]))
