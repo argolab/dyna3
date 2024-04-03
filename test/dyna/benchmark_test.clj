@@ -33,7 +33,9 @@
   (/ (* (- X 1) X) 2))
 
 (defn run-benchmark [func]
-  (for [N (range 10 10000)] ;; make this count by 10?
+  (for [N (range 10 500 5)
+        ;;(range 10 10000 10)
+        ]
     (do (println N)
         (let [start-matches-attempted (StatusCounters/get_matches_attempted)
               start-rewrites-performed (StatusCounters/get_rewrites_performed)

@@ -4,7 +4,7 @@
     (:require [dyna.rexpr :refer [simplify simplify-fully null-term simplify-top find-iterators]])
     (:require [dyna.utils :refer :all])
     (:require [dyna.rexpr-constructors :refer :all])
-    (:require [dyna.rexpr-jit-v2 :refer :all])
+    ;(:require [dyna.rexpr-jit-v2])
     (:require [dyna.base-protocols :refer :all])
     (:require [dyna.context :as context])
     (:require [dyna.system :as system]))

@@ -1520,7 +1520,7 @@
                                #_(when (or (contains? ~seen ~r) (> (count ~seen) 100))
                                    (debug-repl "repeating rexpr rewrites"))
                                (when (> ~cnt 100)
-                                 (println "foo")
+                                 (println "foo loop too many times")
                                  #_(debug-repl "rewrite loop stuck"))
                                (recur ~r
                                         ;(conj ~seen ~r)
