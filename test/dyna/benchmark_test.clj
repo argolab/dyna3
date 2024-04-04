@@ -106,7 +106,7 @@
      ctx
      (let [res (simplify-fully rexpr)]
        (is (= res (make-multiplicity 1)))
-       (debug-repl)
+       ;(debug-repl)
        (is (= (ctx-get-value ctx (make-variable "result")) (f-closed-form to-value)))
        ))))
 

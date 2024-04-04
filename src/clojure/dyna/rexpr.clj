@@ -1512,18 +1512,19 @@
     (let [seen (gensym 'seen)
           cnt (gensym 'cnt)]
       `(loop [~rvar ~rin
-                                        ;~seen #{~rin}
+              ;~seen #{~rin}
               ~cnt 0]
          ~(macrolet-expand
             {'rexpr-rewrite-loop (fn [& args] `(rexpr-rewrite-loop ~@args))
              'recur (fn [r] `(do
                                #_(when (or (contains? ~seen ~r) (> (count ~seen) 100))
-                                   (debug-repl "repeating rexpr rewrites"))
+                                 (debug-repl ~(str "repeating rexpr rewrites " r " " rvar)))
                                (when (> ~cnt 100)
                                  (println "foo loop too many times")
-                                 #_(debug-repl "rewrite loop stuck"))
+                                 ;(debug-repl "rewrite loop stuck")
+                                 )
                                (recur ~r
-                                        ;(conj ~seen ~r)
+                                      ;(conj ~seen ~r)
                                       (inc ~cnt))))}
             body)))))
 
@@ -1543,7 +1544,7 @@
            nrif (debug-tbinding [current-top-level-rexpr nri]
                                 (tbinding [simplify-with-inferences true]
                                           (simplify-inference nri)))]
-       (if (not= nrif nri)
+       (if (and (not= nrif nri) (not= nrif cri))
          (recur nrif)
          nrif)))))
 
@@ -1570,7 +1571,7 @@
                                                                 ;; this function could be replaced with something that is smarter and chooses between multiple different options for what to guess about
                                                                 true)]
                    (simplify-fast nri))]
-        (if (= nri nri2)
+        (if (or (= nri nri2) (= nri2 cri))
           nri
           (recur nri2))))
     (catch UnificationFailure _ (make-multiplicity 0))))
