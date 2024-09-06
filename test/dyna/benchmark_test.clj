@@ -109,6 +109,3 @@
        ;(debug-repl)
        (is (= (ctx-get-value ctx (make-variable "result")) (f-closed-form to-value)))
        ))))
-
-(deftest jit-benchmark1
-  (println "test"))

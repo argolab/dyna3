@@ -285,6 +285,7 @@
   (combine-user-rexprs-bodies (:rexprs term-rep)))
 
 (defn user-rexpr-combined [term-rep]
+  ;; return the R-expr that will be combined into the representation used by call
   (if (:builtin-def term-rep)
     (:rexpr term-rep)
     (if (:memoized-rexpr term-rep)
@@ -296,7 +297,7 @@
         (user-rexpr-combined-no-memo term-rep)))))
 
 
-(defn user-rexpr [ut & {:keys [ignore] :or {ignore #{}}}]
+#_(defn user-rexpr [ut & {:keys [ignore] :or {ignore #{}}}]
   (if (:builtin-def ut)
     {:assumption nil ;;
      :rexpr (:rexpr ut)} ;; builtins are just going to get returned without changes
@@ -309,8 +310,6 @@
 
 
         )
-
-
       )))
 
 

@@ -12,8 +12,6 @@
   (:import [dyna.rexpr unify-structure-rexpr])
   (:import [dyna DynaTerm DIterable DIterator DIteratorInstance UnificationFailure DynaMap IteratorBadBindingOrder]))
 
-;(in-ns 'dyna.rexpr)
-
 (defn  get-variables-in-expression [expression]
   (cond
     (symbol? expression)
