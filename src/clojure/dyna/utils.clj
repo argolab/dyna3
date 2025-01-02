@@ -110,9 +110,9 @@
 (if (= (System/getProperty "dyna.debug_repl" "true") "false")
   (do (defn- debug-repl-fn [prompt local-bindings ^Throwable traceback print-bindings current-namespace])
       (defmacro debug-repl ([]) ([prompt]) ([prompt print-bindings]))
-      (defn debug-print [x] (println x)))
+      (defmacro debug-print [x]))
   (do
-    (defmacro debug-print [x])
+    (defn debug-print [x] (println x))
     (defmacro debug-repl
       "Starts a REPL with the local bindings available."
       ([] `(debug-repl "dr"))

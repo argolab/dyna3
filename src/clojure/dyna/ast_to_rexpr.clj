@@ -287,7 +287,7 @@
                                       (throw (DynaUserError. (str "Did not find variable " name))))
                                     var)
                       "$constant" (let [[val] (.arguments a)]
-                                    (when (is-constant? val)
+                                    #_(when (is-constant? val)
                                       (debug-repl))
                                     (make-constant val))
                       ;; this is something else which is getting called.  This means that we have to recurse into the structure and add the arguments

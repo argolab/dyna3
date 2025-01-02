@@ -1,5 +1,5 @@
 (ns dyna.system
-  (:require [dyna.utils :refer [def-tlocal tlocal tbinding]])
+  (:require [dyna.utils :refer [def-tlocal tlocal tbinding debug-print]])
   (:import [dyna DynaAgenda IDynaAgendaWork ThreadVar]))
 
 ;; variables which control how the system runs
@@ -160,7 +160,7 @@
          (if (.is_done ^DynaAgenda (tlocal work-agenda))
            r#
            (do
-             ;(println "DEBUGGING Rerunning because agenda work")
+             (debug-print "DEBUGGING Rerunning because agenda work")
              (recur)))))))
 
 (defn is-agenda-converged? []

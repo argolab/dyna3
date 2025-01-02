@@ -25,6 +25,7 @@
                                        eval-string
                                        eval-ast]])
   (:require [dyna.repl :refer [repl pretty-print-query-result]])
+  (:require [dyna.rexpr-jit-v2])
   (:import [dyna DynaTerm StatusCounters DynaUserError]))
 
 
