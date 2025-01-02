@@ -4,8 +4,8 @@
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
-  (:require [dyna.assumptions :refer [invalidate! make-assumption make-invalid-assumption depend-on-assumption compute-with-assumption]])
-  (:require [dyna.rexpr-constructors :refer [expose-globally]])
+  (:require [dyna.assumptions :refer [invalidate! make-assumption make-invalid-assumption depend-on-assumption compute-with-assumption is-valid?]])
+  (:require [dyna.rexpr-constructors :refer [expose-globally convert-to-jitted-rexpr]])
   (:require [clojure.set :refer [subset? union]])
   (:import [dyna.rexpr user-call-rexpr]))
 
@@ -317,9 +317,12 @@
 ;; used by memoization
 (defn user-rexpr-combined-no-memo [term-rep]
   ;; this should check if there is some optimized
-  (assert (nil? (:optimized-rexpr term-rep)))
-  (depend-on-assumption (:def-assumption term-rep))
-  (combine-user-rexprs-bodies (:rexprs term-rep)))
+  ;; (assert (nil? (:optimized-rexpr term-rep)))
+  ;; (depend-on-assumption (:def-assumption term-rep))
+  ;; (combine-user-rexprs-bodies (:rexprs term-rep))
+
+  (user-rexpr-combined-compiled term-rep)
+  )
 
 (defn user-rexpr-combined [term-rep]
   ;; return the R-expr that will be combined into the representation used by call
