@@ -160,7 +160,7 @@
          (if (.is_done ^DynaAgenda (tlocal work-agenda))
            r#
            (do
-             (println "DEBUGGING Rerunning because agenda work")
+             ;(println "DEBUGGING Rerunning because agenda work")
              (recur)))))))
 
 (defn is-agenda-converged? []
