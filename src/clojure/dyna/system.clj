@@ -5,7 +5,8 @@
 ;; variables which control how the system runs
 
 (def check-rexpr-arguments
-  false;  (Boolean/parseBoolean (System/getProperty "dyna.check_rexprs_args" "false"))
+  true
+  ;false ;  (Boolean/parseBoolean (System/getProperty "dyna.check_rexprs_args" "false"))
   )
 
 (def print-rewrites-performed

@@ -859,83 +859,84 @@
 
 (defn- convert-to-jitted-rexpr-inspect [rexpr]
   ;; look at the type of the primitive R-expr and figure out if we need to transform some of the sub units
-  (tbinding [use-optimized-disjunct false]
-            (let [jinfo (rexpr-jit-info rexpr)]
-              (cond (contains? jinfo :generated-name) rexpr ;; this is already a jit compiled type.  There is nothing to do here.  Though I suppose that we could map its arguments?
+  (context/bind-no-context
+   (tbinding [use-optimized-disjunct false]
+             (let [jinfo (rexpr-jit-info rexpr)]
+               (cond (contains? jinfo :generated-name) rexpr ;; this is already a jit compiled type.  There is nothing to do here.  Though I suppose that we could map its arguments?
 
-                    (is-aggregator? rexpr) (convert-to-jitted-rexpr-fn
-                                            (convert-basic-aggregator-to-op-aggregator rexpr))
+                     (is-aggregator? rexpr) (convert-to-jitted-rexpr-fn
+                                             (convert-basic-aggregator-to-op-aggregator rexpr))
 
-                    (is-user-call? rexpr) rexpr ;; there is nothing that we can do for this
+                     (is-user-call? rexpr) rexpr ;; there is nothing that we can do for this
 
-                    ;; figure out if this is a big disjunct or a small disjunct.  If it is a big disjunct, then it would become a hole with its sub units getting converted
-                    ;; if this is a small disjunct, then we can convert it to a primitive R-expr type, and then JIT compile that
-                    (is-disjunct-op? rexpr)
-                    (let [trie (:rexprs rexpr)
-                          vars (:disjunction-variables rexpr)
-                          elems (take 11 (trie/trie-get-values trie nil))
-                          all-ground (every? (fn [z] (every? #(not (nil? %)) z)) (map first elems))]
-                      (if (> (count elems) 8)
-                        ;; then we are going to rewrite the leafs of the R-exprs
-                        (rewrite-rexpr-children rexpr convert-to-jitted-rexpr-fn)
-                        (let [new-disjunct (vec (for [[vals rx] elems
-                                                      :let [vals-r (vec (for [[val var] (zipseq vals vars)
-                                                                              :when (not (nil? val))]
-                                                                          (make-no-simp-unify var (make-constant val))))]]
-                                                  (make-conjunct (conj vals-r rx))))
-                              ret (make-no-simp-disjunct new-disjunct)]
-                          (convert-to-jitted-rexpr-fn ret))))
+                     ;; figure out if this is a big disjunct or a small disjunct.  If it is a big disjunct, then it would become a hole with its sub units getting converted
+                     ;; if this is a small disjunct, then we can convert it to a primitive R-expr type, and then JIT compile that
+                     (is-disjunct-op? rexpr)
+                     (let [trie (:rexprs rexpr)
+                           vars (:disjunction-variables rexpr)
+                           elems (take 11 (trie/trie-get-values trie nil))
+                           all-ground (every? (fn [z] (every? #(not (nil? %)) z)) (map first elems))]
+                       (if (> (count elems) 8)
+                         ;; then we are going to rewrite the leafs of the R-exprs
+                         (rewrite-rexpr-children rexpr convert-to-jitted-rexpr-fn)
+                         (let [new-disjunct (vec (for [[vals rx] elems
+                                                       :let [vals-r (vec (for [[val var] (zipseq vals vars)
+                                                                               :when (not (nil? val))]
+                                                                           (make-no-simp-unify var (make-constant val))))]]
+                                                   (make-conjunct (conj vals-r rx))))
+                               ret (make-no-simp-disjunct new-disjunct)]
+                           (convert-to-jitted-rexpr-fn ret))))
 
 
-                    ;; This R-expr can be converted into the JIT, but it might have things inside of the R-expr which will need to get removed
-                    ;; these things will have to get identified and converted into holes
-                    :else
-                    (let [pl (volatile! {}) ;; things go into holes
-                          rp (fn rr [rexpr]
-                               (let [jinfo (rexpr-jit-info rexpr)]
-                                 (if-not (:jittable jinfo true)
-                                   (cond (is-aggregator? rexpr) (rr (convert-basic-aggregator-to-op-aggregator rexpr))
-                                         (is-disjunct-op? rexpr)
-                                         (let [trie (:rexprs rexpr)
-                                               vars (:disjunction-variables rexpr)
-                                               elems (take 11 (trie/trie-get-values trie nil))
-                                               all-ground (every? (fn [z] (every? #(not (nil? %)) z)) (map first elems))]
-                                           (if (> (count elems) 8)
-                                             (let [id (gensym 'jr)
-                                                   exposed (exposed-variables rexpr)
-                                                   new-disjunct (if (tlocal recursive-transformation-to-jit-state)
-                                                                  (rewrite-rexpr-children rexpr convert-to-jitted-rexpr-fn)
-                                                                  rexpr)]
-                                               (vswap! pl assoc id new-disjunct)
-                                               (make-jit-placeholder id nil (vec exposed)))
-                                             (let [new-disjunct (vec (for [[vals rx] elems
-                                                                           :let [vals-r (vec (for [[val var] (zipseq vals vars)
-                                                                                                   :when (not (nil? val))]
-                                                                                               (make-no-simp-unify var (make-constant val))))]]
-                                                                       (make-conjunct (conj vals-r
-                                                                                            (rr rx)))))
-                                                   ret (make-no-simp-disjunct new-disjunct)]
-                                               ret)))
-                                         :else
-                                         (let [id (gensym 'jr)
-                                               exposed (exposed-variables rexpr)]
-                                           (vswap! pl assoc id rexpr)
-                                           (make-jit-placeholder id nil (vec exposed))))
-                                   (rewrite-rexpr-children rexpr rr))))
-                          nr (rp rexpr)
-                          ;; QUESTION: should this always synthize or should there be something which will stop it.
-                          ;; if we allow for merging of jitted types, then it would have that there is some expression between
-                          ;; them.  But how would it allow for the different states to be encoded
-                          ;;
-                          ;; When this figures out which of the states are encoded, it will
-                          vvvv (when (is-jit-placeholder? nr)
-                                 (debug-repl "placeholder fail"))
-                          [synthed _] (synthize-rexpr nr)]
-                      (if-not (empty? @pl)
-                        (rewrite-rexpr-children synthed (fn [r]
-                                                          (assert (is-jit-placeholder? r))
-                                                          (strict-get @pl (:external-name r))))
-                        synthed))))))
+                     ;; This R-expr can be converted into the JIT, but it might have things inside of the R-expr which will need to get removed
+                     ;; these things will have to get identified and converted into holes
+                     :else
+                     (let [pl (volatile! {}) ;; things go into holes
+                           rp (fn rr [rexpr]
+                                (let [jinfo (rexpr-jit-info rexpr)]
+                                  (if-not (:jittable jinfo true)
+                                    (cond (is-aggregator? rexpr) (rr (convert-basic-aggregator-to-op-aggregator rexpr))
+                                          (is-disjunct-op? rexpr)
+                                          (let [trie (:rexprs rexpr)
+                                                vars (:disjunction-variables rexpr)
+                                                elems (take 11 (trie/trie-get-values trie nil))
+                                                all-ground (every? (fn [z] (every? #(not (nil? %)) z)) (map first elems))]
+                                            (if (> (count elems) 8)
+                                              (let [id (gensym 'jr)
+                                                    exposed (exposed-variables rexpr)
+                                                    new-disjunct (if (tlocal recursive-transformation-to-jit-state)
+                                                                   (rewrite-rexpr-children rexpr convert-to-jitted-rexpr-fn)
+                                                                   rexpr)]
+                                                (vswap! pl assoc id new-disjunct)
+                                                (make-jit-placeholder id nil (vec exposed)))
+                                              (let [new-disjunct (vec (for [[vals rx] elems
+                                                                            :let [vals-r (vec (for [[val var] (zipseq vals vars)
+                                                                                                    :when (not (nil? val))]
+                                                                                                (make-no-simp-unify var (make-constant val))))]]
+                                                                        (make-conjunct (conj vals-r
+                                                                                             (rr rx)))))
+                                                    ret (make-no-simp-disjunct new-disjunct)]
+                                                ret)))
+                                          :else
+                                          (let [id (gensym 'jr)
+                                                exposed (exposed-variables rexpr)]
+                                            (vswap! pl assoc id rexpr)
+                                            (make-jit-placeholder id nil (vec exposed))))
+                                    (rewrite-rexpr-children rexpr rr))))
+                           nr (rp rexpr)
+                           ;; QUESTION: should this always synthize or should there be something which will stop it.
+                           ;; if we allow for merging of jitted types, then it would have that there is some expression between
+                           ;; them.  But how would it allow for the different states to be encoded
+                           ;;
+                           ;; When this figures out which of the states are encoded, it will
+                           vvvv (when (is-jit-placeholder? nr)
+                                  (debug-repl "placeholder fail"))
+                           [synthed _] (synthize-rexpr nr)]
+                       (if-not (empty? @pl)
+                         (rewrite-rexpr-children synthed (fn [r]
+                                                           (assert (is-jit-placeholder? r))
+                                                           (strict-get @pl (:external-name r))))
+                         synthed)))))))
 
 (defn- convert-to-jitted-rexpr-fn [rexpr]
   (if (or (not (tlocal system/generate-new-jit-states))
@@ -1784,6 +1785,12 @@
                    {:type :value
                     :current-value (get-value cval)
                     :cljcode-expr `(bad-gen "get value without gen cache")}))))
+
+           (instance? jit-local-variable-rexpr (:matched-variable varj))
+           (let []
+             (debug-repl "bad gen calling get value unbound")
+             {:type :value
+              :cljcode-expr `(bad-gen "calling get value on local variable without value being bound" ~varj)})
 
            :else
            (let []
@@ -2906,7 +2913,6 @@
                     fr)))))))
 
 (defn simplify-jit-attempt-create-rewrite-for-jittype [rexpr]
-
   (if-not (tlocal system/*generate-new-jit-rewrites*)
     rexpr
     (let [jinfo (rexpr-jit-info rexpr)]
@@ -3101,7 +3107,7 @@
               (if *jit-compute-unification-failure*
                 (make-multiplicity 0)
                 (let [ ;; vvv (when-not (is-bound-jit? incoming)
-                      ;;       (debug-repl "incoming"))
+                       ;;       (debug-repl "incoming"))
                       incoming-val (jit-evaluate-cljform `(get-value ~incoming))
                       local-agg (bound? #'*jit-aggregator-info*)]
                   (assert (can-generate-code?))
