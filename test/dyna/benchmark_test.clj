@@ -75,11 +75,11 @@
                                   br)))))
 
 (deftest basic-jit-bench
-  (println "test started " (-> (java.lang.management.ManagementFactory/getRuntimeMXBean)
-                               (.getName)
-                               (string/split #"@")
-                               (first)))
-  (Thread/sleep 5000)
+  ;; (println "test started " (-> (java.lang.management.ManagementFactory/getRuntimeMXBean)
+  ;;                              (.getName)
+  ;;                              (string/split #"@")
+  ;;                              (first)))
+  ;; (Thread/sleep 5000)
   (tbinding
    [generate-new-jit-rewrites true]
    (let [rexpr (synthize-rexpr benchmark-rexpr)

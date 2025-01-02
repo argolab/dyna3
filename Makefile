@@ -3,7 +3,7 @@ JAVA ?= java
 
 # this version should match the version in project.clj as that is what is going to be built by lein
 JVERSION:= 0.1.0
-VERSION= $(shell date '+%Y%m%d')
+VERSION:= $(shell git describe --always --long --abbrev=12)-$(shell date '+%Y%m%d')
 
 SOURCE=$(wildcard src/*/*/*.clj) $(wildcard src/*/*/*.java)
 JAR_TARGET=target/dyna-$(JVERSION)-SNAPSHOT-standalone.jar

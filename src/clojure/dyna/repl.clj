@@ -166,7 +166,7 @@ print fib(100).
             (doseq [v (rest @to-print)]
               (print "\n    ")
               (print-r v))
-            (print " "(:bag-right print-symbols) "\n")))
+            (print " " (:bag-right print-symbols) "\n")))
                                         ;(debug-repl "print r")
         (flush)))))
 
@@ -250,7 +250,7 @@ print fib(100).
                 (if (is-command? input)
                   (case (first (split (trim input) #" "))
                     "run" (let [fname (second (split (trim input) #" " 2))]
-                            (if (nil? @active-system)
+                            (if (nil? @active-system )
                               (tbinding [system/query-output query-output-fn]
                                 (import-file-url (.toURL (file fname))))
                               (system/run-under-system @active-system
@@ -308,3 +308,52 @@ print fib(100).
     (println "To continue running type \"continue\" or press ctrl-D")
     (println "To kill the program type \"exit\" or \"quit\"")
     (repl-core)))
+
+(def web-repl-active-system (volatile! nil))
+
+(defn web-repl-validate-command [^String line]
+  (if (is-command? line)
+    nil ;; this is a command, so run that is valid
+    (try (let [r (binding [print-parser-errors false]
+                   (parse-string line :fragment-allowed false))]
+           (if (nil? r)
+             "incomplete expression" ;; return the error as a string
+             nil))
+         (catch RuntimeException e
+           (.toString e)))))
+
+(defn web-repl-run-command [^String line]
+  (if (nil? @web-repl-active-system)
+    (vreset! web-repl-active-system (system/make-new-dyna-system)))
+  (system/run-under-system
+   @web-repl-active-system
+   (if (is-command? line)
+     (case line
+       "reset" (do (vreset! web-repl-active-system nil)
+                   "Runtime has been reset")
+       "run-agenda" (do (system/run-agenda)
+                        "agenda has been run")
+       "clear-agenda" (do (.clear_agenda (tlocal system/work-agenda))
+                          "Agenda cleared\nWARNING: this can cause the system to return incorrect results as some updates will not have been processed")
+       "help" "Commands: quit/exit reset run-agenda clear-agenda"
+       "unknown command")
+     (try
+       (with-out-str
+         (let [did-print (volatile! false)
+               query-output-fn (fn [[query-text query-line-number] result]
+                                 (vreset! did-print true)
+                                 (binding [*terminal-print-width* 120]
+                                   (pretty-print-query-result query-text result)))
+               rexpr-result (tbinding [system/query-output query-output-fn]
+                                      (eval-string line :fragment-allowed false))]
+           (if (= (make-multiplicity 1) rexpr-result)
+             (if-not @did-print
+               (println "ok"))
+             (println rexpr-result))
+           ))
+       (catch DynaUserAssert e
+         (.getMessage e))
+       (catch DynaUserError e
+         (.getMessage e))
+       (catch Exception e
+         (str "ERROR: " (.toString e)))))))
