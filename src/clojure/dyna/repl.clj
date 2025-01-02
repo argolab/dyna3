@@ -313,7 +313,7 @@ print fib(100).
 
 (defn web-repl-validate-command [^String line]
   (if (is-command? line)
-    nil ;; this is a command, so run that is valid
+    nil ;; this is a command, so return that is valid
     (try (let [r (binding [print-parser-errors false]
                    (parse-string line :fragment-allowed false))]
            (if (nil? r)

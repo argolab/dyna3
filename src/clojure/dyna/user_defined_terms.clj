@@ -178,7 +178,11 @@
         (invalidate! assumpt-db)))))
 
 ;; used in many places
-(defn get-user-term [name]
+(defn get-user-term
+  "Returns the user-defined-term map which contains all of the metadata for a given term.
+  This will perform look up across different files to find the right term.
+  This will create an empty term map if the term has not yet been defined (this will allow for out of order usage and definition of terms)"
+  [name]
   (let [sys-name [(:name name) (:arity name)]
         sys (get @system/system-defined-user-term sys-name)]
     (if-not (nil? sys)
@@ -272,10 +276,43 @@
 ;; The User Rexpr should follow the sequence
 ;; Raw (combined into single R-expr) -> optimized -> compiled -> memo (Last R-expr which is returned)
 
-(defn user-rexpr-combined-no-compiled [term-rep]
-  (depend-on-assumption (:def-assumption term-rep))
+(defn user-rexpr-combined-not-opt-compiled-memo [term-rep]
+  (let [assumption (:combined-rexpr-assumption term-rep)]
+    (if (is-valid? assumption)
+      (do (depend-on-assumption assumption)
+          (:combined-rexpr term-rep))
+      (let [[assumpt combined] (compute-with-assumption
+                                (depend-on-assumption (:def-assumption term-rep))
+                                (combine-user-rexprs-bodies (:rexprs term-rep)))
+            [_ new-term] (update-user-term! (:term-name term-rep)
+                                            (fn [x]
+                                              (assoc x
+                                                     :combined-rexpr-assumption assumpt
+                                                     :combined-rexpr combined)))]
+        (depend-on-assumption (:combined-rexpr-assumption new-term))
+        (:combined-rexpr new-term)))))
 
-  )
+(defn user-rexpr-combined-optimized [term-rep]
+  ;; TODO: this should call into the optimize_rexprs.clj file
+  (user-rexpr-combined-not-opt-compiled-memo term-rep))
+
+(defn user-rexpr-combined-compiled [term-rep]
+  (let [assumption (:compiled-rexpr-assumption term-rep)]
+    (if (is-valid? assumption)
+      (do (depend-on-assumption assumption)
+          (:compiled-rexpr term-rep))
+      (if (tlocal generate-new-jit-states)
+        (let [[assumpt compiled] (compute-with-assumption
+                                  (let [optimized-rexpr (user-rexpr-combined-optimized term-rep)]
+                                    (convert-to-jitted-rexpr optimized-rexpr)))
+              [_ new-term] (update-user-term! (:term-name term-rep)
+                                              (fn [x]
+                                                (assoc x
+                                                       :compiled-rexpr-assumption assumpt
+                                                       :compiled-rexpr compiled)))]
+          (depend-on-assumption (:compiled-rexpr-assumption new-term))
+          (:compiled-rexpr new-term))
+        (user-rexpr-combined-optimized term-rep)))))
 
 ;; used by memoization
 (defn user-rexpr-combined-no-memo [term-rep]
@@ -295,22 +332,6 @@
       (do
         (depend-on-assumption (:is-not-memoized-null term-rep))
         (user-rexpr-combined-no-memo term-rep)))))
-
-
-#_(defn user-rexpr [ut & {:keys [ignore] :or {ignore #{}}}]
-  (if (:builtin-def ut)
-    {:assumption nil ;;
-     :rexpr (:rexpr ut)} ;; builtins are just going to get returned without changes
-    (do
-      (assert (contains? ut :term-name))
-      (if (and (:memoized-rexpr ut) (not (ignore :memo)))
-        {:assumption (:memoized-rexpr-assumption ut)
-         :rexpr (:memoized-rexpr ut)}
-
-
-
-        )
-      )))
 
 
 (def-rewrite
@@ -381,27 +402,6 @@
                                                  value-call]))]
               ret)
             variable-map-rr))))))
-
-
-;; get a user defined function and turn it into something which can be called
-;; not 100% sure that this should be included in this file.  Should maybe also
-;; allow for there to be a textual representation that can be called into.  But
-;; that is going to have to go through the parser first.
-#_(defn get-user-defined-function [term-name arity]
-  (fn [& args]
-    (assert (= arity (count args)))
-    (let [result-var (make-variable 'Result)
-          rexpr (make-user-call term-name
-                                (merge (into {} (for [[k v] (zipseq (range) args)]
-                                                  [(make-variable (str "$" k)) (make-constant v)]))
-                                       {(make-variable (str "$" arity)) result-var})
-                                0
-                                {})
-          ctx (context/make-empty-context rexpr)
-          result-rexpr (context/bind-context-raw ctx (simplify-fully rexpr))]
-      (assert (= (make-multiplicity 1) (result-rexpr)))
-      (ctx-get-value ctx result-var))))
-
 
 (swap! debug-useful-variables assoc
        'get-term (fn []

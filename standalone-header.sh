@@ -16,7 +16,7 @@ echo " \                                              / /  \                    
 echo "  \                                            / /    \                      "
 echo "   \                                          / /      \                     "
 echo "    \                                        / /        \                    "
-echo "     \     Impelemented by                  / /          \                   "
+echo "     \     Implemented by                   / /          \                   "
 echo "      \       Matthew Francis-Landau       / /            \                  "
 echo "       \                  (2020-2023)     / /              \                 "
 echo "        \                                / /                \                "

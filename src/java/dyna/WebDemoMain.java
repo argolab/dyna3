@@ -5,8 +5,8 @@ import clojure.lang.IFn;
 
 
 /**
- * Main class for running in the web browser.  Will start the dyna runtime and
- * call the javascript to get the prompt from the user, and then return the resultb
+ * Main class for running in the web browser.  Will start the dyna runtime and receive
+ * calls from javascript that manages the prompt from the user.
  */
 public class WebDemoMain {
 
@@ -26,26 +26,5 @@ public class WebDemoMain {
     public static String run(String command) {
         return (String)run_command.invoke(command);
     }
-
-    // public static void load() {
-    //     RT.init();
-    //     DynaMain.initRuntime();
-    // }
-
-    // public static String validate(String command) {
-    //     try {
-    //         Clojure.var("clojure.core", "read-string").invoke(command);
-    //         return null;
-    //     } catch(Exception err) {
-    //         return err.toString();
-    //     }
-    // }
-
-    // public static String run(String command) {
-    //     IFn eval = Clojure.var("clojure.core", "eval");
-    //     IFn read_string = Clojure.var("clojure.core", "read-string");
-    //     Object result = eval.invoke(read_string.invoke(command));
-    //     return result.toString();
-    // }
 
 }
