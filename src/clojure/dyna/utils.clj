@@ -427,7 +427,8 @@
   (let [r (get map key :not-found-value)]
     (if (= :not-found-value r)
       (do
-        (debug-repl "key not found")
+        (println "Did not find key " key " in map " map)
+        (debug-repl "key not found" false)
         (throw (RuntimeException. (str "Key " key " not found in map"))))
       r)))
 

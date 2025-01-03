@@ -1,3 +1,5 @@
+;; This is the JIT compiler for R-exprs.  This is disabled by default.  To enable pass `-Ddyna.enable_jit=true` as a command line argument
+
 (ns dyna.rexpr-jit-v2
   (:require [dyna.utils :refer :all])
   (:require [aprint.core :refer [aprint]])
@@ -17,7 +19,7 @@
   (:require [dyna.prefix-trie :as trie])
   (:require [dyna.iterators :as iterators])
   (:require [clojure.walk :refer [macroexpand-all]])
-  (:require [clojure.set :refer [union subset?]])
+  (:require [clojure.set :refer [union subset? intersection]])
   (:import [dyna.rexpr proj-rexpr simple-function-call-rexpr conjunct-rexpr disjunct-rexpr constant-value-rexpr])
   (:import [dyna.rexpr_aggregators_optimized aggregator-op-outer-rexpr aggregator-op-inner-rexpr])
   (:import [dyna.rexpr_aggregators Aggregator])
@@ -292,10 +294,17 @@
 
     :else (rewrite-rexpr-children-no-simp (primitive-rexpr rexpr) convert-to-primitive-rexpr)))
 
-(defn- get-placeholder-rexprs [rexpr]
-  (for [c (get-children rexpr)
-        z (if (is-jit-placeholder? c) [c] (get-placeholder-rexprs c))]
-    z))
+(defn- get-placeholder-rexprs [hidden-variables rexpr]
+  (if (is-jit-placeholder? rexpr)
+    [[rexpr (intersection hidden-variables (exposed-variables rexpr))]]
+    (let [sig (@rexpr-containers-signature (rexpr-name rexpr))
+          lhidden (for [[[typ _] var] (zipseq sig (get-arguments rexpr))
+                              :when (#{:hidden-var} typ)]
+                          var)
+          hidden-variables (union hidden-variables lhidden)]
+      (for [c (get-children rexpr)
+            z (get-placeholder-rexprs hidden-variables c)]
+        z))))
 
 (defn- primitive-rexpr-cljcode
   ([varmap rexpr]
@@ -620,7 +629,8 @@
   ;; (argument) into a single synthic R-expr.  This is not going to evaluate the code and do the conversion
   (let [prim-rexpr (convert-to-primitive-rexpr rexpr)
         exposed-vars (set (filter is-variable? (exposed-variables prim-rexpr)))
-        placeholder-rexprs (set (get-placeholder-rexprs prim-rexpr))
+        placeholder-rexprs (set (get-placeholder-rexprs #{} prim-rexpr))
+        www (debug-repl "placeholders")
         root-rexpr (gensym 'root) ;; the variable which will be the argument for the conversions
                                         ;vars-path (get-variables-and-path rexpr)
                                         ;[var-access var-gen-code] (get-variables-values-letexpr root-rexpr (keys vars-path)) ;; this might have to handle exceptions which are going to thrown by the
@@ -628,7 +638,10 @@
         new-arg-names (merge (into {} (map (fn [v] [v (gensym 'jv)]) exposed-vars))
                              (into {} (map (fn [r]
                                              (dyna-assert (:external-name r))
-                                             [r (:external-name r)]) placeholder-rexprs)))
+                                             [r (:external-name r)]) (map first placeholder-rexprs)))
+                             (into {} (for [[_ vs] placeholder-rexprs
+                                            v vs]
+                                        [{:hidden-var v} (gensym 'jhv)])))
         new-arg-names-rev (into {} (for [[k v] new-arg-names]
                                      [v k]))
         new-arg-order (vec (vals new-arg-names))
@@ -638,6 +651,7 @@
                                      *local-variable-names-for-variable-values* (volatile! nil)
                                      ]
                              (find-iterators-cljcode prim-rexpr-with-placeholder))
+        vvv (debug-repl "vvv")
         rexpr-def-expr `(do (def-base-rexpr ~new-rexpr-name [~@(flatten (for [a new-arg-order
                                                                               :let [v (get new-arg-names-rev a)]]
                                                                           (cond (rexpr? v) [:rexpr a]
@@ -668,13 +682,15 @@
                                                                                   (~(symbol (str "make-" new-rexpr-name))
                                                                                    ~@(for [a new-arg-order
                                                                                            :let [v (strict-get new-arg-names-rev a)]]
-                                                                                       (if (rexpr? v)
-                                                                                         `(convert-to-jitted-rexpr-fn ~(strict-get values-to-vars v))
-                                                                                         (strict-get values-to-vars v))))
+                                                                                       (cond (rexpr? v) `(convert-to-jitted-rexpr-fn ~(strict-get values-to-vars v))
+                                                                                             (and (map? v) (:hidden-var v)) (strict-get values-to-vars (:hidden-var v))
+                                                                                             :else (strict-get values-to-vars v))))
                                                                                   (~(symbol (str "make-" new-rexpr-name))
-                                                                                   ~@(for [a new-arg-order]
-                                                                                       (strict-get values-to-vars
-                                                                                                   (strict-get new-arg-names-rev a))))))))))
+                                                                                   ~@(for [a new-arg-order
+                                                                                           :let [v (strict-get new-arg-names-rev a)]]
+                                                                                       (if (and (map? v) (:hidden-var v))
+                                                                                         (strict-get values-to-vars (:hidden-var v))
+                                                                                         (strict-get values-to-vars v))))))))))
         def-iterator-expr (when find-iterator-code
                             `(swap! rexpr-iterators-accessors update ~(symbol (str new-rexpr-name "-rexpr")) conj
                                     (fn [~(with-meta 'rexpr {:tag (str "dyna.rexpr_jit_v2." new-rexpr-name "-rexpr")})]
@@ -698,6 +714,7 @@
              ;; ;; check that the shape of the R-expr matches the kind of the thing that we can convert into this generated code
              ;; :check-could-be-converted (fn [rexpr] (???))
              }]
+    (debug-repl "vvv2")
     (swap! rexprs-types-constructed assoc new-rexpr-name ret)
     ret))
 
