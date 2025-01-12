@@ -298,9 +298,11 @@
   (if (is-jit-placeholder? rexpr)
     [[rexpr (intersection hidden-variables (exposed-variables rexpr))]]
     (let [sig (@rexpr-containers-signature (rexpr-name rexpr))
-          lhidden (for [[[typ _] var] (zipseq sig (get-arguments rexpr))
-                              :when (#{:hidden-var} typ)]
-                          var)
+          lhidden (if (is-aggregator-op-inner? rexpr)
+                    (cons (:incoming rexpr) (:projected rexpr))
+                    (for [[[typ _] var] (zipseq sig (get-arguments rexpr))
+                          :when (#{:hidden-var} typ)]
+                      var))
           hidden-variables (union hidden-variables lhidden)]
       (for [c (get-children rexpr)
             z (get-placeholder-rexprs hidden-variables c)]
@@ -630,7 +632,6 @@
   (let [prim-rexpr (convert-to-primitive-rexpr rexpr)
         exposed-vars (set (filter is-variable? (exposed-variables prim-rexpr)))
         placeholder-rexprs (set (get-placeholder-rexprs #{} prim-rexpr))
-        www (debug-repl "placeholders")
         root-rexpr (gensym 'root) ;; the variable which will be the argument for the conversions
                                         ;vars-path (get-variables-and-path rexpr)
                                         ;[var-access var-gen-code] (get-variables-values-letexpr root-rexpr (keys vars-path)) ;; this might have to handle exceptions which are going to thrown by the
@@ -651,7 +652,6 @@
                                      *local-variable-names-for-variable-values* (volatile! nil)
                                      ]
                              (find-iterators-cljcode prim-rexpr-with-placeholder))
-        vvv (debug-repl "vvv")
         rexpr-def-expr `(do (def-base-rexpr ~new-rexpr-name [~@(flatten (for [a new-arg-order
                                                                               :let [v (get new-arg-names-rev a)]]
                                                                           (cond (rexpr? v) [:rexpr a]
@@ -714,7 +714,6 @@
              ;; ;; check that the shape of the R-expr matches the kind of the thing that we can convert into this generated code
              ;; :check-could-be-converted (fn [rexpr] (???))
              }]
-    (debug-repl "vvv2")
     (swap! rexprs-types-constructed assoc new-rexpr-name ret)
     ret))
 
@@ -1085,8 +1084,11 @@
                          ;;                                     (if (contains? remapped-locals var)
                          ;;                                       (remapped-l))))
                          [_ new-synth] (synthize-rexpr new-r)
-                         rlocal-map (into {} (for [[k v] remapped-locals] [v k]))
+                         ;rlocal-map (into {} (for [[k v] remapped-locals] [v k]))
                          rvarmap (:variable-name-mapping-rev new-synth)
+                         hidden-variables (into {} (for [[k v] rvarmap
+                                                         :when (and (map? v) (:hidden-var v))]
+                                                     [(:hidden-var v) k]))
                          target-r ((:conversion-function new-synth) rexpr)]
                      (dyna-assert (not (nil? target-r))) ;; if this is nil, then that means this is not a matching R-expr
                      {:type :rexpr
@@ -1114,8 +1116,12 @@
                                                              (assert (:local-name arg))
                                                              (:local-name arg))))
 
+                                                       (contains? hidden-variables arg)
+                                                       `(. ~(with-meta 'rexpr {:tag (jit-generating-rewrite-for-rexpr-type)})
+                                                           ~(strict-get hidden-variables arg))
+
                                                        :else (do (debug-repl "arg type")
-                                                                 (???))))))}))]
+                                                                 `(bad-gen "bad type generation" ~arg))))))}))]
           (if (and simplify-result (not (is-multiplicity? rexpr)))
             (assoc re :cljcode-expr `(~'simplify ~(:cljcode-expr re)))
             re))))
