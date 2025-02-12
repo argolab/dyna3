@@ -13,6 +13,8 @@ public interface RexprValue {
 
     void set_value_BANG_(Object value);
 
+    void set_value_in_context_BANG_(RContext ctx, Object value);
+
     boolean is_bound_QMARK_();
 
     boolean is_bound_in_context_QMARK_(RContext ctx);

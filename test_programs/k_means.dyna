@@ -1,0 +1,33 @@
+% This is a theoritical program for k-means where we are going to iterate with dyna
+
+num_centroids = 10.  % define the number of k-means centroids to handle
+
+vector = {
+       % element(X) = INPUT.
+
+       distance(Other) = sqrt(distance_sum_squared(Other)).
+       distance_sum_squared(Other) += (Other.element(X)-$self.element(X)) **2.  % if both are defined, then the distance between the two elements
+       distance_sum_squared(Other) += Other.element(X)**2 for !is_defined($self.element(X)).  % if only one defines some element, then it will pretend that the other one has the value of zero
+       distance_sum_squared(Other) += $self.element(X)**2 for !is_defined(Other.element(X)).
+
+       size += 1 for _=element(_).
+}.
+
+data(Element) = new vector {
+     element(X) = INPUT.  % this would be replaced with the input somehow.  This might work as an external call to python for example
+}.
+
+
+dimentions(X) :- data(_).element(X).
+
+centroids(Index:range(num_centroids), 0) = new vector {
+     element(X) = random for dimentions(X).
+}.
+
+assigned_centroid(Element, T) = $arg((min= data(Element).distance(centroids(C, T)) arg C)).
+
+centroid_distance(C, Element, T) = data(Element).distance(centroids(C, T)).
+
+centroids(Index, T+1) = new vector {
+    element(X) mean= data(Element).element(X) for assigned_centroid(Element,T)==Index.
+}.

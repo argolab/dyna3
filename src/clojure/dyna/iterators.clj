@@ -3,9 +3,9 @@
   (:require [dyna.base-protocols :refer :all])
   (:require [dyna.rexpr-constructors :refer :all])
   (:require [dyna.context :as context])
+  (:require [dyna.system :refer [should-stop-processing?]])
   (:require [clojure.set :refer [union intersection subset? difference]])
-  ;(:require [clojure.tools.macro :refer [macrolet]])
-  (:import [dyna DIterable DIterator DIteratorInstance]))
+  (:import [dyna DIterable DIterator DIteratorInstance UnificationFailure IteratorBadBindingOrder]))
 
 ;; iterators are going to allow for there to efficiently loop over the values which are assigned to variables
 
@@ -23,7 +23,7 @@
 ;; this will want to find which of the values will have this binding
 
 
-
+(def ^{:private true} ensure-set set)
 
 
 (defn make-unit-iterator [variable value]
@@ -31,7 +31,8 @@
       (iter-what-variables-bound [this] #{variable})
       (iter-variable-binding-order [this] [[variable]])
       (iter-create-iterator [this which-binding]
-        (assert (or (= which-binding [variable])))
+        (when-not (or (= which-binding [variable]))
+          (throw (IteratorBadBindingOrder.)))
         (reify DIterator
           (iter-run-cb [this cb-fun]
             (cb-fun (reify DIteratorInstance
@@ -74,7 +75,7 @@
         ;; figure out which variables can be bound next
         (cons v fv)))))
 
-(defn- iterator-conjunction-start-sub-iterators [iterators order]
+#_(defn- iterator-conjunction-start-sub-iterators [iterators order]
   ;; in there are many conjunctive iterators that we want to combine into a single iterator, this will
   ;; identify how to construct the sub iterators with different orders
 
@@ -107,61 +108,188 @@
                                 ;; need to determine some usable binding
                                 (let [can-bind (first (filter #(some #{nv} %) usable-bindings))
                                       can-bind-iter (binding-order-iter (vec can-bind))]
-                                  (assert (not (nil? can-bind-iter)))
+                                  (dyna-assert (not (nil? can-bind-iter)))
                                   (recur (next bo)
                                          (conj bound nv)
                                          (assoc picked-map can-bind can-bind-iter)))))))
         ]
     ;(debug-repl "used bindings")
     (into {} (for [[k v] picked-bindings]
-               [k (iter-create-iterator v k)]))))
+               [k [(iter-create-iterator v k) (ensure-set (iter-what-variables-bound v))]]))))
 
-(defn- iterator-conjunction-diterator [iterators order]
+(defn- iterator-conjunction-start-sub-iterators [iterators order]
+  (let [possible-bindings (into {} (for [iter iterators
+                                         :let [can-bind (ensure-set (iter-what-variables-bound iter))]
+                                         itorder (iter-variable-binding-order iter)]
+                                     [(vec itorder) [iter can-bind]]))
+        picked-bindings (loop [bo order
+                               bound #{}
+                               picked-map {}]
+                          (if (empty? bo)
+                            picked-map
+                            (let [nv (first bo)]
+                              ;; first check if there is already some iterator in the map that can do the binding of the `nv` variable for us
+                              (if (some (fn [[k [iter can-bind]]]
+                                          (and (= nv (first (drop-while #(or (is-constant? %) (bound %)) k)))
+                                               (can-bind nv)))
+                                        picked-map)
+                                (recur (next bo) ;; we found something so go to the next variable that needs to be bound
+                                       (conj bound nv)
+                                       picked-map)
+                                (let [could-bind (filter (fn [[k [iter can-bind]]]
+                                                           (and (= nv (first (drop-while #(or (is-constant? %) (bound %)) k)))
+                                                                (can-bind nv)))
+                                                         possible-bindings)
+                                      [k v] (first could-bind)]
+                                  (if (empty? could-bind)
+                                    (do
+                                      ;; if there is nothing that could bind it, then that means that we must not be the iterator that is going to be responsible for
+                                      ;; binding this variable, hence there is nothing that we should bother adding in this case....
+                                      (recur (next bo)
+                                             (conj bound nv)
+                                             picked-map))
+                                    (let [[k v] (first could-bind)]
+                                      (recur (next bo)
+                                             (conj bound nv)
+                                             (assoc picked-map
+                                                    k v)))))))))
+        ]
+    ;(debug-repl "new used bindings")
+    (into {} (for [[k [v can-bind]] picked-bindings]
+               [k [(iter-create-iterator v k) can-bind]]))))
+
+(defn- iterator-conjunction-select-min-cardinality [iterators]
+  (let [f (first iterators)
+        r (rest iterators)]
+    (if (empty? r)
+      f
+      (loop [f f
+             c (iter-estimate-cardinality (first (second (first iterators))))
+             r r]
+        (if (empty? r)
+          f
+          (let [o (iter-estimate-cardinality (first (second (first r))))]
+            (if (< o c)
+              (recur (first r) o (rest r))
+              (recur f c (rest r)))))))))
+
+(defn- iterator-conjunction-diterator [iterators order already-bound]
   ;; iterators is a map where the key is the order of the variables which get bound, and the value is the nested diterator object
   ;; when running through a conjunction of multiple iterators, we can bind all of the iterators which match for a given variable
-  (reify DIterator
-    (iter-run-cb [this cb-fn] (doseq [v (iter-run-iterable this)] (cb-fn v)))
-    (iter-run-iterable [this]
-      (let [picked-var (first order)
-            remains-var (next order)
-            possible-iterators (filter (fn [[k v]] (= (first k) picked-var)) iterators)
-            [picked-it-order picked-iterator] (first possible-iterators) ;; this should select the one that has the lowest cardinality or something....
-            picked-it-order-remains (next picked-it-order)
-            ret
-            ((fn run [iter]
-               (let [iter-val (first iter)]
-                 (if (nil? iter-val)
-                   () ;; then we have reached the end of the sequence, so we just stop
-                   (let [iter-var-val (iter-variable-value iter-val)
-                         new-bindings (into {} (map (fn [[k v]]
-                                                      (if (= (first k) picked-var)
-                                                        [(next k) (iter-bind-value v iter-var-val)]
-                                                        [k v]))
-                                                    iterators))]
-                     (if (some (fn [[k v]] (nil? v)) new-bindings)
-                       ;; then one of the conjuncts failed to bind, so we just are going to skip this value
-                       (recur (next iter))
-                       ;; the binding was successful, so we will return a continuation
-                       (cons (reify DIteratorInstance
-                               (iter-variable-value [this] iter-var-val)
-                               (iter-continuation [this] (iterator-conjunction-diterator new-bindings remains-var)))
-                             (lazy-seq (run (next iter)))))))))
-             (iter-run-iterable picked-iterator))]
+  (let [iterators (doall (for [[k1 [iter1 can-bind]] iterators
+                               :when (not (empty? k1))]
+                           (loop [k k1
+                                  iter iter1]
+                             (when (nil? iter)
+                               (debug-repl))
+                             (let [f (first k)]
+                               (cond (is-constant? f) (recur (rest k) (iter-bind-value iter (get-value f)))
+                                     (contains? already-bound f) (recur (rest k) (iter-bind-value iter (already-bound f)))
+                                     :else [k [iter can-bind]])))))
+        compute-bindings (fn [bound]
+                           (into {} (for [[k1 [iter1 can-bind]] iterators]
+                                      (loop [k k1
+                                             iter iter1]
+                                        (if (nil? iter)
+                                          [k [iter can-bind]]
+                                          (let [f (first k)]
+                                            (cond (is-constant? f) (recur (rest k) (iter-bind-value iter (get-value f)))
+                                                  (contains? bound f) (recur (rest k) (iter-bind-value iter (bound f)))
+                                                  :else [k [iter can-bind]])))))))]
+    (reify DIterator
+      (iter-run-cb [this cb-fn] (doseq [v (iter-run-iterable this)] (cb-fn v)))
+      (iter-run-iterable [this]
+        (let [picked-var (first order)
+              remains-var (next order)]
+          (if (is-bound? picked-var)
+            (let [v (get-value picked-var)
+                  bound (assoc already-bound picked-var v)
+                  new-bindings (compute-bindings bound)]
+              (if (some (fn [[k [v _]]] (nil? v)) new-bindings)
+                ()
+                (list (reify DIteratorInstance
+                        (iter-variable-value [this] v)
+                        (iter-continuation [this] (iterator-conjunction-diterator new-bindings remains-var bound))))))
+            (let [possible-iterators (filter (fn [[k [v can-bind]]] (and (= (first k) picked-var) (can-bind picked-var))) iterators)
+                  zzz (when (empty? possible-iterators)
+                        (debug-repl "use alread bound to find something else")
+                        (???))
+                  ;; www (when (> (count possible-iterators) 1)
+                  ;;       (debug-repl "multiple possible iterators"))
+                  [_ [picked-iterator _]] (iterator-conjunction-select-min-cardinality possible-iterators)
+                                        ;(first possible-iterators) ;; this should select the one that has the lowest cardinality or something....
+                                        ;picked-it-order-remains (next picked-it-order)
+                                        ;zzz (debug-repl "zzz")
+                  ret
+                  ((fn run [iter]
+                     (let [iter-val (first iter)]
+                       (if (nil? iter-val)
+                         () ;; then we have reached the end of the sequence, so we just stop
+                         (let [iter-var-val (iter-variable-value iter-val)
+                               bound (assoc already-bound picked-var iter-var-val)
+                               new-bindings (compute-bindings bound)]
+                           (if (some (fn [[k [v _]]] (nil? v)) new-bindings)
+                             ;; then one of the conjuncts failed to bind, so we just are going to skip this value
+                             (recur (next iter))
+                             ;; the binding was successful, so we will return a continuation
+                             (cons (reify DIteratorInstance
+                                     (iter-variable-value [this] iter-var-val)
+                                     (iter-continuation [this] (iterator-conjunction-diterator new-bindings remains-var bound)))
+                                   (lazy-seq (run (next iter)))))))))
+                   (iter-run-iterable picked-iterator))]
                                         ;(debug-repl "g2")
-        ret))
-    (iter-run-iterable-unconsolidated [this]
-      ;; this should use the unconsolidated iterators to make this work?  though this would just pick something I suppose
-      (iter-run-iterable this))
-    (iter-bind-value [this value]
-      (let [picked-var (first order)
-            new-bindings (into {} (map (fn [[k v]]
-                                         (if (= (first k) picked-var)
-                                           [(next k) (iter-bind-value v value)]
-                                           [k v]))
-                                       iterators))]
-        (if (some (fn [[k v]] (nil? v)) new-bindings)
-          nil
-          (iterator-conjunction-diterator new-bindings (next order)))))))
+              ret))))
+      (iter-run-iterable-unconsolidated [this]
+        ;; this should use the unconsolidated iterators to make this work?  though this would just pick something I suppose
+        (let [picked-var (first order)
+              remains-var (next order)]
+          (if (is-bound? picked-var)
+            (let [v (get-value picked-var)
+                  bound (assoc already-bound picked-var v)
+                  new-bindings (compute-bindings bound)]
+              (if (some (fn [[k [v _]]] (nil? v)) new-bindings)
+                ()  ;; something failed with the binding
+                (list (reify DIteratorInstance
+                        (iter-variable-value [this] v)
+                        (iter-continuation [this] (iterator-conjunction-diterator iterators remains-var bound))))))
+            (let [possible-iterators (filter (fn [[k [v can-bind]]] (= (first k) picked-var)) iterators)
+                  zzz (when (empty? possible-iterators)
+                        (debug-repl "use alread bound to find something else")
+                        (???))
+                  [_ [picked-iterator _]] (iterator-conjunction-select-min-cardinality possible-iterators) ;(first possible-iterators)
+                  ret
+                  ((fn run [iter]
+                     (let [iter-val (first iter)]
+                       (if (nil? iter-val)
+                         ()
+                         (let [iter-var-val (iter-variable-value iter-val)
+                               bound (assoc already-bound picked-var iter-var-val)
+                               new-bindings (compute-bindings bound)]
+                           (if (some (fn [[k [v _]]] (nil? v)) new-bindings)
+                             (recur (next iter)) ;; one of the conjuncts rejected the value
+                             (cons (reify DIteratorInstance
+                                     (iter-variable-value [this] iter-var-val)
+                                     (iter-continuation [this]
+                                       (iterator-conjunction-diterator new-bindings remains-var bound)))
+                                   (lazy-seq (run (next iter)))))))))
+                   (iter-run-iterable-unconsolidated picked-iterator))]
+                                        ;(debug-repl "conjunct unconsolidated")
+              ret))))
+      (iter-bind-value [this value]
+        (let [picked-var (first order)]
+          (if (is-bound? picked-var)
+            (if (= value (get-value picked-var))
+              (let [bound (assoc already-bound picked-var value)
+                    new-bindings (compute-bindings bound)]
+                (if (some (fn [[k [v _]]] (nil? v)) new-bindings)
+                  nil
+                  (iterator-conjunction-diterator new-bindings (next order) bound)))
+              nil)
+            (let [bound (assoc already-bound picked-var value)
+                  new-bindings (compute-bindings bound)]
+              (if (some (fn [[k [v _]]] (nil? v)) new-bindings)
+                nil
+                (iterator-conjunction-diterator new-bindings (next order) )))))))))
 
 (defn- iterator-intersect-orders [iterator-orders-set]
   (if (<= (count iterator-orders-set) 1)
@@ -189,21 +317,25 @@
       (iter-what-variables-bound [this] (apply union (map iter-what-variables-bound iterators)))
       (iter-variable-binding-order [this] (iterator-conjunction-orders iterators))
       (iter-create-iterator [this which-binding]
-                                        ;(debug-repl "vv")
-        (let [existing (loop [itrs iterators]
+        (let [can-bind (iter-what-variables-bound this)
+              existing (loop [itrs iterators] ;; check if there is one iterator that can just do everything for us already
                          (if (empty? itrs)
                            nil
-                           (if (some #{which-binding} (iter-variable-binding-order (first itrs)))
-                             (iter-create-iterator (first itrs) which-binding)
-                             (recur (next itrs)))))]
+                           (let [i (first itrs)]
+                             (if (and (= can-bind (iter-what-variables-bound i))
+                                      (some #{which-binding} (iter-variable-binding-order i)))
+                               (iter-create-iterator i which-binding)
+                               (recur (next itrs))))))]
           (if-not (nil? existing)
             existing
             (do
-                                        ;(debug-repl "finish writing this")
-                                        ;(???) ;; TODO: finish writing this code
+              ;; we are going to have to run multiple iterators at the same time
+              #_(when (some is-constant? which-binding)
+                (debug-repl "q"))
               (iterator-conjunction-diterator
                (iterator-conjunction-start-sub-iterators iterators which-binding)
-               which-binding))))))))
+               which-binding
+               {}))))))))
 
 
 (defn- build-skip-trie [^DIterator iterator arity skips]
@@ -332,7 +464,7 @@
        [] (next branch-iters) (iter-run-iterable (first branch-iters)) (first branch-iters)))
     (iter-run-iterable-unconsolidated [this]
       (for [b branch-iters
-            v (iter-run-iterable b)]
+            v (iter-run-iterable-unconsolidated b)]
         v))
     (iter-bind-value [this value]
       (let [new-branches (remove nil? (map #(iter-bind-value % value) branch-iters))]
@@ -374,7 +506,7 @@
 
 
 
-(defn pick-iterator [iterators binding-variables]
+#_(defn pick-iterator1 [iterators binding-variables]
   (let [bv (into #{} binding-variables)
         ;; we are going to consider some of the iterators which would be able to bind something
         ;; in the case that there are still values which are still unbound, it should just keep running
@@ -422,10 +554,49 @@
         ))
     ))
 
+#_(defn pick-iterator1 [ctx iterators binding-variables]
+  (let [[a b] (pick-iterator1 iterators binding-variables)]
+    (println "picking iterator" a)
+    #_(when (and (not (nil? a)) (> (count iterators) 1))
+      (debug-repl "iter"))
+    [a b]))
+
+(defn- pick-iterator [ctx iterators binding-variables]
+  (let [bv (ensure-set binding-variables)
+        iterators (remove #(empty? (second %))
+                          (map (fn [x] [x (if (empty? bv)
+                                            (iter-what-variables-bound x)
+                                            (intersection bv (iter-what-variables-bound x)))])
+                               iterators))]
+    (cond (empty? iterators)
+          [nil nil] ;; there is nothing to iterate so return
+
+          (= 1 (count iterators)) ;; there is only 1 iterator that we can use, so we are just going to return it
+          (let [[picked-iter can-bind] (first iterators)
+                can-bind-variables (ensure-set (iter-what-variables-bound picked-iter))
+                binding-order (first (iter-variable-binding-order picked-iter))]
+            #_(when (> (count (remove is-constant? binding-order)) (count can-bind-variables))
+              (debug-repl "ff"))
+            (if (every? #(or (can-bind-variables %) (is-constant? %)) binding-order)
+              [picked-iter binding-order]
+              (let [siter (make-skip-variables-iterator picked-iter (difference (set binding-order) can-bind-variables))]
+                [siter (first (iter-variable-binding-order siter))])))
+
+          :else
+          ;; then there are multiple iterators that we can consider, so we are going to ensure that all of the variables that we can bind do get bound by smething
+          (let [;can-bind (apply union (map second iterators))
+                picked-iter (make-conjunction-iterator (map first iterators))
+                can-bind-variables (ensure-set (iter-what-variables-bound picked-iter))
+                orders (iter-variable-binding-order picked-iter)
+                binding-order (first orders)]
+            (if (every? #(or (can-bind-variables %) (is-constant? %)) binding-order)
+              [picked-iter binding-order]
+              (let [siter (make-skip-variables-iterator picked-iter (difference (set binding-order) can-bind-variables))]
+                [siter (first (iter-variable-binding-order siter))]))))))
 
 ;; TODO: can-bind-variables can be removed now I think..
-(defn- run-iterator-fn [picked-iterator picked-binding-order can-bind-variables rexpr ctx callback-fn simplify-fn]
-  ((fn rec [iter bind-order rexpr]
+#_(defn- run-iterator-fn1 [picked-iterator picked-binding-order can-bind-variables rexpr ctx callback-fn simplify-fn]
+    ((fn rec [iter bind-order rexpr]
      (if (empty? bind-order)
        ;; then we have reached the end of this expression, so we are going to callback
        (callback-fn rexpr)
@@ -445,6 +616,7 @@
                  )))
            (if (some #{v} can-bind-variables) ;(contains? can-bind-variables v)
              (doseq [val (iter-run-iterable iter)]
+               (should-stop-processing?)
                (let [dctx (context/make-nested-context-disjunct rexpr)] ;; this should take the context as an argument?
                  (context/bind-context-raw
                   dctx
@@ -467,6 +639,34 @@
      bo)  ;; make this a linked list so that it will quickly be able to pull items off the head of the list
    rexpr))
 
+
+(defn- run-iterator-fn [picked-iterator picked-binding-order rexpr ctx callback-fn simplify-fn]
+  (assert (not (empty? picked-binding-order)))
+  (context/bind-context-raw
+   ctx
+   ((fn rec [iter bind-order rexpr]
+      (if (empty? bind-order)
+        (callback-fn rexpr true)
+        (let [v (first bind-order)
+              r (rest bind-order)]
+          (if (is-bound? v)
+            (let [it-bound (iter-bind-value iter (get-value v))]
+              (if-not (nil? it-bound)
+                (rec it-bound r rexpr)))
+            (doseq [val (iter-run-iterable iter)]
+              (should-stop-processing?)
+              (try
+                (let [dctx (context/make-nested-context-disjunct rexpr)]
+                  (ctx-set-value! dctx v (iter-variable-value val))
+                  (context/bind-context-raw
+                   dctx
+                   (let [new-rexpr (simplify-fn rexpr)]
+                     (if-not (is-empty-rexpr? new-rexpr)
+                       (rec (iter-continuation val) r new-rexpr)))))
+                (catch UnificationFailure _ nil)))))))
+    (iter-create-iterator picked-iterator picked-binding-order)
+    picked-binding-order
+    rexpr)))
 
 
 ;; there should be something which allows this to "know" what variables are
@@ -507,7 +707,7 @@
         rexpr (gensym 'rexpr)
         simplify-method (:simplify kw-args 'simplify)
         ;; the macro let does not work with the debug-repl.  I suppose that
-        ;; there could be something simpler which woul djust keep the same form,
+        ;; there could be something simpler which would just keep the same form,
         ;; but would expand the macro in place?  Or that it would
         ;; callback-body (macroexpand `(macrolet [~'iterator-encode-state-as-rexpr
         ;;                                        ([] `(do
@@ -520,8 +720,8 @@
                      ~ctx ~(if assign-to-context
                              `(context/get-context) ;; use the existing "global" context
                              `(context/make-empty-context ~rexpr))
-                     [picked-iterator# picked-binding-order#] (pick-iterator iters# ~required-binding)
-                     callback-fn# (fn [~rexpr-callback-var]
+                     [picked-iterator# picked-binding-order#] (~pick-iterator ~ctx iters# ~required-binding)
+                     callback-fn# (fn [~rexpr-callback-var ~'did-run-some-iterator]
                                     ;; could use macrolet here to define the
                                     ;; encode-state-as-rexpr and then it can
                                     ;; expand into whatever is required we know
@@ -533,20 +733,19 @@
                                                   ~body))
                      ]
                  (if (nil? picked-iterator#)
-                   (callback-fn# ~rexpr) ;; there is nothing to iterate, so just run the callback function
+                   (callback-fn# ~rexpr false) ;; there is nothing to iterate, so just run the callback function
                    (do ;(dyna-assert (subset? picked-binding-order# (ensure-set (iter-what-variables-bound picked-iterator#))))
                        (~run-iterator-fn
                         picked-iterator#
                         picked-binding-order#
-                        (iter-what-variables-bound picked-iterator#)
+                        ;(iter-what-variables-bound picked-iterator#)
                         ~rexpr
                         ~ctx
                         callback-fn#
                         ~simplify-method)))
                  )]
       ;(debug-repl "iter runner")
-      ret)
-    ))
+      ret)))
 
 
 ;; the iterators which bind variables that are "hidden" might still be useful,

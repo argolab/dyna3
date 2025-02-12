@@ -9,6 +9,8 @@ import clojure.lang.IFn;
 public interface Rexpr {
     Rexpr primitive_rexpr();
 
+    //Rexpr primitive_rexpr_jit_placeholder();
+
     Object get_variables();
 
     Object get_children();
@@ -35,9 +37,13 @@ public interface Rexpr {
 
     Rexpr remap_variables_handle_hidden(ILookup renaming_map);
 
+    Object rewrite_all_args(IFn remap_function);
+
     boolean is_constraint_QMARK_();
 
-    String rexpr_name();
+    Object variable_functional_dependencies();
+
+    Object rexpr_name();
 
     boolean is_empty_rexpr_QMARK_();
 
@@ -49,10 +55,15 @@ public interface Rexpr {
 
     Object rexpr_jit_info();
 
+    int rexpr_jittype_hash();
+
     Object check_rexpr_basecases(Object stack);
 
-    Rexpr simplify_fast_rexprl(IFn simplify);
+    SimplifyRewriteCollection rexpr_simplify_fast_collection();
 
-    Rexpr simplify_inference_rexprl(IFn simplify);
+    SimplifyRewriteCollection rexpr_simplify_construct_collection();
 
+    SimplifyRewriteCollection rexpr_simplify_inference_collection();
+
+    SimplifyRewriteCollection rexpr_jit_compilation_step_collection();
 }

@@ -3,6 +3,11 @@
   (:require [dyna.core])
   (:require [dyna.system :refer [make-new-dyna-system run-under-system]])
   (:require [dyna.ast-to-rexpr :refer [eval-string]])
+  (:require [dyna.rexpr-constructors :refer :all])
+  (:require [dyna.context :as context])
+  (:require [dyna.rexpr :refer [simplify-fully]])
+  (:require [dyna.utils :refer [debug-repl]])
+  (:require [dyna.base-protocols :refer [ctx-get-value]])
   (:import [dyna DynaUserAssert DynaUserError]))
 
 (deftest basic-assert-test
@@ -440,3 +445,39 @@ assert map(((X) += X + 1), [1,2,3]) = [2,3,4].
 
 assert Seven=7, map(((X) max= X; Seven), [1,5,10]) = [7,7,10].
 ")
+
+
+;; (str-test times-determine-one "
+;; r(X) = X.
+;; t(Y) = A * Y = A.
+
+;; asser
+;; ")
+
+(str-test random-range "
+print random(0,10).
+")
+
+(str-test is-defined "
+r = is_defined(foo).
+
+assert r == false.
+")
+
+
+(str-test bad-ast-print "
+print $ast'{ a = {:- output a/2}. }.
+")
+
+
+(deftest lots-aggregated
+  (let [rexpr (make-aggregator "+=" (make-variable 'result) (make-variable 'incoming) true
+                               (make-disjunct (vec (for [i (range 0 100)]
+                                                     (make-conjunct [(make-lessthan-eq (make-constant i) (make-variable 'X) (make-constant true))
+                                                                     (make-unify (make-variable 'incoming) (make-constant i))])))))]
+    (doseq [i (range 0 60 5)
+            :let [rr (make-conjunct [(make-unify (make-variable 'X) (make-constant i))
+                               rexpr])
+                  ctx (context/make-empty-context rr)
+                  res (context/bind-context-raw ctx (simplify-fully rr))]]
+      (is (= (/ (* i (+ i 1)) 2) (ctx-get-value ctx (make-variable 'result)))))))

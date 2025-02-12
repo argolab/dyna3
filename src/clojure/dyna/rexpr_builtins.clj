@@ -8,10 +8,9 @@
   (:require [clojure.set :refer [union]])
   (:require [dyna.user-defined-terms :refer [def-user-term]])
   (:require [dyna.context :as context])
+  (:require [dyna.rexpr-pretty-printer :refer [rexpr-printer]])
   (:import [dyna.rexpr unify-structure-rexpr])
-  (:import [dyna DynaTerm DIterable DIterator DIteratorInstance UnificationFailure DynaMap]))
-
-;(in-ns 'dyna.rexpr)
+  (:import [dyna DynaTerm DIterable DIterator DIteratorInstance UnificationFailure DynaMap IteratorBadBindingOrder]))
 
 (defn  get-variables-in-expression [expression]
   (cond
@@ -46,7 +45,7 @@
 
     `(def-rewrite
        :match (~name ~@(for [var all-vars]
-                         (if (.contains required-ground var)
+                         (if (some #{var} required-ground)
                            `(:ground ~(symbol (str "g" var)))
                            `(:free ~var))))
 
@@ -105,11 +104,21 @@
   `(do
      (def-base-rexpr ~name ~(vec (flatten (for [i (range 0 nargs)]
                                             [:var (symbol (str "v" i))])))
-       (is-constraint? [this] true))
+       (is-constraint? [this] true)
+       (variable-functional-dependencies ~'[this]
+                                         ~(into {} (for [rr rewrites
+                                                         :when (not= :allground (car rr))]
+                                                     [(into #{} (get-variables-in-expression (cdar rr))) #{(car rr)}]))))
      ~@(for [rr rewrites]
          (construct-rewrite-for-expression name nargs rr)
         )
      ))
+
+(defmacro binary-op-printer [symb rexpr]
+  `(defmethod rexpr-printer ~(symbol (str rexpr "-rexpr")) ~'[r]
+     (if (= (make-constant true) (:v2 ~'r))
+       (str (rexpr-printer (:v0 ~'r)) ~(str symb) (rexpr-printer (:v1 ~'r)))
+       (str (rexpr-printer (:v2 ~'r)) "=" (rexpr-printer (:v0 ~'r)) ~(str symb) (rexpr-printer (:v1 ~'r))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -141,15 +150,41 @@
 
 (def-user-term "+" 2 (make-add v0 v1 v2))
 (def-user-term "-" 2 (make-add v2 v1 v0))
+(binary-op-printer "+" add)
+
+
+(defn- is-equal? [val] (fn [x] (= x (make-constant val))))
 
 (def-rewrite
+  :match (add ((is-equal? 0) _) (:any B) (:any C))
+  (make-unify B C))
+
+(def-rewrite
+  :match (add (:any A) ((is-equal? 0) _) (:any C))
+  (make-unify A C))
+
+(def-rewrite
+  :match {:rexpr (add (:variable A) (:any B) (:variable C))
+          :check (= A C)}
+  :assigns-variable B
+  0)
+
+(def-rewrite
+  :match {:rexpr (add (:any A) (:variable B) (:variable C))
+          :check (= B C)}
+  :assigns-variable A
+  0)
+
+
+
+#_(def-rewrite
   :match (add (:ground A) (:any B) (:any C))
   (let [av (get-value A)]
     (cond (= av 0) (make-unify B C) ;; the value is zero, so can unify the variables together
           (and (= B C) (not= av 0)) (make-multiplicity 0) ;; the two variables equal will never work
           :else nil)))
 
-(def-rewrite
+#_(def-rewrite
   :match (add (:any A) (:ground B) (:any C))
   (let [bv (get-value B)]
     (cond (= bv 0) (make-unify A C)  ;; the value is zero, so can unify the variables together
@@ -164,16 +199,37 @@
 
 (def-user-term "*" 2 (make-times v0 v1 v2))
 (def-user-term "/" 2 (make-times v2 v1 v0))
-
+(binary-op-printer "*" times)
 
 (def-rewrite
+  :match (times ((is-equal? 1) _) (:any B) (:any C))
+  (make-unify B C))
+
+(def-rewrite
+  :match (times (:any A) ((is-equal? 1) _) (:any C))
+  (make-unify A C))
+
+(def-rewrite
+  :match {:rexpr (times (:any A) (:variable B) (:variable C))
+          :check (= B C)}
+  :assigns-variable A
+  1)
+
+(def-rewrite ;; A * B = A
+  :match {:rexpr (times (:variable A) (:any B) (:variable C))
+          :check (= A C)}
+  :assigns-variable B
+  1)
+
+
+#_(def-rewrite
   :match (times (:ground A) (:any B) (:any C))
   (let [av (get-value A)]
     (cond (= av 1) (make-unify B C)
           (and (= B C) (not= av 1)) (make-multiplicity 0)
           :else nil)))
 
-(def-rewrite
+#_(def-rewrite
   :match (times (:any A) (:ground B) (:any C))
   (let [bv (get-value B)]
     (cond (= bv 1) (make-unify A C)
@@ -185,6 +241,7 @@
   (:allground (= v2 (min v0 v1)))
   (v2 (min v0 v1)))
 (def-user-term "min" 2 (make-min v0 v1 v2))
+
 
 ;; if the output of the min is already known, then at least one of the arguments must
 (def-rewrite
@@ -232,6 +289,7 @@
 
 (def-user-term ["pow" "**"] 2 (make-pow v0 v1 v2))
 (def-user-term "sqrt" 1 (make-pow v0 (make-constant 0.5) v1))
+(binary-op-printer "**" pow)
 
 (def-builtin-rexpr exp 2
   (:allground (= v1 (java.lang.Math/exp v0)))
@@ -247,6 +305,7 @@
 
 (def-user-term ["lessthan" "<"] 2 (make-lessthan v0 v1 v2))
 (def-user-term ["greaterthan" ">"] 2 (make-lessthan v1 v0 v2))
+(binary-op-printer "<" lessthan)
 
 (def-builtin-rexpr lessthan-eq 3
   (:allground (= v2 (<= v0 v1)))
@@ -254,17 +313,18 @@
 
 (def-user-term ["lessthaneq" "<="] 2 (make-lessthan-eq v0 v1 v2))
 (def-user-term ["greaterthaneq" ">="] 2 (make-lessthan-eq v1 v0 v2))
+(binary-op-printer "<=" lessthan-eq)
 
 (defn is-true? [x] (= (make-constant true) x))
 
 (def-rewrite
-  :match {:rexpr (lessthan (:any A) (:any B) (is-true? _))
+  :match {:rexpr (lessthan (:free A) (:any B) (is-true? _))
           :context (lessthan (:any C) A (is-true? _))}
   :run-at :inference
   :infers (make-lessthan C B (make-constant true)))
 
 (def-rewrite
-  :match {:rexpr (lessthan (:any A) (:any B) (is-true? _))
+  :match {:rexpr (lessthan (:any A) (:free B) (is-true? _))
           :context (lessthan B (:any C) (is-true? _))}
   :run-at :inference
   :infers (make-lessthan A C (make-constant true)))
@@ -275,23 +335,15 @@
   :run-at :construction
   (make-unify C (make-constant false)))
 
-;; (def-rewrite
-;;   :match {:rexpr (lessthan (:any A) (:any B) (is-true? _))
-;;           :context (lessthan (:any C) (:any D) (is-true? _))}
-;;   :run-at :inference
-;;   (do
-;;     ;(debug-repl "match lessthan")
-;;     nil))
-
 
 (def-rewrite
-  :match {:rexpr (lessthan-eq (:any A) (:any B) (is-true? _))
+  :match {:rexpr (lessthan-eq (:free A) (:any B) (is-true? _))
           :context (lessthan-eq (:any C) A (is-true? _))}
   :run-at :inference
   :infers (make-lessthan-eq C B (make-constant true)))
 
 (def-rewrite
-  :match {:rexpr (lessthan-eq (:any A) (:any B) (is-true? _))
+  :match {:rexpr (lessthan-eq (:any A) (:free B) (is-true? _))
           :context (lessthan-eq B (:any C) (is-true? _))}
   :run-at :inference
   :infers (make-lessthan-eq A C (make-constant true)))
@@ -307,25 +359,25 @@
   (make-lessthan B A (make-constant true)))
 
 (def-rewrite
-  :match {:rexpr (lessthan (:any A) (:any B) (is-true? _))
+  :match {:rexpr (lessthan (:any A) (:free B) (is-true? _))
           :context (lessthan-eq B (:any C) (is-true? _))}
   :run-at :inference
   :infers (make-lessthan-eq A C (make-constant true)))
 
 (def-rewrite
-  :match {:rexpr (lessthan (:any A) (:any B) (is-true? _))
+  :match {:rexpr (lessthan (:free A) (:any B) (is-true? _))
           :context (lessthan-eq (:any C) A (is-true? _))}
   :run-at :inference
   :infers (make-lessthan-eq C B (make-constant true)))
 
 (def-rewrite
-  :match {:rexpr (lessthan-eq (:any A) (:any B) (is-true? _))
+  :match {:rexpr (lessthan-eq (:any A) (:free B) (is-true? _))
           :context (lessthan B (:any C) (is-true? _))}
   :run-at :inference
   :infers (make-lessthan-eq A C (make-constant true)))
 
 (def-rewrite
-  :match {:rexpr (lessthan-eq (:any A) (:any B) (is-true? _))
+  :match {:rexpr (lessthan-eq (:free A) (:any B) (is-true? _))
           :context (lessthan (:any C) A (is-true? _))}
   :run-at :inference
   :infers (make-lessthan-eq C B (make-constant true)))
@@ -350,32 +402,33 @@
   (make-unify C (make-constant true)))
 
 (def-rewrite
-  :match {:rexpr (equals (:any A) (:any B) (is-true? _))
+  :match {:rexpr (equals (:free A) (:any B) (is-true? _))
           :context (equals A (:any C) (is-true? _))}
   :run-at :inference
   :infers (make-equals B C (make-constant true)))
 
 (def-rewrite
-  :match {:rexpr (equals (:any A) (:any B) (is-true? _))
+  :match {:rexpr (equals (:free A) (:any B) (is-true? _))
           :context (equals (:any C) A (is-true? _))}
   :run-at :inference
   :infers (make-equals B C (make-constant true)))
 
 
 (def-rewrite
-  :match {:rexpr (equals (:any A) (:any B) (is-true? _))
+  :match {:rexpr (equals (:any A) (:free B) (is-true? _))
           :context (equals B (:any C) (is-true? _))}
   :run-at :inference
   :infers (make-equals B C (make-constant true)))
 
 (def-rewrite
-  :match {:rexpr (equals (:any A) (:any B) (is-true? _))
+  :match {:rexpr (equals (:any A) (:free B) (is-true? _))
           :context (equals (:any C) B (is-true? _))}
   :run-at :inference
   :infers (make-equals B C (make-constant true)))
 
 
 (def-user-term ["equals" "=="] 2 (make-equals v0 v1 v2))
+(binary-op-printer "==" equals)
 
 (def-builtin-rexpr not-equals 3
   (:allground (= v2 (not= v0 v1)))
@@ -393,16 +446,19 @@
   (make-unify C (make-constant false)))
 
 (def-user-term ["notequals" "!="] 2 (make-not-equals v0 v1 v2))
+(binary-op-printer "!=" not-equals)
 
 (def-builtin-rexpr land 3
   (:allground (= (boolean v2) (boolean (and v0 v1))))
   (v2 (boolean (and v0 v1))))
 (def-user-term ["land" "&&"] 2 (make-land v0 v1 v2))
+(binary-op-printer "&&" land)
 
 (def-builtin-rexpr lor 3
   (:allground (= (boolean v2) (boolean (or v0 v1))))
   (v2 (boolean (or v0 v1))))
 (def-user-term ["lor" "||"] 2 (make-lor v0 v1 v2))  ;; the pipe might be something which is or between methods so that we can use this to define types
+(binary-op-printer "||" lor)
 
 
 (def-builtin-rexpr not 2
@@ -410,6 +466,8 @@
   (v1 (not v0)))
 (def-user-term ["not" "!"] 1 (make-not v0 v1))
 
+(defmethod rexpr-printer not-rexpr [r]
+  (str (rexpr-printer (:v1 r)) "= !" (rexpr-printer (:v0 r))))
 
 
 (def-builtin-rexpr sin 2
@@ -464,6 +522,11 @@
 (def-user-term "range" 3 (make-range v0 v1 (make-constant 1) v2 v3))
 (def-user-term "range" 2 (make-range (make-constant 0) v0 (make-constant 1) v1 v2))
 
+(defmethod rexpr-printer range-rexpr [r]
+  (if (and (= 1 (get-value (:Step r))) (= true (get-value (:Contained r))))
+    (str "range(" (rexpr-printer (:Low r)) "," (rexpr-printer (:High r)) "," (rexpr-printer (:Out r)) ")")
+    (str (rexpr-printer (:Contained r)) "=range(" (rexpr-printer (:Low r)) "," (rexpr-printer (:High r)) "," (rexpr-printer (:Step r)) "," (rexpr-printer (:Out r)) ")")))
+
 (def-rewrite
   :match (range (:ground Low) (:ground High) (:ground Step) (:ground Out) (:any Contained))
   :run-at :standard
@@ -481,6 +544,36 @@
     (make-unify Contained
                 (make-constant-bool successful))))
 
+(def-rewrite
+  :match {:rexpr (range (:ground Low) (:ground High) Step Out (:any Contained))
+          :check (>= (get-value Low) (get-value High))}
+  :assigns-variable Contained
+  false)
+
+(defn- ^{:dyna-jit-external true} range-iterator [Out low-v high-v step-v]
+  (let [r (range low-v high-v step-v)]
+    #{(reify DIterable
+        (iter-what-variables-bound [this] #{Out})
+        (iter-variable-binding-order [this] [[Out]])
+        (iter-create-iterator [this which-binding]
+          (when (not= which-binding [Out])
+            (throw (IteratorBadBindingOrder.)))
+          (reify DIterator
+            (iter-run-cb [this cb-fn] (doseq [v (iter-run-iterable this)] (cb-fn v)))
+            (iter-run-iterable [this]
+              (for [v r]
+                (reify DIteratorInstance
+                  (iter-variable-value [this] v)
+                  (iter-continuation [this] nil))))
+            (iter-run-iterable-unconsolidated [this] (iter-run-iterable this))
+            (iter-bind-value [this value]
+              (if (and (int? value) (< (mod (- value low-v) step-v) high-v))
+                iterator-empty-instance
+                nil))
+            (iter-estimate-cardinality [this]
+              (quot (- high-v low-v) step-v)
+                                        ;(count r) ;; this is not optimized, as it will scan through the entire list when doing this count
+              ))))}))
 
 (def-iterator
   :match (range (:ground Low) (:ground High) (:ground Step) (:free Out) (is-true? Contained))
@@ -488,27 +581,7 @@
         high-v (get-value High)
         step-v (get-value Step)]
     (when (and (int? low-v) (int? high-v) (int? step-v))
-      (let [r (range low-v high-v step-v)]
-        #{(reify DIterable
-            (iter-what-variables-bound [this] #{Out})
-            (iter-variable-binding-order [this] [[Out]])
-            (iter-create-iterator [this which-binding]
-              (reify DIterator
-                (iter-run-cb [this cb-fn] (doseq [v (iter-run-iterable this)] (cb-fn v)))
-                (iter-run-iterable [this]
-                  (for [v r]
-                    (reify DIteratorInstance
-                      (iter-variable-value [this] v)
-                      (iter-continuation [this] nil))))
-                (iter-run-iterable-unconsolidated [this] (iter-run-iterable this))
-                (iter-bind-value [this value]
-                  (if (and (int? value) (< (mod (- value low-v) step-v) high-v))
-                    iterator-empty-instance
-                    nil))
-                (iter-estimate-cardinality [this]
-                  (quot (- high-v low-v) step-v)
-                  ;(count r) ;; this is not optimized, as it will scan through the entire list when doing this count
-                  ))))}))))
+      (range-iterator Out low-v high-v step-v))))
 
 
 ;; there should be notation that this is going to introduce a disjunct
@@ -583,6 +656,13 @@
 (def-user-term "string" 1 (make-is-string v0 v1))
 
 (comment
+  ;; the unify-with-return is basically the same as ==.  Which returns a boolean
+  ;; value if two expressions can unify together if the unify-with-return was
+  ;; the last expression in a term, then it might end up not checking the
+  ;; unification properly so we actually want to /always/ unify when using
+  ;; $unify, and then have that == can be the conditional version which
+  ;; sometimes returns false
+
   (def-base-rexpr unify-with-return [:var A :var B :var Return]
     (is-constraint? [this] true))
 
@@ -658,7 +738,7 @@
 (def-user-term "map" 1 (make-is-map v0 v1))
 ;(def-user-term "$map_merge" 2) ;; take two maps and combine them together
 
-;; there should be some way to isnert a value into a map overriding, but this will have that
+;; there should be some way to insert a value into a map overriding, but this will have that
 ;(def-user-term "$map_insert" )
 
 (def-rewrite
@@ -705,7 +785,7 @@
   (let [pm (get-value Map)
         kl (get-value KeyList)]
     (if-not (and (instance? DynaMap pm)
-                   (instance? DynaTerm kl))
+                 (instance? DynaTerm kl))
       false
       (let [l (.list_to_vec ^DynaTerm kl)]
         (if (nil? l) false
@@ -796,8 +876,7 @@
 
 (def-rewrite
   :match-combines [(is-int (:free Var) (is-true? _))
-                   (or (lessthan (:free Var) (:ground Upper) (is-true? _))
-                       (lessthan-eq (:free Var) (:ground Upper) (is-true? _)))
+                   (lessthan (:free Var) (:ground Upper) (is-true? _))
                    (or (lessthan (:ground Lower) (:free Var) (is-true? _))
                        (lessthan-eq (:ground Lower) (:free Var) (is-true? _)))]
   :run-at :inference
@@ -808,18 +887,36 @@
               Var
               (make-constant true)))
 
+(def-rewrite
+  :match-combines [(is-int (:free Var) (is-true? _))
+                   (lessthan-eq (:free Var) (:ground Upper) (is-true? _))
+                   (or (lessthan (:ground Lower) (:free Var) (is-true? _))
+                       (lessthan-eq (:ground Lower) (:free Var) (is-true? _)))]
+  :run-at :inference
+  :infers
+  (make-range (make-constant (round-down (get-value Lower)))
+              (make-constant (round-up (+ 1 (get-value Upper)))) ;; the upper bound is non-inclusive, so we need to +1 in the case of <= for upper
+              (make-constant 1)
+              Var
+              (make-constant true)))
+
+
+
 (defmacro incompatible-types [type1 type2]
   `(do
      (def-rewrite
        :match {:rexpr (~type1 ~'(:free Var) ~'(:any Result))
-               :context (~type2 ~'(:free Var) (is-true? ~'_))}
+               :context (~type2 ~'Var (is-true? ~'_))}
        :run-at :inference
-       (make-unify ~'Result (make-constant false)))
+       :assigns-variable ~'Result
+       false ;; the value getting assigned to the result
+       )
      (def-rewrite
        :match {:rexpr (~type2 ~'(:free Var) ~'(:any Result))
-               :context (~type1 ~'(:free Var) (is-true? ~'_))}
+               :context (~type1 ~'Var (is-true? ~'_))}
        :run-at :inference
-       (make-unify ~'Result (make-constant false)))))
+       :assigns-variable ~'Result
+       false)))
 
 (incompatible-types is-int is-string)
 (incompatible-types is-int is-float)
@@ -832,7 +929,8 @@
        :match {:rexpr (~type ~'(:free Var) ~'(:any Result))
                :context ~'(unify-structure Var _ _ _ _)}
        :run-at :inference
-       (make-unify ~'Result (make-constant false)))
+       :assigns-variable ~'Result
+       false)
      (def-rewrite
        :match {:rexpr ~'(unify-structure (:free Var) _ _ _ _)
                :context (~type ~'Var (is-true? ~'_))}
@@ -874,7 +972,7 @@
 (defn- cast-to-float [x]
   (if (instance? String x)
     (Double/parseDouble ^String x)
-    (.doubleVaue ^Number (num x))))
+    (. ^Number (num x) doubleVaue)))
 
 (def-builtin-rexpr float-cast 2
   (:allground (= v1 (cast-to-float v0)))
@@ -900,13 +998,31 @@
 ;; if this value is used, then $free will return true.  This should make it easier to run this against
 ;; though it would only match against $free rather than having it actually match against an unbound value
 ;; this might be better if is changed to some dummy type rather than having this represented as a DynaTerm, so it is forced to be checked by $free
-(def meta-free-dummy-free-value (DynaTerm. "$free_meta_representing_unbound_value" []))
+;(def ^:dynamic *dollar-free-matches-ground-values* false)
+(def-tlocal dollar-free-matches-ground-values)
+
+(defrecord meta-free-dummy-value []
+  Object
+  (toString [this]
+    "$FREE_VARIABLE"))
+(def meta-free-dummy-free-value (meta-free-dummy-value.)
+                                        ;(DynaTerm. "$free_meta_representing_unbound_value" [])
+  )
+
+(defmethod rexpr-printer meta-free-dummy-value [x]
+  "$FREE_VARIABLE")
 
 (def-rewrite
   :match (meta-is-free (:ground input) (:any result))
   :assigns-variable result
   ;; this can only match the dummy placeholder value for free, otherwise then it would clearly be bound to something else
-  (= meta-free-dummy-free-value (get-value input)))
+  (or (= meta-free-dummy-free-value (get-value input))
+      (tlocal *dollar-free-matches-ground-values*)))
+(def-rewrite
+  :match {:rexpr (meta-is-free _ (:any result))
+          :check (tlocal *dollar-free-matches-ground-values*)}
+  :assigns-variable result
+  true)
 (def-rewrite
   :match (meta-is-free (:free input) (:any result))
   :run-at :inference ;; this is indended to delay this a bit such that it has time to check if this is truly a free variable

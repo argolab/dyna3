@@ -81,7 +81,7 @@ f ?= 1.
 assert f = 1.
 ")
 
-(str-test type-structure-confict "
+(str-test type-structure-conflict "
 f := 1.
 f := 0 for X:int = foo[Z].
 

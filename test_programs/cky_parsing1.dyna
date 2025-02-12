@@ -1,0 +1,50 @@
+word(0) = "Papa".
+word(1) = "ate".
+word(2) = "the".
+word(3) = "caviar".
+word(4) = "with".
+word(5) = "a".
+word(6) = "spoon".
+word(7) = ".".
+
+
+rule("SD", "NP", "VP") = 1.
+rule("S", "SD", ".") = 1.
+rule("NP", "Det", "N") = 1.
+rule("NP", "NP", "PP") = 1.
+rule("VP", "V", "NP") = 1.
+rule("VP", "VP", "PP") = 1.
+rule("PP", "P", "NP") = 1.
+
+rule("NP", "Papa") = 1.
+rule("N", "caviar") = 1.
+rule("N", "spoon") = 1.
+rule("V", "ate") = 1.
+rule("P", "with") = 1.
+rule("Det", "the") = 1.
+rule("Det", "a") = 1.
+rule(".", ".") = 1.
+
+
+length max= I for _=word(I).
+
+phrase(I,K,T) max= phrase(I,J,T1) * phrase(J,K,T2) * rule(T,T1,T2) for range(I+1,K,J), I+2 <= K.
+phrase(I,I+1,T) max= rule(T, word(I)).
+
+$memo(phrase[A:$free,B:$free,C:$free]) = "null".
+
+print "program loaded, going to make query".
+
+% phrase(I:range(10),I+1,X)?
+
+phrase(A,B,C)?
+
+%phrase(0,2,X)?
+
+% debug_repl_clojure phrase(0,2,X).
+
+% phrase(0,1,X)?
+
+% phrase(A,B,C) ?
+
+% :- print_memo_table phrase/3.

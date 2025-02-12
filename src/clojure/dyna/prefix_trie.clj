@@ -6,25 +6,6 @@
   )
 
 
-;; the data structure could be represented as differented nested objects rather
-;; than having a single trie which represents everything?  The question would
-;; then be updating the nested structure.  it seems that vectors have some way
-;; in which they can replace some of the elements with a masked array.
-
-
-;; this file is not used yet
-
-
-;; (gen-interface
-;;  :name dyna.IPrefixTrie
-;;  :extends [clojure.lang.ILookup]
-;;  :methods [[get [Object] Object]
-;;            [set [Object Object] "Ldyna.IPrefixTrie;"]
-;;            ])
-
-
-;; example structure of the trie
-#_({:a {:b [val1 val2]}})
 
 (defn trie-hash-map [& args]
   (ClojureHashMap/createFromSeq args))
@@ -50,27 +31,14 @@
 
 (defn- merge-map-arity [arity & args]
   (if (= arity 0)
-    (ClojureUnorderedVector/concat args)  ;(apply concat args)
-    (apply merge-with (partial merge-map-arity (- arity 1)) args)))
-
-#_(defn- equal-tries [arity map1 map2]
-  (if (identical? map1 map2)
-    true
-    (if (or (empty? map1) (empty? map2))
-      (and (empty? map1) (empty? map2))
-      (if (= arity 0)
-        (= (frequencies map1) (frequencies map2)) ;; then this needs to check that the same number of elements appear, but the order doesn't matter
-        ;; then this needs to compare that the inner elements are equal to eachother
-        (and (= (count map1) (count map2))
-             (every? #(equal-tries (- arity 1) (get map1 %) (get map2 %)) (keys map1)))))))
-
-;; the elements in the leaf of the trie should not matter about the order, so this is
-#_(defn- hash-tries [arity node]
-  (if (= arity 0)
-    (reduce bit-xor (map hash node))
-    (reduce unchecked-add-int 0 (map #(bit-xor (hash (first %)) (hash-tries (- arity 1) (second %))) node))))
+    (ClojureUnorderedVector/concat args)
+    (let [f (first args)]
+      (apply merge-with (partial merge-map-arity (- arity 1)) (if (nil? f) ClojureHashMap/EMPTY f) (rest args)))))
 
 (defsimpleinterface IPrefixTrie
+  (trie-arity [])
+  (trie-wildcard [])
+  (trie-root [])
   (trie-get-values-collection [key])  ;; return the values associated with a given key together
   (trie-get-values [key])  ;; return the values associated with a given key seperatly
 
@@ -101,6 +69,11 @@
   (trie-progressive-iterator [key])
 
   (trie-reorder-keys [new-order])
+
+  (trie-reorder-keys-subselect [new-order known-values])
+
+  ;; any key which is non-nil will be selected to that particular value
+  ;(trie-select-subkeys [key])
   )
 
 ;; (intern 'dyna.rexpr 'check-argument-prefix-trie (fn [x] (instance? IPrefixTrie x)))
@@ -117,6 +90,9 @@
                      ;^{:tag int :unsynchronized-mutable true} hashCodeCache
                      ]
   IPrefixTrie
+  (trie-arity [this] arity)
+  (trie-wildcard [this] contains-wildcard)
+  (trie-root [this] root)
   (trie-get-values-collection [this key]
     (let [key (if (nil? key) (repeat arity nil) key)]
       (assert (= (count key) arity))
@@ -198,10 +174,10 @@
                                 ]
                             (into ClojureHashMap/EMPTY
                                   (remove empty? (if (nil? cur-key)
-                                                   (for [[k v] node]
-                                                     (let [r (rec (cons k key-so-far) rest-key v)]
-                                                       (when-not (empty? r)
-                                                         [k r])))
+                                                   (for [[k v] node
+                                                         :let [r (rec (cons k key-so-far) rest-key v)]
+                                                         :when (not (empty? r))]
+                                                     [k r])
                                                    (for [k [nil cur-key]
                                                          :let [v (get node k)]
                                                          :when (not (nil? v))]
@@ -257,10 +233,10 @@
                                        (conj (or prev-val []) val))))
 
   (trie-merge [this other]
-    (assert (= arity (.arity other)))
+    (assert (= arity (trie-arity other)))
     (make-PrefixTrie arity
-                 (bit-or contains-wildcard (.contains-wildcard other))
-                 (merge-map-arity arity root (.root other))))
+                 (bit-or contains-wildcard (trie-wildcard other))
+                 (merge-map-arity arity root (trie-root other))))
 
   (trie-delete-matched [this key]
     (if (or (nil? key) (every? nil? key))
@@ -345,6 +321,31 @@
             (vswap! new-root trie-assoc-in new-key col)))
         (make-PrefixTrie (count new-order) new-contains-wildcard @new-root))))
 
+  (trie-reorder-keys-subselect [this new-order known-values]
+    (if (every? nil? known-values)
+      (trie-reorder-keys this new-order)
+      (let [new-root (volatile! ClojureHashMap/EMPTY)
+            new-contains-wildcard (reduce bit-or 0 (map (fn [[new-i old-i]]
+                                                          (if (not= 0 (bit-and (bit-shift-left 1 old-i) contains-wildcard))
+                                                            (bit-shift-left 1 new-i)
+                                                            0))
+                                                        (zipseq (range) new-order)))]
+        (dyna-assert (= arity (+ (count (remove nil? known-values)) (count (remove nil? new-order)))))
+        (doseq [[key col] (trie-get-values-collection this known-values)]
+          (let [new-key (vec (map (fn [i] (if (nil? i) nil (nth key i))) new-order))]
+            (vswap! new-root trie-assoc-in new-key col)))
+        (make-PrefixTrie (count new-order) new-contains-wildcard @new-root))))
+
+  #_(trie-select-subkeys [this key]
+    (assert (= (count key) arity))
+    (let (= new-order ))
+    (let [new-arity (count (filter nil? key))]
+      (if (= new-arity arity)
+        this ;; then nothing is projected out
+        (let [r (fn rec [] )]))
+      )
+    )
+
   Object
   (toString [this]
     (println "===================== prefix trie to string called")
@@ -369,14 +370,14 @@
   (valAt [this key] (.valAt this key nil))
   (valAt [this key notfound]
     (assert (seqable? key))
-    (let [ret (map second (trie-get-values key))]
+    (let [ret (map second (trie-get-values this key))]
       (if (empty? ret) [notfound] ret)))
 
   clojure.lang.Seqable
   (seq [this] (trie-get-values this nil))
 
   clojure.lang.IPersistentCollection
-  (count [this] (count (trie-get-values this)))
+  (count [this] (count (trie-get-values this nil)))
   (cons [this other] (???))
   (equiv [^IPrefixTrie this other]
     (.equals this other))
@@ -384,9 +385,9 @@
   clojure.lang.Associative
   (containsKey [this key]
     (assert (seqable? key))
-    (not (empty? (trie-get-values key))))
+    (not (empty? (trie-get-values this key))))
   (entryAt [this key]
-    (into {} (trie-get-values this )))
+    (into {} (trie-get-values this nil)))
   (assoc [this key val]
     (trie-insert-val this key val)))
 
@@ -394,23 +395,25 @@
   ;; check that we have the right internals for now
   (dyna-slow-check
    (if (> arity 0)
-     ((fn rec [d n]
+     ((fn rec [d n wild]
         (if (= d 0)
           (assert (instance? ClojureUnorderedVector n))
           (do
-            (assert (or (nil? n) (instance? ClojureHashMap n)))
+            (assert (or (= 1 (bit-and 1 wild)) (not (contains? n nil))))
+            (dyna-assert (or (nil? n) (instance? ClojureHashMap n)))
             (doseq [v (vals n)]
-              (rec (- d 1) v)))))
-      arity root)
+              (rec (- d 1) v (bit-shift-right wild 1))))))
+      arity root wildcard)
      (assert (or (nil? root) (instance? ClojureUnorderedVector root)))))
   (PrefixTrie. arity wildcard root))
 
-(defmethod print-dup PrefixTrie [^PrefixTrie this ^java.io.Writer w]
-  (.write w (str "(dyna.prefix-trie/make-PrefixTrie "
-                 (.arity this) " "
-                 (.contains-wildcard this) " "))
-  (print-dup (.root this) w)
-  (.write w ")"))
+;; the prefix trie is going to require that the clojure hash type maps are also printable, but this does not have a print-dup method...
+#_(defmethod print-dup PrefixTrie [^PrefixTrie this ^java.io.Writer w]
+    (.write w (str "(dyna.prefix-trie/make-PrefixTrie "
+                   (.arity this) " "
+                   (.contains-wildcard this) " "))
+    (print-dup (.root this) w)
+    (.write w ")"))
 
 (defmethod print-method PrefixTrie [^PrefixTrie this ^java.io.Writer w]
   (.write w (str "(PrefixTrie "

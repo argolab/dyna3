@@ -16,12 +16,12 @@ make
 
 A recent version of java is required.  Running `make` should automattically
 download all dependencies.  The dyna runtime will be compiled into
-`./dyna-standalone-*`.
+`./dyna-standalone-*.run`.
 
 ## Running dyna
 ```
 make
-./dyna-standalone-*
+./dyna-standalone-*.run
 ```
 
 ## Running tests

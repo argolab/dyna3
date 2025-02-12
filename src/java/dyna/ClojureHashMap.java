@@ -177,7 +177,7 @@ public final class ClojureHashMap extends AFn implements IPersistentMap,
         int k = hash(key), v = hash(value);
         for(int i = 0; i < 8; i++) {
             int g = hashPairCodes[(v >> (i*4) & 15) + i*16];
-            k = Integer.rotateLeft(k, g & 15) * (1 + (g&255)) ^ (g >> 8);
+            k = Integer.rotateLeft(k, g & 15) * (1 + ((g>>4)&255)) ^ (g >> 12);
         }
         return k;
     }
@@ -396,6 +396,8 @@ public final class ClojureHashMap extends AFn implements IPersistentMap,
                 else
                     return LeafMultipleNode.create(modifier, new Object[]{this.key,key}, new Object[]{this.value,value}, hashOffset, hash);
             } else {
+                if(value == null) // this is deleting something that we do not have
+                    return this;
                 return InternalNode.create(modifier, new Object[]{this.key,key}, new Object[]{this.value,value}, hashOffset);
             }
         }
@@ -448,6 +450,9 @@ public final class ClojureHashMap extends AFn implements IPersistentMap,
         }
 
         public static INode create(Object modifier, Object[] ks, Object[] vs, int hashOffset, int hash) {
+            if(ks.length == 0) {
+                return null;
+            }
             if(ks.length == 1) {
                 return LeafSingleNode.create(ks[0], vs[0], hash);
             }
@@ -528,7 +533,7 @@ public final class ClojureHashMap extends AFn implements IPersistentMap,
                             _hash = 0;
                             return this;
                         } else {
-                            return new LeafMultipleNode(modifier, new_keys, new_values, hash);
+                            return LeafMultipleNode.create(modifier, new_keys, new_values, hashOffset, hash);
                         }
                     } else {
                         if(can_modify) {
@@ -541,7 +546,7 @@ public final class ClojureHashMap extends AFn implements IPersistentMap,
                             System.arraycopy(keys, 0, new_keys, 0, keys.length);
                             System.arraycopy(values, 0, new_values, 0, values.length);
                             new_values[index] = value;
-                            return new LeafMultipleNode(modifier, new_keys, new_values, hash);
+                            return LeafMultipleNode.create(modifier, new_keys, new_values, hashOffset, hash);
                         }
                     }
                 } else {
@@ -558,7 +563,7 @@ public final class ClojureHashMap extends AFn implements IPersistentMap,
                         _hash = 0;
                         return this;
                     } else {
-                        return new LeafMultipleNode(modifier, new_keys, new_values, hash);
+                        return LeafMultipleNode.create(modifier, new_keys, new_values, hashOffset, hash);
                     }
                 }
             } else {
@@ -650,6 +655,7 @@ public final class ClojureHashMap extends AFn implements IPersistentMap,
                         if(fval != e.getValue() && !ClojureHashMap.equals(fval, e.getValue()))
                             return false;
                     }
+                    return true;
                 }
                 return false;
             }
@@ -694,6 +700,7 @@ public final class ClojureHashMap extends AFn implements IPersistentMap,
                 INode n = children[d];
                 if(n == null) n = ClojureHashMap.EMPTY_INODE;
                 children[d] = n.insert_or_update(modifier, key, value, hash, hashOffset+3);
+                if(children[d] == ClojureHashMap.EMPTY_INODE) children[d] = null;
                 _hash = _size = 0;
                 return this;
             } else {
@@ -750,7 +757,7 @@ public final class ClojureHashMap extends AFn implements IPersistentMap,
         }
 
         public int hashCode() {
-            return 0; // the hash code is depending on the keys which are contained, which is non in this case so it gets a zero
+            return 0; // the hash code is depending on the keys which are contained, which is nothing in this case so it gets a zero
         }
 
         public boolean equals(INode o, int hashOffset) {

@@ -5,9 +5,9 @@
   (:require [dyna.rexpr-dynabase :refer :all])
   (:require [dyna.system :as system])
   (:require [dyna.context :as context])
-  (:require [dyna.user-defined-terms :refer [add-to-user-term update-user-term! def-user-term get-user-term]])
+  (:require [dyna.user-defined-terms :refer [add-to-user-term! update-user-term! def-user-term get-user-term]])
   ;(:require [dyna.memoization-v1 :refer [set-user-term-as-memoized print-memo-table]])
-  (:require [dyna.memoization-v2 :refer [handle-dollar-memo-rexpr handle-dollar-priority-rexpr]])
+  (:require [dyna.memoization-v2 :refer [handle-dollar-memo-rexpr handle-dollar-priority-rexpr print-memo-table]])
   (:require [dyna.optimize-rexpr :refer [optimize-aliased-variables]])
   (:require [clojure.set :refer [union intersection difference]])
   (:require [clojure.string :refer [join]])
@@ -23,6 +23,14 @@
 
 (def ^:dynamic print-parser-errors true)
 
+(def ^:dynamic *user-print-function*
+  (fn [rel-path line-number text-rep ctx result-rexpr result-variable]
+    (println "=================================================")
+    (println "Print from line" (str "`" rel-path ":" line-number "`") "Query:" text-rep)
+    (if (= (make-multiplicity 1) result-rexpr)
+      (println (ctx-get-value ctx result-variable))
+      (println "Rexpr:" (ctx-exit-context ctx result-rexpr)))
+    (println "=================================================")))
 
 
 ;; if we provide some way for a string to be converted into an AST, and then
@@ -88,10 +96,12 @@
 
   (exposed-variables [this] (filter is-variable?
                                     (into #{out-variable ast}
-                                          (vals variable-name-mapping)))))
+                                          (vals variable-name-mapping))))
+  (rexpr-jit-info [this] {:jittable false}))
 
 
-(declare import-file-url)
+(declare import-file-url
+         eval-string)
 
 
 
@@ -102,55 +112,16 @@
 ;; the reason we do this here instead of letting the standard simplification
 ;; handle this is that the parser will generate many intermediate values that
 ;; are "useless"
-(defn optimize-rexpr [rexpr] (optimize-aliased-variables rexpr))
-#_(defn optimize-rexpr
-  ([rexpr] (let [[unified-vars new-rexpr] (optimize-rexpr rexpr #{})]
-             new-rexpr))
-  ([rexpr proj-out-vars]
-   (let [var-unifies (transient {})
-         mr (cond
-              (is-proj? rexpr) (let [ufv (:var rexpr)
-                                     prexpr (:body rexpr)
-                                     [nested-unifies nested-rexpr] (optimize-rexpr prexpr
-                                                                                   (conj proj-out-vars ufv))
-                                     self-var (disj (get nested-unifies ufv) ufv)
-                                     ret-rexpr (if (not (empty? self-var))
-                                                 ;; then there is some variable that we can use to replace this statement
-                                                 ;; if it is a constant, then we can do the replacement such that it will avoid
-                                                 (let [const (some is-constant? self-var)
-                                                       replace-with (if const
-                                                                      (first (filter is-constant? self-var))
-                                                                      (first self-var))]
-                                                   (remap-variables nested-rexpr {ufv replace-with}))
+(defn- optimize-rexpr [rexpr] (optimize-aliased-variables rexpr))
 
-                                                 (if (= nested-rexpr prexpr)
-                                                   rexpr
-                                                   (make-proj ufv nested-rexpr)))]
-                                 ;; we need to take the nested-unifies and add
-                                 ;; in the info here, but filter out any
-                                 ;; information which references our variable
-                                 (doseq [[k v] nested-unifies]
-                                   (when (not= k ufv)
-                                     (assoc! var-unifies k (union (get var-unifies k) (disj v ufv)))))
-                                 ret-rexpr)
-              (is-unify? rexpr) (let [[a b] (get-arguments rexpr)]
-                                  (assoc! var-unifies a (conj (get var-unifies a #{}) b))
-                                  (assoc! var-unifies b (conj (get var-unifies b #{}) a))
-                                  rexpr) ;; there is no change to the expression here
-              (is-disjunct? rexpr) rexpr ;; we do not evaluate disjunctions for variables which might get unified together
-              :else ;; otherwise we should check all of the children of the expression to see if there is some structure
-              (rewrite-rexpr-children-no-simp rexpr
-                                      (fn [r]
-                                        (let [[unifies nr] (optimize-rexpr r proj-out-vars)]
-                                          (doseq [[k v] unifies]
-                                            (assoc! var-unifies k (union v (get var-unifies k))))
-                                          nr))))]
-     [(persistent! var-unifies) mr])))
+(defn- dyna-debugger [file-name]
+  (require 'dyna.repl)
+  ((find-var 'dyna.repl/repl-in-file) file-name))
 
 
-(def true-constant-dterm (DynaTerm. "$constant" [true]))
+(def ^{:private true} true-constant-dterm (DynaTerm. "$constant" [true]))
 
-(defn make-comma-conjunct
+(defn- make-comma-conjunct
   ([] true-constant-dterm)
   ([a] (if (nil? a)
          true-constant-dterm
@@ -232,7 +203,7 @@
                                           arguments))]
         (if all-consts
           (DynaTerm. "$constant" [(DynaTerm. (.name ast) DynaTerm/null_term source-file (vec (map #(get % 0) arguments)))]) ;; if this does not have nested structure, then can optimize and just use a constant structure
-          (DynaTerm. "$quote1" [(DynaTerm. (.name ast) DynaTerm/null_term source-file arguments)]))))))
+          (DynaTerm. "$quote1" [(DynaTerm. (.name ast) DynaTerm/null_term source-file (vec arguments))]))))))
 
 #_(defn- get-all-conjuncts [^DynaTerm ast]
   (if (instance? DynaTerm ast)
@@ -284,9 +255,14 @@
   )
 
 (defn convert-from-ast [^DynaTerm ast out-variable variable-name-mapping source-file]
-  ;; convert from the ast into an R-expr which can then be evaluated
-  ;; the AST is a DynaTerm object, it should come from the parser.  It could also get generated by the user's program
-  ;; out-variable is whatever variable represents the resulting expression.  In the AST, everything returns a "value", so
+  ;; convert from the ast into an R-expr which can then be evaluated the AST is
+  ;; a DynaTerm object, it should come from the parser.  It could also get
+  ;; generated by the user's program out-variable is whatever variable
+  ;; represents the resulting expression.  In the AST, everything returns a
+  ;; "value", which will be assigned to out-variable.  (This is different from
+  ;; R-exprs where everything returns a multiplicity).  The
+  ;; variable-name-mapping is a map from the string of a variable's name to the
+  ;; variables representation as an R-expr value (make-variable or make-constant).
   (let [source-file (cond
                       (instance? URL source-file) source-file
                       (= "REPL" source-file) current-dir
@@ -311,7 +287,7 @@
                                       (throw (DynaUserError. (str "Did not find variable " name))))
                                     var)
                       "$constant" (let [[val] (.arguments a)]
-                                    (when (is-constant? val)
+                                    #_(when (is-constant? val)
                                       (debug-repl))
                                     (make-constant val))
                       ;; this is something else which is getting called.  This means that we have to recurse into the structure and add the arguments
@@ -360,11 +336,10 @@ This is most likely not what you want."))))
                                                                              rf)
                                                                          (catch FileNotFoundException e2
                                                                            (throw e))))))]
-                                        ;(import-file-url file)
                                                         (let [imported-names (if (= (.arity arg1) 2)
                                                                                (.list_to_vec ^DynaTerm (get arg1 0))
                                                                                ;; then this should lookup the exported terms
-                                                                               (get @system/user-exported-terms file))]
+                                                                               (get @(tlocal system/user-exported-terms) file))]
                                                           (doseq [imported-term imported-names]
                                                             (match-term imported-term ("/" name arity)
                                                                         (update-user-term! {:name name
@@ -390,7 +365,7 @@ This is most likely not what you want."))))
                                                       (when-not (nil? *compiler-expression-dynabase*)
                                                         (throw (DynaUserError. "`:- export` must be at the top level in the file, not inside of a Dynabase.")))
                                                       (match-term arg1 ("export" ("/" lname larity))
-                                                                  (swap! system/user-exported-terms
+                                                                  (swap! (tlocal system/user-exported-terms)
                                                                          (fn [o]
                                                                            (assoc o source-file (conj (get o source-file #{})
                                                                                                       (DynaTerm. "/" [lname larity])))))))
@@ -410,8 +385,8 @@ This is most likely not what you want."))))
                                                                                   (.arguments disp-term)))]
                                                        (when-not (nil? *compiler-expression-dynabase*)
                                                          (throw (DynaUserError. "Dispose is not support on Dynabase methods.")))
-                                                       (update-user-term! {:name (.name disp-term)
-                                                                          :arity (.arity disp-term)
+                                                       (update-user-term! {:name (.name ^DynaTerm disp-term)
+                                                                          :arity (.arity ^DynaTerm disp-term)
                                                                           :source-file source-file}
                                                                          (fn [o]
                                                                            (let [ret (assoc o :dispose-arguments disp-arg-map)]
@@ -442,7 +417,7 @@ This is most likely not what you want."))))
                                                                             (when-not (nil? *compiler-expression-dynabase*)
                                                                               (throw (DynaUserError. "make_system_term is not supported on Dynabase methods.")))
                                                                             (when (is-multiplicity? rexpr) (debug-repl))
-                                                                            (swap! system/globally-defined-user-term
+                                                                            (swap! (tlocal system/globally-defined-user-term)
                                                                                    assoc [name arity] rexpr)))
 
                                            "make_global_term" (match-term arg1 ("make_global_term" ("/" name arity))
@@ -454,38 +429,11 @@ This is most likely not what you want."))))
                                                                           (???) ;; TODO
                                                                           )
 
-                                           ;; "memoize_unk" (match-term arg1 ("memoize_unk" ("/" name arity))
-                                           ;;                           (let [call-name {:name name
-                                           ;;                                            :arity arity
-                                           ;;                                            :source-file source-file}]
-                                           ;;                             (set-user-term-as-memoized call-name :unk)))
-                                           ;; "memoize_null" (match-term arg1 ("memoize_null" ("/" name arity))
-                                           ;;                            (let [call-name {:name name
-                                           ;;                                             :arity arity
-                                           ;;                                             :source-file source-file}]
-                                           ;;                              (set-user-term-as-memoized call-name :null)))
-
-                                           ;; "memoize_none" (match-term arg1 ("memoize_none" ("/" name arity))
-                                           ;;                            (let [call-name {:name name
-                                           ;;                                             :arity arity
-                                           ;;                                             :source-file source-file}]
-                                           ;;                              (set-user-term-as-memoized call-name :none)))
-
-                                           ;; "memoize" (match-term arg1 ("memoize" term)
-                                           ;;                       (let [name (.name ^DynaTerm term)
-                                           ;;                             arg-signature (.arguments ^DynaTerm term)
-                                           ;;                             call-name {:name name
-                                           ;;                                        :arity (.arity ^DynaTerm term)
-                                           ;;                                        :source-file source-file}]
-                                           ;;                         (???)
-                                           ;;                         ))
-
-                                           ;; "print_memo_table" (match-term arg1 ("print_memo_table" ("/" name arity))
-                                           ;;                                (let [call-name {:name name
-                                           ;;                                                 :arity arity
-                                           ;;                                                 :source-file source-file}]
-                                           ;;                                  (print-memo-table call-name)))
-
+                                           "print_memo_table" (match-term arg1 ("print_memo_table" ("/" name arity))
+                                                                          (let [call-name {:name name
+                                                                                           :arity arity
+                                                                                           :source-file source-file}]
+                                                                            (print-memo-table call-name)))
 
 
                                            ;; "import_csv" (let [[term-name term-arity file-name] (.arguments ^DynaTerm (get arg1 0))]
@@ -506,11 +454,11 @@ This is most likely not what you want."))))
                                                                       (require '[dyna.core :refer :all])
                                                                       (eval clj-code))))
 
-                                           "optimized_rexprs" (match-term arg1 ("optimized_rexprs" c)
-                                                                          (alter-var-root system/*use-optimized-rexprs* (if c true false)))
+                                           "use_optimized_rexprs" (match-term arg1 ("optimized_rexprs" c)
+                                                                              (alter-var-root system/use-optimized-rexprs (constantly (if c true false))))
 
                                            "set_recursion_limit" (match-term arg1 ("set_recursion_limit" l)
-                                                                             (reset! system/user-recursion-limit (int l)))
+                                                                             (reset! (tlocal system/user-recursion-limit) (int l)))
 
                                            (let [arity (.arity arg1)
                                                  call-name {:name (str "$pragma_" (.name arg1))
@@ -594,7 +542,8 @@ This is most likely not what you want."))))
                                                              (convert-from-ast body
                                                                                incoming-variable
                                                                                (merge {"$functor_name" (make-constant functor-name)
-                                                                                       "$functor_arity" (make-constant functor-arity)}
+                                                                                       "$functor_arity" (make-constant functor-arity)
+                                                                                       "$functor_filename" (make-constant (str source-file))}
                                                                                       project-variables-map
                                                                                       argument-variables
                                                                                       (when (dnil? dynabase)
@@ -607,16 +556,19 @@ This is most likely not what you want."))))
                                                                                (make-proj-many (vals project-variables-map)
                                                                                                body-rexpr))
                                                 rexpr-opt (optimize-rexpr rexpr)]
-                                            (when (get @system/globally-defined-user-term [functor-name functor-arity])
+                                            (when (get @(tlocal system/globally-defined-user-term) [functor-name functor-arity])
                                               (throw (DynaUserError. (str "The term " functor-name "/" functor-arity " is a system defined term, unable to redefine"))))
                                             (cond (and (= "$memo" functor-name) (= 1 functor-arity))
                                                   (handle-dollar-memo-rexpr rexpr-opt source-file dynabase)
 
-                                                  (= "$priority" functor-name)
+                                                  (and (= "$priority" functor-name) (= 1 functor-arity))
                                                   (handle-dollar-priority-rexpr rexpr-opt source-file dynabase)
 
+                                                  (and (= "$warning" functor-name) (= 0 functor-arity))
+                                                  (add-to-user-term! nil nil  "$warning" 0 rexpr-opt)
+
                                                   :else
-                                                  (add-to-user-term source-file dynabase functor-name functor-arity
+                                                  (add-to-user-term! source-file dynabase functor-name functor-arity
                                                                     rexpr-opt))
                                             #_(when
                                               ;; this needs to mark the memo table as having a priority function.
@@ -707,7 +659,7 @@ This is most likely not what you want."))))
                                      ;(make-conjunct [structure meta-struct])
                                      structure)
 
-            ["$dynabase_call" 2] (let [[dynabase-var call-term] (.arguments ast)
+            ["$dynabase_call" 2] (let [[^DynaTerm dynabase-var ^DynaTerm call-term] (.arguments ast)
                                        dynabase-val (get-value dynabase-var)
                                        call-vals (get-arg-values (.arguments call-term))
                                        arity (count call-vals)
@@ -824,9 +776,13 @@ This is most likely not what you want."))))
                                 all-variable-names (find-term-variables expression)
                                 ;; this should construct some assert= aggregator, which will check some expression for "all" of the values
                                 ;; which would mean that it identifies which of the expressions
-                                variable-name-mapping (into {} (for [n all-variable-names] [n (make-variable n)]))
-                                rexpr (make-proj-many (vals variable-name-mapping)
-                                                      (convert-from-ast expression (make-constant true) variable-name-mapping source-file))
+                                variable-name-mapping (merge {"$functor_name" (make-constant (str "ASSERT:" line-number))
+                                                              "$functor_arity" (make-constant 0)
+                                                              "$functor_filename" (make-constant (str source-file))}
+                                                             (into {} (for [n all-variable-names] [n (make-variable n)])))
+                                rexpr (make-aggregator ":-" (make-constant true) (make-constant true) true
+                                                       (make-proj-many (vals variable-name-mapping)
+                                                                       (convert-from-ast expression (make-constant true) variable-name-mapping source-file)))
                                 run-agenda-zzz (system/maybe-run-agenda)
                                 result (system/converge-agenda
                                         (simplify-top rexpr))]
@@ -846,8 +802,12 @@ This is most likely not what you want."))))
 
             ["$print" 3] (let [[expression text-rep line-number] (.arguments ast)
                                all-variable-names (find-term-variables expression)
-                               result-variable (make-variable 'Result)
-                               variable-map (into {} (for [v all-variable-names] [v (make-variable v)]))
+                               result-variable (make-variable "$print_result_var")
+                               variable-map (merge
+                                             {"$functor_name" (make-constant (str "PRINT:" line-number))
+                                              "$functor_arity" (make-constant 0)
+                                              "$functor_filename" (make-constant (str source-file))}
+                                             (into {} (for [v all-variable-names] [v (make-variable v)])))
                                rexpr (convert-from-ast expression result-variable variable-map source-file)
                                agenda-run-zzz (system/maybe-run-agenda)
                                [ctx result] (system/converge-agenda
@@ -857,14 +817,13 @@ This is most likely not what you want."))))
                                ;; result (context/bind-context-raw ctx (system/converge-agenda
                                ;;                                       (simplify-fully rexpr)))
                                rel-path (if (instance? URL source-file)
-                                          (str (.relativize current-dir-path (Paths/get (.toURI source-file))))
+                                          (str (.relativize ^Paths current-dir-path (Paths/get (.toURI source-file))))
                                           (str source-file))]
-                           (println "=================================================")
-                           (println "Print from line" (str "`" rel-path ":" line-number "`") "Query:" text-rep )
-                           (if (= (make-multiplicity 1) result)
-                             (println (ctx-get-value ctx result-variable))
-                             (println "Rexpr:" (ctx-exit-context ctx result)))
-                           (println "=================================================")
+                           (*user-print-function* rel-path line-number text-rep ctx result result-variable)
+                           (make-unify out-variable (make-constant true)))
+
+            ["$debug" 0] (do
+                           (dyna-debugger source-file)
                            (make-unify out-variable (make-constant true)))
 
             ["$_debug_repl" 3] (let [[expression text-rep line-number] (.arguments ast)
@@ -883,14 +842,13 @@ This is most likely not what you want."))))
                                all-variables (find-term-variables expression) ;; if there is an nested aggregator, those are not found, just the exposed variables
                                variable-map (into {} (map (fn [x] [x (make-variable x)]) all-variables))
                                rexpr (convert-from-ast expression result-var variable-map source-file)]
-                           (system/converge-agenda
-                            (simplify-rexpr-query [text-rep line-number] rexpr))
+                           (simplify-rexpr-query [text-rep line-number] rexpr)
                            (make-unify out-variable (make-constant true)))
 
             ["$external_value" 1] (let [[value-index] (.arguments ast)]
                                     (make-unify
                                      out-variable
-                                     (make-constant (system/parser-external-value value-index))))
+                                     (make-constant ((tlocal system/parser-external-value) value-index))))
 
             ["$with_key" 2] (let [[expression-value with-key-expression] (.arguments ast)
                                   has-dynabase (not (and (is-constant? (get variable-name-mapping "$self"))
@@ -943,7 +901,7 @@ This is most likely not what you want."))))
                                                   ast-var
                                                   variable-name-mapping
                                                   source-file))
-            ["$eval_toplevel" 1] (let [[string-arg] (.arguments ast) ;; this could just be a normal function, as it does not require
+            ["$eval_toplevel" 1] (let [[string-arg] (.arguments ast) ;; this could just be a normal function, as it does not require access to the variable name map
                                        arg-val (get-value string-arg)
                                        ast-var (make-intermediate-var)]
                                    (make-conjunct [(make-ast-from-string ast-var arg-val)
@@ -1077,37 +1035,38 @@ This is most likely not what you want."))))
     (reportFailedPredicate [recognizer exception]
       (if print-parser-errors
         (println "==========> report failed predicate" exception)
-        (throw (DynaSyntaxError.))))
+        (throw (DynaSyntaxError. "Failed predicate" exception))))
     (reportInputMismatch [recognizer exception]
       (if print-parser-errors
         (println "==========> report input missmatch" exception)
-        (throw (DynaSyntaxError.))))
-    (reportNoViableAlternative [recognizer exception]
+        (throw (DynaSyntaxError. "Input missmatch" exception))))
+    (reportNoViableAlternative [^org.antlr.v4.runtime.Parser recognizer ^org.antlr.v4.runtime.NoViableAltException exception]
       (if print-parser-errors
         (let [token (.getStartToken exception)
               offending (.getOffendingToken exception)
               stream (.getInputStream token)
-              continuations (map get-parser-print-name (.toList (.getExpectedTokens exception)))]
-          (println "====================================================================================================")
-          (println "PARSER ERROR -- invalid input")
-          (println "")
-          (println "Input was incomplete")
-          (println "")
-          (println (str "Line: " (.getLine token) ":" (.getCharPositionInLine token) "-" (.getLine offending) ":" (.getCharPositionInLine offending)))
-          (println "--------------------")
-          (println (.getText stream (Interval. ^int (.getStartIndex token) ^int (.getStopIndex offending))))
-          (println "--------------------")
-          (println "possible missing tokens: " (join " OR " continuations))
-          (println "===================================================================================================="))
-        (throw (DynaSyntaxError.))))
+              continuations (map get-parser-print-name (.toList (.getExpectedTokens exception)))
+              message (str
+                       "====================================================================================================\n"
+                       "PARSER ERROR -- invalid input\n"
+                       "\n"
+                       "Input was incomplete\n"
+                       (str "Line: " (.getLine token) ":" (.getCharPositionInLine token) "-" (.getLine offending) ":" (.getCharPositionInLine offending)) "\n"
+                       "--------------------\n"
+                       (.getText stream (Interval. ^int (.getStartIndex token) ^int (.getStopIndex offending))) "\n"
+                       "--------------------\n"
+                       "possible missing tokens: " (join " OR " continuations) "\n"
+                       "====================================================================================================")]
+          (println message)
+          (throw (DynaSyntaxError. message)))))
     (reportUnwantedToken [recognizer]
       (if print-parser-errors
         (println "=============> unwanted token")
-        (throw (DynaSyntaxError.))))
+        (throw (DynaSyntaxError. "Unwanted token"))))
     (reportMissingToken [recognizer]
       (if print-parser-errors
         (proxy-super reportMissingToken recognizer)
-        (throw (DynaSyntaxError.))))))
+        (throw (DynaSyntaxError. "Missing token"))))))
 
 (def lexer-error-handler
   (proxy [org.antlr.v4.runtime.ConsoleErrorListener] []
@@ -1167,22 +1126,23 @@ This is most likely not what you want."))))
                    (URL. ^String file-url)
                    (do (assert (instance? URL file-url))
                      file-url))]
-    (parse-stream (.openStream url)
+    (parse-stream (.openStream ^URL url)
                   :fragment-allowed false)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-(defn eval-ast [ast]
+(defn eval-ast [ast & {:keys [file-name] :or {file-name "REPL"}}]
   (make-eval-from-ast (make-constant true)
                       (make-constant ast)
                       {}
-                      "REPL"))
+                      file-name))
 
-(defn eval-string [^String s & {:keys [fragment-allowed] :or {fragment-allowed true}}]
+(defn eval-string [^String s & {:keys [fragment-allowed file-name] :or {fragment-allowed true file-name "REPL"}}]
   (eval-ast (parse-string s
-                          :fragment-allowed fragment-allowed)))
+                          :fragment-allowed fragment-allowed)
+            :file-name file-name))
 
 (defn import-parse [file-url ast]
   ;; this needs to construct the evaluate AST object, and then pass it to simplify to make sure that it gets entirely evaluated
@@ -1195,7 +1155,7 @@ This is most likely not what you want."))))
 
 (defn import-file-url [url]
   (let [do-import (atom false)]
-    (swap! system/imported-files
+    (swap! (tlocal system/imported-files)
            (fn [o]
              (if (contains? o url)
                (do (reset! do-import false)
@@ -1209,7 +1169,8 @@ This is most likely not what you want."))))
         (if (nil? parse)
           (when print-parser-errors
             (println (str "WARNING: file " url " did not contain any dyna rules")))
-          (let [result (convert-from-ast parse (make-constant true) {} url)]
+          (let [result (context/bind-no-context
+                        (convert-from-ast parse (make-constant true) {} url))]
             (when-not (= result (make-multiplicity 1))
               (when print-parser-errors
                 (println (str "failed to load file " url))
@@ -1238,7 +1199,8 @@ This is most likely not what you want."))))
   :run-at [:standard :construction] ;; this should run at both standard time and construction
                                         ;:run-at :standard-and-construction ;; this should run when it is constructed and when it might have a ground variable
   (let [a (get-value ast)]
-    (convert-from-ast a out-variable variable-name-mapping source-file)))
+    (context/bind-no-context
+     (convert-from-ast a out-variable variable-name-mapping source-file))))
 
 
 ;; (def-rewrite

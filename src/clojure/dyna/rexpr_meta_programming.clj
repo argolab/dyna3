@@ -12,7 +12,9 @@
                                     :var result]
   (check-rexpr-basecases [this stack]
                          1 ;; indicate that there is an indirect user call, so we can't be sure about this
-                         ))
+                         )
+  (rexpr-jit-info [this] {:jittable false})
+  (rexpr-jittype-hash [this] 0))
 
 (def-base-rexpr reflect-structure [:var out
                                    :var dynabase
@@ -29,6 +31,10 @@
 ;; $reflect(&foo(1,2,3), Name, Args) => (Name="foo")*(Args=[1,2,3]).
 
 (def reflect-ignore-arg (make-constant (Object.)))  ;; a special value which indicates that the dynabase should just get ignored
+
+;; maybe the $reflect/3 should just have $nil dynabase instead of allowing it to
+;; unify with any dynabase.  So if something attempts to reflect when there is a
+;; dynabase, it would just result in it failing, which is a bit more consistent behavior
 
 (let [junk-arity (make-variable (gensym))]
   (def-user-term "$reflect" 3 (make-conjunct [(make-unify v3 (make-constant true)) ;; reflect always return true
@@ -146,8 +152,9 @@
           :context (unify-structure foo (:unchecked file-name) (:any dynabase) (:unchecked name-str) (:any-list arguments2))
           }
   :run-at :inference
-  (let [args (concat arguments2 arguments)
-        has-dynabase (not (and (is-ground? dynabase) (dnil? (get-value dynabase))))
+  (let [;vv (debug-repl "good mathc indirect")
+        args (concat arguments2 arguments)
+        has-dynabase (not (and (is-bound? dynabase) (dnil? (get-value dynabase))))
         call-name (if has-dynabase
                     {:name name-str
                      :arity (count args)}
@@ -159,3 +166,10 @@
                          (when has-dynabase {(make-variable "$self") dynabase})
                          {(make-variable (str "$" (count args))) result})]
     (make-user-call call-name value-map 0 {})))
+
+#_(def-rewrite
+  :match (indirect-user-call (:free call-ref) (:any-list arguments) (:any result))
+  :run-at :inference
+  (let []
+    (debug-repl "indirect inference")
+    nil))

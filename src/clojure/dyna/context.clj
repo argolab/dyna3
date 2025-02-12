@@ -2,26 +2,30 @@
   (:require [dyna.utils :refer :all])
   (:require [dyna.base-protocols :refer :all])
   (:require [clojure.set :refer [union intersection difference]])
-  (:import [dyna UnificationFailure RContext])
+  (:import [dyna UnificationFailure RContext ContextHandle])
   (:require [dyna.rexpr-constructors :refer :all]))
 
 
 ;; this is the current context which is dynamically rebound depending on what is currently running
 ;; this means that we are not passing this value around, which simplifies the calling api a bit
-(def ^{:dynamic true :private true} *context*)
 
-;; global variable which sets the full-context variable on the context.  The
-;; full context tracks /all/ conjunctive constraints rather than just the easy
-;; constraints
-;(def ^{:dynamic true :private true} *use-full-context* false)
+;; (ContextHandler/get) is how to get a reference to the context variable now.  It will return
+
 
 (defn- make-variable-assignment-conjunct [value-map]
   (make-conjunct (into [] (for [[k v] value-map]
                             (make-no-simp-unify k (make-constant v))))))
 
-(defn get-context [] *context*)
+(defn get-context
+  {:inline (fn [] `(ContextHandle/get))}
+  []
+  (ContextHandle/get))
+(defn- get-context-bound []
+  (let [c (ContextHandle/get)]
+    (assert (not (nil? c)))
+    c))
 
-(def context-set-value-history {})
+;(def context-set-value-history {})
 
 (deftype context
     [parent
@@ -47,6 +51,8 @@
   ;; TODO: there should be a recursive version of the set-value! function which avoids rechecking what the current
   ;; value of the variable is
   (ctx-set-value! [this variable value]
+    #_(when (.contains (str variable) "agg-op-hidden23628")
+      (debug-repl "setting h var"))
     (assert (not (nil? value)))
     (let [current-value (ctx-get-value this variable)]
       (if-not (nil? current-value)
@@ -54,13 +60,15 @@
           (throw (UnificationFailure. "Value does not match")))
         ;; then depending on the kind of context this is, we might have different behavior of
         ;; setting the value of the variable.
-        (if (or (contains? #{:root :disjunct :aggregator :if-expr-coditional :memo-expr-conditional ;:aggregator-op-outer
-                             } context-kind)
+        (if (or (contains? #{:root :disjunct :aggregator :if-expr-coditional :memo-expr-conditional :aggregator-op-outer
+                             :jit-root}
+                           context-kind)
                 (and (contains? #{:aggregator-conjunctive :proj :aggregator-op-inner} context-kind)
                      (contains? value-map variable)))
           ;; then we set the value locally
           (do (set! value-map (assoc value-map variable value))
-              (def context-set-value-history (assoc context-set-value-history variable [value (Throwable.)])))
+              ;(def context-set-value-history (assoc context-set-value-history variable [value (Throwable.)]))
+              )
           ;; then we are going to pass this up to something else
           (ctx-set-value! parent variable value)))))
   (ctx-add-rexpr! [this rexpr]
@@ -128,16 +136,20 @@
       (= context-kind :aggregator-op-inner) (do
                                               ;; Any variable that is bound will be remapped by the aggregator itself, we do not need to anything here
                                               resulting-rexpr)
-      (= context-kind :aggregator-op-outer) (if (empty? value-map)
-                                              resulting-rexpr
-                                              (do
-                                                (assert (empty? value-map))
-                                                resulting-rexpr
-                                                #_(when value-map
-                                                  (debug-repl "agg outer")
-                                                  (???)) ;; this is wrong.  Nothing is projected with outer.  All of the values should just "float up"
-                                                #_(make-conjunct [(make-variable-assignment-conjunct value-map)
-                                                                  resulting-rexpr])))
+      (= context-kind :aggregator-op-outer) (do
+                                              [value-map resulting-rexpr])
+      #_(if (empty? value-map)
+          resulting-rexpr
+          (do
+            (assert (empty? value-map))
+            resulting-rexpr
+            #_(when value-map
+                (debug-repl "agg outer")
+                (???)) ;; this is wrong.  Nothing is projected with outer.  All of the values should just "float up"
+            #_(make-conjunct [(make-variable-assignment-conjunct value-map)
+                              resulting-rexpr])))
+      (= context-kind :jit-root) resulting-rexpr
+
       :else (do
               (dyna-debug (debug-repl "context unknown kind"))
               (???))))  ;; todo: other kinds of contexts which are going
@@ -172,20 +184,16 @@
   (context. nil  :root rexpr #{rexpr} {}))
 
 (defn make-nested-context-disjunct [rexpr]
-  (assert (bound? #'*context*))
-  (context. *context*  :disjunct rexpr #{rexpr} {}))
+  (context. (get-context-bound) :disjunct rexpr #{rexpr} {}))
 
 (defn make-nested-context-proj [rexpr variables]
-  (assert (bound? #'*context*))
-  (context. *context* :proj rexpr #{rexpr} (into {} (map (fn [x] [x nil]) variables))))
+  (context. (get-context-bound) :proj rexpr #{rexpr} (into {} (map (fn [x] [x nil]) variables))))
 
 (defn make-nested-context-if-conditional [rexpr]
-  (assert (bound? #'*context*))
-  (context. *context* :if-expr-conditional rexpr #{rexpr} {}))
+  (context. (get-context-bound) :if-expr-conditional rexpr #{rexpr} {}))
 
 (defn make-nested-context-aggregator [rexpr incoming-var is-conjunctive-aggregator]
-  (assert (bound? #'*context*))
-  (let [pcontext *context*]
+  (let [pcontext (get-context-bound)]
     (context. pcontext
               (if is-conjunctive-aggregator
                 :aggregator-conjunctive  ;; this would mean that we can push through assignments of variables to variables which are outside of this expression.  If something is
@@ -200,21 +208,17 @@
 
 
 (defn make-nested-context-memo-conditional [rexpr]
-  (assert (bound? #'*context*))
-  (context. *context* :memo-expr-conditional rexpr #{rexpr} {}))
+  (context. (get-context-bound) :memo-expr-conditional rexpr #{rexpr} {}))
 
 (defn make-nested-context-aggregator-op-outer [rexpr]
-  (let [c *context*]
-    (context. c  :aggregator-op-outer rexpr #{rexpr}
-              {}
-              #_(into {} (for [v exposed-vars
-                             :when (not (is-bound-in-context? v c))]
-                         ;; the aggregator needs to control when a variable binding is exposed
-                         ;; this means that it needs to "catch" the assignments to any variables done by the inner expression
-                         [v nil])))))
+  (context. (get-context-bound)  :aggregator-op-outer rexpr #{rexpr}
+            {}))
 
 (defn make-nested-context-aggregator-op-inner [rexpr projected-vars incoming-var]
-  (context. *context* :aggregator-op-inner rexpr #{rexpr} (into {incoming-var nil} (for [v projected-vars] [v nil]))))
+  (context. (get-context-bound) :aggregator-op-inner rexpr #{rexpr} (into {incoming-var nil} (for [v projected-vars] [v nil]))))
+
+(defn make-context-jit [rexpr bound-variables]
+  (context. nil :jit-root rexpr #{rexpr} bound-variables))
 
 (defmethod print-method context [this ^java.io.Writer w]
   (.write w (.toString ^Object this)))
@@ -222,27 +226,42 @@
 (defmacro bind-context [val & args]
   ;; this should remap any call to get-context to whatever is the new variable
 
-  `(let [new-ctx# ~val]
+  `(let [new-ctx# ~val
+         old-ctx# (ContextHandle/get)]
      (dyna-assert (and (instance? RContext new-ctx#)
                        (not (nil? new-ctx#))))
-     (let [resulting-rexpr# (binding [*context* new-ctx#]
-                              ~@args)]
+     (let [resulting-rexpr#
+           (try
+             (do
+               (ContextHandle/set new-ctx#)
+               ~@args)
+             (finally
+               (ContextHandle/set old-ctx#)))]
        ;; there should be some exit operation which can check if there is anything which should happen with the grounding
        (ctx-exit-context new-ctx# resulting-rexpr#))))
 
 (defmacro bind-context-raw [val & args]
-  `(let [new-ctx# ~val]
+  `(let [new-ctx# ~val
+         old-ctx# (ContextHandle/get)]
      (dyna-assert (and (instance? RContext new-ctx#)
                        (not (nil? new-ctx#))))
-     (binding [*context* new-ctx#]
-       ~@args)))
+     (try
+       (do
+         (ContextHandle/set new-ctx#)
+         ~@args)
+       (finally
+         (ContextHandle/set old-ctx#)))))
 
 (defmacro bind-no-context [& args]
-  `(binding [*context* nil]  ;; not 100% sure if we can "unbind" the context, maybe should just make the "root" nil and just check the nil value
-     ~@args))
+  `(let [old-ctx# (ContextHandle/get)]
+     (try
+       (do
+         (ContextHandle/set nil)
+         ~@args)
+       (finally
+         (ContextHandle/set old-ctx#)))))
 
-(defn has-context [] (and (bound? #'*context*)
-                          (not (nil? *context*))))
+(defn has-context [] (not (nil? (get-context))))
 
 (defmacro need-context [& args]
   `(if (has-context)

@@ -9,6 +9,14 @@
             [dyna.utils :refer [debug-repl make-term match-term defsimpleinterface]]))
 
 
+(defmacro run-unoptimized-rexprs [& body]
+  `(try
+     (do
+       (alter-var-root #'system/use-optimized-rexprs (constantly false))
+       ~@body)
+     (finally
+       (alter-var-root #'system/use-optimized-rexprs (constantly true)))))
+
 (deftest basic-rexpr
   (let [rexpr (make-add (make-constant 2) (make-constant 3) (make-constant 5))
         ctx (context/make-empty-context rexpr)
@@ -42,7 +50,7 @@
 
 
 (deftest basic-disjunct
-  (binding [system/*use-optimized-rexprs* false]
+  (run-unoptimized-rexprs
     (let [rexpr (make-disjunct
                  [(make-unify (make-variable 'foo) (make-constant 123))
                   (make-unify (make-variable 'foo) (make-constant 123))])
@@ -54,7 +62,7 @@
 
 (deftest basic-disjunct2
   ;; these can not be combined because the values of the variables are different
-  (binding [system/*use-optimized-rexprs* false]  ;; the disjunct will get replaced with the optimized disjunct if this is set to true (the default)
+  (run-unoptimized-rexprs  ;; the disjunct will get replaced with the optimized disjunct if this is set to true (the default)
     (let [rexpr (make-disjunct
                  [(make-unify (make-variable 'foo) (make-constant 123))
                   (make-unify (make-variable 'foo) (make-constant 456))])
@@ -88,7 +96,7 @@
     (is (= (ctx-get-value ctx (make-variable 'out)) 666))))
 
 (deftest basic-aggregator3
-  (binding [system/*use-optimized-rexprs* false]
+  (run-unoptimized-rexprs
     (let [rexpr (make-aggregator "+="
                                  (make-variable 'out)
                                  (make-variable 'agg-in)
@@ -138,3 +146,6 @@
         r2 (my-simple-interface-fn2 val 3 11)]
     (is (= r1 (+ 3 (* 11 5) (* 13 7))))
     (is (= r2 (+ 3 (* 11 5) (* 17 7))))))
+
+
+(def-base-rexpr no-arg-test-case [])

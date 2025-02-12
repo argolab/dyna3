@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# this runs the dyna repl without having to generate the jar first
+# this runs the dyna repl
 
 make
 exec java -cp `make run-class-path` dyna.DynaMain "$@"

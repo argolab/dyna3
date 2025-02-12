@@ -6,9 +6,11 @@
   (:require [dyna.user-defined-terms :refer [def-user-term]])
   (:require [dyna.assumptions :refer [make-assumption is-valid? depend-on-assumption invalidate!]])
   (:require [dyna.system :as system])
-  (:require [dyna.rexpr-builtins :refer [def-builtin-rexpr]])
+  (:require [dyna.rexpr-builtins :refer [def-builtin-rexpr is-true?]])
   (:require [clojure.set :refer [subset?]])
-  (:import [dyna DynaTerm Dynabase]))
+  (:import [dyna DynaTerm Dynabase])
+  (:import [dyna.rexpr_builtins is-int-rexpr is-float-rexpr is-number-rexpr is-string-rexpr])
+  (:import [dyna.rexpr unify-structure-rexpr]))
 
 ;; R-exprs which represent construction of dynabases
 ;; dynabases are a prototype styled inheritiance system for dyna
@@ -27,7 +29,7 @@
                                       :var-list arguments
                                       :var parent-dynabase  ;; either constant nil, or a variable which references what dynabase this is constructed from
                                       :var dynabase]
-  (is-constraint? [this] (let [metadata (get @system/dynabase-metadata name)
+  (is-constraint? [this] (let [metadata (get @(tlocal system/dynabase-metadata) name)
                                assump (:does-not-self-inerhit-assumption metadata)]
                            (if (is-valid? assump)
                              (do
@@ -42,7 +44,7 @@
 (def-base-rexpr dynabase-access [:str name
                                  :var dynabase
                                  :var-list arguments]
-  (is-constraint? [this] (let [metadata (get @system/dynabase-metadata name)
+  (is-constraint? [this] (let [metadata (get @(tlocal system/dynabase-metadata) name)
                                assump (:does-not-self-inerhit-assumption metadata)]
                            (if (is-valid? assump)
                              (do
@@ -55,7 +57,7 @@
   :match (dynabase-constructor (:str name) (:ground-var-list arguments) (:ground parent-dynabase) (:any dynabase))
   (let [parent-val (get-value parent-dynabase)
         args (vec (map get-value arguments))
-        metadata (get @system/dynabase-metadata name)
+        metadata (get @(tlocal system/dynabase-metadata) name)
         ret (cond (dnil? parent-val) (let [db (Dynabase. {name (list args)})]
                                        (make-unify dynabase (make-constant db)))
                   (instance? Dynabase parent-val) (let [parent-obj (.access_map ^Dynabase parent-val)
@@ -182,7 +184,7 @@
   ;; if we are going to somehow seralize and then relaod new items, then we are going to make these unique
   ;; we might consider using UUID as the identifier for a dynabase name.  Then we could just assume that those would be unique between different seralization
   (let [name (str (gensym 'dynabase_))]
-    (swap! system/dynabase-metadata assoc name
+    (swap! (tlocal system/dynabase-metadata) assoc name
            {:has-super has-super ;; true or false to indicate if this is a
                                    ;; "root" dynabase, as that indicates that we
                                    ;; are not going to see more than one
@@ -271,3 +273,41 @@
 
 (defmethod print-method Dynabase [^Dynabase this ^java.io.Writer w]
   (.write w (.toString this)))
+
+
+(defmacro not-dynabase-type [type]
+  `(do
+     (def-rewrite
+       :match {:rexpr ~'(dynabase-constructor _ _ _ (:free Dynabase))
+               :context (~type ~'Dynabase (is-true? ~'_))}
+       :run-at :inference
+       (make-multiplicity 0))
+     (def-rewrite
+       :match {:rexpr (~type (:free ~'Var) ~'Result)
+               :context ~'(dynabase-constructor _ _ _ Var)}
+       :run-at :inference
+       :assigns-variable ~'Result
+       false)
+     (def-rewrite
+       :match {:rexpr ~'(dynabase-access _ (:free Dynabase) _)
+               :context (~type ~'Dynabase (is-true? ~'_))}
+       :run-at :inference
+       (make-multiplicity 0))
+     (def-rewrite
+       :match {:rexpr (~type (:free ~'Var) ~'Result)
+               :context ~'(dynabase-access _ Var _)}
+       :run-at :inference
+       :assigns-variable ~'Result
+       false)))
+
+(not-dynabase-type is-int)
+(not-dynabase-type is-float)
+(not-dynabase-type is-number)
+(not-dynabase-type is-string)
+
+(def-rewrite
+  :match-combines [(or (dynabase-constructor _ _ _ (:free Dynabase))
+                       (dynabase-access _ (:free Dynabase) _))
+                   (unify-structure (:free Dynabase) _ _ _ _)]
+  :run-at :inference
+  (make-multiplicity 0))

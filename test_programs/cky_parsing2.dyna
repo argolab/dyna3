@@ -1,0 +1,49 @@
+word(0) = "Papa".
+word(1) = "ate".
+word(2) = "the".
+word(3) = "caviar".
+word(4) = "with".
+word(5) = "a".
+word(6) = "spoon".
+word(7) = ".".
+
+
+% random numbers such that we will get a unique best parse
+rule("SD", "NP", "VP") = .2406.
+rule("S", "SD", ".") = .6518.
+rule("NP", "Det", "N") = .7946.
+rule("NP", "NP", "PP") = .1605.
+rule("VP", "V", "NP") = .9918.
+rule("VP", "VP", "PP") = .552.
+rule("PP", "P", "NP") = .457.
+
+rule("NP", "Papa") = 1.
+rule("N", "caviar") = 1.
+rule("N", "spoon") = 1.
+rule("V", "ate") = 1.
+rule("P", "with") = 1.
+rule("Det", "the") = 1.
+rule("Det", "a") = 1.
+rule(".", ".") = 1.
+
+
+length max= I for _=word(I).
+
+phrase(I,K,T) max= phrase(I,J,T1) * phrase(J,K,T2) * rule(T,T1,T2) for range(I+1,K,J), I+2 <= K arg x[T,$arg(phrase(I,J,T1)),$arg(phrase(J,K,T2))].
+phrase(I,I+1,T) max= rule(T, word(I)) arg [word(I)].
+
+$memo(phrase[A:$free,B:$free,C:$free]) = "null".
+
+print "program loaded, going to make query".
+
+phrase(A,B,C)?
+
+% max_non_term(A,B) max= phrase(A,B,X) arg X.
+% $arg(max_non_term(A,B)) ?
+
+print "parse".
+$arg(phrase(0,length+1,"S"))?
+
+target = x["S", x["SD", ["Papa"], x["VP", x["VP", ["ate"], x["NP", ["the"], ["caviar"]]], x["PP", ["with"], x["NP", ["a"], ["spoon"]]]]], ["."]].
+
+assert target == $arg(phrase(0,length+1,"S")).

@@ -3,7 +3,7 @@ JAVA ?= java
 
 # this version should match the version in project.clj as that is what is going to be built by lein
 JVERSION:= 0.1.0
-VERSION= $(shell date '+%Y%m%d')
+VERSION:= $(shell git describe --always --long --abbrev=12)-$(shell date '+%Y%m%d')
 
 SOURCE=$(wildcard src/*/*/*.clj) $(wildcard src/*/*/*.java)
 JAR_TARGET=target/dyna-$(JVERSION)-SNAPSHOT-standalone.jar
@@ -22,10 +22,14 @@ clean:
 	rm -rf target/ dyna-standalone-* python_build/
 
 test:
-	_JAVA_OPTIONS='-Ddyna.debug=false -Ddyna.trace_rexpr_construction=false -Xss8m' $(LEIN) test
+	_JAVA_OPTIONS='-Ddyna.debug=false -Ddyna.trace_rexpr_construction=false -Ddyna.debug_repl=false -Xss8m -ea' $(LEIN) test
 
 test-debug:
 	$(LEIN) test
+
+# some of the tests are failing randomly or somehow failing depending on the order in which they run.  Trying to fix this, but annoying right now with github running of the tests failing
+github-test:
+	_JAVA_OPTIONS='-Ddyna.debug=false -Ddyna.trace_rexpr_construction=false -Ddyna.debug_repl=false -Xss8m -ea' $(LEIN) test || 	_JAVA_OPTIONS='-Ddyna.debug=false -Ddyna.trace_rexpr_construction=false -Ddyna.debug_repl=false -Xss8m -ea' $(LEIN) retest
 
 # start the repl for dyna code from the source directory
 repl: dyna-repl

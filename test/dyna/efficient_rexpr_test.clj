@@ -11,8 +11,13 @@
   (:require [dyna.context :as context])
   (:require [dyna.simple-test :refer [run-string str-test]]))
 
+(defmacro run-optimized-rexprs [& body]
+  `(do
+     (alter-var-root #'system/use-optimized-rexprs (constantly true))
+     ~@body))
+
 (deftest make-disjunct1
-  (binding [system/*use-optimized-rexprs* true]
+  (run-optimized-rexprs
     (run-string "
 f(1) = 2.
 f(2) = 3.
@@ -22,7 +27,7 @@ assert f(1) = 2.
 ")))
 
 (deftest make-disjunct2
-  (binding [system/*use-optimized-rexprs* true]
+  (run-optimized-rexprs
     (run-string "
 f(X) += 1.
 f(X) += X.
@@ -34,7 +39,7 @@ assert r(f(5)) = 6.
 
 
 (deftest make-disjunct3
-  (binding [system/*use-optimized-rexprs* true]
+  (run-optimized-rexprs
     (run-string "
 f(0,0) = 1.
 f(0,1) = 2.
@@ -61,7 +66,7 @@ assert b = 22. %1 + 2*3 + 3 + 4*3.
 
 
 (deftest disjunct-op-empty
-  (binding [system/*use-optimized-rexprs* true]
+  (run-optimized-rexprs
     (let [r (make-disjunct [(make-multiplicity 1) (make-unify (make-variable 'a) (make-constant 1))])]
       (is (is-disjunct-op? r))
       (is (is-non-empty-rexpr? r))
@@ -69,7 +74,7 @@ assert b = 22. %1 + 2*3 + 3 + 4*3.
 
 
 (deftest efficient-aggregator1
-  (binding [system/*use-optimized-rexprs* true]
+  (run-optimized-rexprs
     (let [r (make-aggregator "+=" (make-variable 'result) (make-variable 'incoming) true
                              (make-disjunct [(make-proj-many [(make-variable 'A)] (make-conjunct [(make-range (make-constant 0) (make-constant 10) (make-constant 1) (make-variable 'A) (make-constant true))
                                                                                                   (make-times (make-variable 'A) (make-constant 7) (make-variable 'incoming))]))
@@ -84,7 +89,7 @@ assert b = 22. %1 + 2*3 + 3 + 4*3.
                                                                      (* (reduce + (range 20 30)) 13))))))))
 
 (deftest efficient-aggregator2
-  (binding [system/*use-optimized-rexprs* true]
+  (run-optimized-rexprs
     (run-string "
 f(X) += V:range(X)*10.
 f(X) += V:range(X,100)*50.
@@ -93,7 +98,7 @@ assert f(17) == 242060.
 ")))
 
 (deftest efficient-aggregator3
-  (binding [system/*use-optimized-rexprs* true]
+  (run-optimized-rexprs
     (run-string "
 
 % define a basic matrix
@@ -109,7 +114,7 @@ print b(0,0).
 
 
 (deftest efficient-aggregator4
-  (binding [system/*use-optimized-rexprs* true]
+  (run-optimized-rexprs
     (run-string "
 sum([]) = 0.
 sum([X|Y]) = X+sum(Y).

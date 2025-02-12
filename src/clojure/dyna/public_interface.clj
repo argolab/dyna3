@@ -12,7 +12,7 @@
                                        eval-string
                                        eval-ast
                                        current-dir]])
-  (:require [dyna.user-defined-terms :refer [add-to-user-term]])
+  (:require [dyna.user-defined-terms :refer [add-to-user-term!]])
   (:import [dyna DynaInterface ExternalFunction DynaTerm]))
 
 
@@ -68,5 +68,5 @@
                         (.call func (into-array Object args)))
                    rexpr (make-function-call ff out vars)]
 
-               (add-to-user-term current-dir DynaTerm/null_term name arity rexpr)
+               (add-to-user-term! current-dir DynaTerm/null_term name arity rexpr)
                (eval-ast (make-term ("$compiler_expression" ("make_system_term" ("/" name arity))))))))

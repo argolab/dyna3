@@ -3,7 +3,9 @@ package dyna;
 import clojure.java.api.Clojure;
 import clojure.lang.IFn;
 import clojure.lang.ILookup;
-import java.util.concurrent.atomic.AtomicLong;
+import clojure.lang.IPending;
+//import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Pattern;
 
 
 /**
@@ -27,15 +29,18 @@ public final class DynaTerm implements ILookup {
         this.dynabase = null_term;
         this.from_file = null;
         this.arguments = arguments;
+        check_arguments();
     }
 
     public DynaTerm(String name, Object dynabase, Object from_file, Object arguments) {
         assert name != null;
+        assert dynabase != null;
         assert clojure_seqable.invoke(arguments) == Boolean.TRUE;
         this.name = name; // .intern(); // it would be nice to intern all of the names.  Then we can just use pointer equality between these different values
         this.dynabase = dynabase;
         this.from_file = from_file;
         this.arguments = arguments;
+        check_arguments();
     }
 
     private DynaTerm() {
@@ -46,11 +51,29 @@ public final class DynaTerm implements ILookup {
         this.arguments = new Object[]{};
     }
 
+    private void check_arguments() {
+        if(arguments instanceof IPending)
+            throw new IllegalArgumentException("Should not have a pending type for DynaTerm arguments");
+        // try {
+        //     //final int c = arity();
+        //     /*for(int i = 0; i < c; i++) {
+        //         if(get(i) == null) {
+        //             System.err.println("null in term arguments");
+        //             //throw new RuntimeException("null in term arguments");
+        //         }
+        //         }*/
+        // } catch(Exception err) {
+        //     System.err.println(err);
+        //     //throw new RuntimeException(err);
+        // }
+    }
+
     public static boolean include_filename_in_print = false;
 
     public String toString() {
         StringBuilder b = new StringBuilder();
-        if(".".equals(name) && arguments != null && arity() == 2) {
+        final int count = arity();
+        if(".".equals(name) && arguments != null && count == 2) {
             Object[] arr = list_to_array();
             if(arr != null) {
                 b.append("[");
@@ -66,15 +89,21 @@ public final class DynaTerm implements ILookup {
             b.append(from_file.toString());
             b.append("/");
         }
-        final int count = arity();
         if(name.charAt(0) == '$' && count == 0) {
             // $nil (and $null) is a term which would cause it to print as $nil[], but we also have it defined as a term which just returns its value
             return name;
         }
+
         // there is no way to tell the difference between $nil and [] as those are the same expression.
         // I suppose that we could make the end of a list represented as something else?  Like use `[]` as the name of the list term or something
         // in which case it would
-        b.append(name);
+        if(no_quote_term.matcher(name).find()) {
+            b.append(name);
+        } else {
+            b.append("'");
+            b.append(name);
+            b.append("'");
+        }
         b.append("["); // going to use the square bracket to print these as that is the syntax for writing this without &x(1,2,3) == x[1,2,3]
         for(int i = 0; i < count; i++) {
             if(i != 0) b.append(", ");
@@ -91,6 +120,7 @@ public final class DynaTerm implements ILookup {
         // to compare as equal with eachother.  As such, we can't just directly
         // hash the array/vec/etc as those would give different hash code
         // results
+
         if(hashcode_cache == 0) {
             int h = ((java.lang.Number)clojure_hash.invoke(name)).intValue();
             int count = arity();
@@ -99,8 +129,8 @@ public final class DynaTerm implements ILookup {
                 // .get does not work with a list
                 h = h * 31 + ((java.lang.Number)clojure_hash.invoke(clojure_nth.invoke(arguments, i))).intValue();
             }
-            // if(dynabase != null_term)
-            //     h ^= dynabase.hashCode();
+            if(!null_term.equals(dynabase)) // the $nil term will have that it is its own dynabase
+                h ^= dynabase.hashCode();
             hashcode_cache = hash_scramble(h);
         }
         return hashcode_cache;
@@ -112,7 +142,7 @@ public final class DynaTerm implements ILookup {
         DynaTerm t = (DynaTerm)other;
         if(t.hashCode() != hashCode() ||
            !name.equals(t.name)) return false;
-        int count = arity();
+        final int count = arity();
         if(count != t.arity()) return false;
         for(int i = 0; i < count; i++) {
             if(clojure_eq.invoke(clojure_nth.invoke(arguments, i),
@@ -122,7 +152,8 @@ public final class DynaTerm implements ILookup {
         // should the dynabase be included in the check for equality.  I suppose
         //that these objects will not unify with eachother.  But the different from_file will still unify together
 
-        //if(this.dynabase != t.dynabase && !this.dynabase.equals(t.dynabase))  return false;
+        if(this.dynabase != t.dynabase && !this.dynabase.equals(t.dynabase))
+            return false;
         return true;
     }
 
@@ -166,6 +197,9 @@ public final class DynaTerm implements ILookup {
     static private final Object arity_keyword;
 
     static public final DynaTerm null_term;
+    static public DynaTerm get_null_term() { return null_term; } // annoying clojure making this hard
+
+    static private final Pattern no_quote_term = Pattern.compile("^\\$?[a-z][a-zA-Z0-9_]*$");
 
     static {
         // this should get the underlying value, otherwise there is still some indirect through the variable for these values
@@ -183,6 +217,7 @@ public final class DynaTerm implements ILookup {
         arity_keyword = Clojure.var("clojure.core", "keyword").invoke("arity");
 
         null_term = new DynaTerm();//"$nil", new Object[]{});
+        null_term.hashCode();
     }
 
     public static DynaTerm create(String name, Object... args) {

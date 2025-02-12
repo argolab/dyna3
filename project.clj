@@ -5,6 +5,7 @@
   :dependencies [[org.clojure/clojure "1.11.1" ;"1.12.0-mfl-SNAPSHOT"
                   ]
                  [org.clojure/tools.namespace "1.2.0"]
+                 ;[org.ow2.asm/asm "9.5"]
                  ;[org.clojure/tools.macro "0.1.5"]
                  [aprint "0.1.3"]  ;; for formatted printing
                  ;[clj-python/libpython-clj "2.00-beta-22"]
@@ -23,10 +24,6 @@
                  ;[reply "0.5.1"]
                  ]
   :repl-options {:init-ns dyna.core}
-  ;; :aot [dyna.interface
-  ;;       dyna.parser_interface]
-  ;;:aot :all
-  ;;:aot [dyna.rexpr]
   :source-paths ["src/clojure"]
   :java-source-paths ["target/gen-src" "src/java"]
   :resource-paths ["src/resources"]
@@ -38,14 +35,12 @@
   :antlr-src-dir "src/antlr"
   :antlr-dest-dir "target/gen-src"
 
-  :profiles {:uberjar {:main dyna.DynaMain
-                       ;; clojure only requires java 8, and we shouldn't need any of the "newer" features ourselves also
-                       ;; so this should make this work with any version released after 1.8 (march 2014)
-                       :javac-options ["-source" "1.8" "-target" "1.8"]
-
-                                        ;:aot [dyna.core] ;; this makes it start faster but run slower....
-                       }}
+  :profiles {:uberjar {:main dyna.DynaMain}}
   :main dyna.core
+
+  ;; clojure only requires java 8, and we shouldn't need any of the "newer" features ourselves also
+  ;; so this should make this work with any version released after 1.8 (march 2014)
+  :javac-options ["-source" "1.8" "-target" "1.8" "-XDignore.symbol.file" "-Xlint:-options"]
 
   ;; this is needed to generate the uberjar, but it makes it slower to run when working on stuff
   ;; so can comment out if running tests or something from the local directory
@@ -55,7 +50,7 @@
 
   ;;:main dyna.DynaMain
   :global-vars {;*warn-on-reflection* true  ;; useful for identifying where it uses clojure's reflection which is slow...
-                                        ;*unchecked-math* :warn-on-boxed ;; boxed math is slow9
+                                        ;*unchecked-math* :warn-on-boxed ;; boxed math is slow
                 }
 
   ;; this will check the repo every time it runs...

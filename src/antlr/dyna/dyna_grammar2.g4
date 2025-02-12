@@ -84,7 +84,7 @@ atom returns[String t]
         $t = $m.getText();
         $t = $t.substring(1, $t.length() - 1);
         if($t.startsWith("\$_"))
-            throw new RuntimeException("the namespace \$_ is reserved for internal use");
+            throw new DynaSyntaxError("the namespace \$_ is reserved for internal use");
       }
     ;
 
@@ -101,7 +101,7 @@ Variable
 // going to change this to only match the aggregators which are actually defined
 MergedAggregator
     : [&*\-+:|?] '='
-    | [a-z][a-z&*\-+:|?]* '=' {
+    | [a-z][a-z&*\-+:|?_]* '=' {
     // this checks that the aggregator name is defined in rexpr_aggregators.clj and will conditionally enable this lexer rule
         aggregator_defined(getText())}?
     ;
@@ -277,12 +277,14 @@ term returns[DynaTerm rterm = null]
             String ttext = $t.ctx.start.getInputStream().getText(new Interval($t.ctx.start.getStartIndex(), $t.ctx.stop.getStopIndex()));
             $rterm = DynaTerm.create("\$print", $t.rterm, ttext, $t.ctx.getStart().getLine());
        }
-    | 'debug_repl'
+    | 'debug_repl_clojure'
       t=termBody["print="] EndTerm
       {
            String ttext = $t.ctx.start.getInputStream().getText(new Interval($t.ctx.start.getStartIndex(), $t.ctx.stop.getStopIndex()));
            $rterm = DynaTerm.create("\$_debug_repl", $t.rterm, ttext, $t.ctx.getStart().getLine());
       }
+    | 'debug' EndTerm
+      { $rterm = DynaTerm.create("\$debug"); }
 
 // there could be warnings if some library is used in a particular way.  This should somehow defer in the case that some dynabase has not been constructed, but this would want to have that the expression would later come into existence
     | 'warning' '(' we=expression ')' t=termBody["warning="] EndTerm
@@ -544,6 +546,9 @@ expressionRoot returns [DynaTerm rterm]
     | mp=assocativeMap { $rterm=$mp.rterm; }
     | db=dynabase { $rterm = $db.rterm; }
     | v=Variable '(' arguments ')' {
+            if($v.getText().equals("_")) {
+                throw new DynaSyntaxError("Calling an unscore function is not supported");
+            }
             // for doing an indirect call to some value
             $arguments.args.add(0, DynaTerm.create("\$variable", $v.getText()));
             $rterm = DynaTerm.create_arr("\$call", $arguments.args);
@@ -564,7 +569,7 @@ expressionDynabaseAccess returns[DynaTerm rterm]
     : a=expressionRoot {$rterm=$a.rterm;}
       ('.' m=methodCall {
                 if($rterm.name.equals("\$quote") || $rterm.name.equals("\$inline_function")) {
-                    throw new RuntimeException("syntax error");
+                    throw new DynaSyntaxError();//"syntax error");
                     //assert(false); /// should be a syntax error
                 }
                 if($rterm.name.equals("\$quote1")) {
@@ -579,8 +584,7 @@ expressionDynabaseAccess returns[DynaTerm rterm]
         })*
       ('.' bracketTerm {
         if($rterm.name.equals("\$quote") || $rterm.name.equals("\$quote1") || $rterm.name.equals("\$dynabase_quote1")) {
-            throw new RuntimeException("syntax error");
-            //assert(false); // should be a syntax error
+            throw new DynaSyntaxError("Structured terms can not be used as a dynabase");
         }
         $rterm = DynaTerm.create("\$dynbase_quote1", $rterm, DynaTerm.create_arr($bracketTerm.name, $bracketTerm.args)); })?
     ;
@@ -607,8 +611,7 @@ locals [DynaTerm add_arg=null]
                || $rterm.name.equals("\$dynabase_create") || $rterm.name.equals("\$map_empty") || $rterm.name.equals("\$map_element")
                || $rterm.name.equals("\$nil") || $rterm.name.equals("\$cons"))
                {
-               throw new RuntimeException("syntax error");
-               //assert(false); // this should return a syntax error rather than an assert(false)
+               throw new DynaSyntaxError("Implicit call using {} can only be done to a term");
                }
             if($rterm.name.equals("\$dynabase_call")) {
                 // have to put the argument onto the dynabase call element,
@@ -664,15 +667,20 @@ expressionAdditive returns [DynaTerm rterm]
             {$rterm = DynaTerm.create($op.getText(), $rterm, $b.rterm);})*
     ;
 
+expressionNot returns [DynaTerm rterm]
+    : a=expressionAdditive {$rterm=$a.rterm;}
+    | '!' a=expressionAdditive {$rterm = DynaTerm.create("!", $a.rterm);}
+    ;
+
 expressionRelationCompare returns [DynaTerm rterm]
 locals[ArrayList<DynaTerm> expressions, ArrayList<String> ops]
-    : a=expressionAdditive {$rterm = $a.rterm;}
-    | a=expressionAdditive {
+    : a=expressionNot {$rterm = $a.rterm;}
+    | a=expressionNot {
           $expressions = new ArrayList<>();
           $ops = new ArrayList<>();
           $expressions.add($a.rterm);
       }
-      (op=('>'|'<'|'<='|'>=') b=expressionAdditive
+      (op=('>'|'<'|'<='|'>=') b=expressionNot
           { $ops.add($op.getText());
             $expressions.add($b.rterm);
           })+
@@ -722,8 +730,8 @@ expression returns [DynaTerm rterm]
 compilerExpressionArgument returns [Object val]
     locals [ArrayList<Object> args=null]
     : p=primitive {$val=$p.v;}
-    | {$args=new ArrayList<>();} a=atom ('(' (ag=compilerExpressionArgument Comma {$args.add($ag.val);})*
-                                             (ag=compilerExpressionArgument Comma? {$args.add($ag.val);})?  ')' )?
+    | {$args=new ArrayList<>();} a=atom ('(' ((ag=compilerExpressionArgument Comma {$args.add($ag.val);})*
+                                              ag=compilerExpressionArgument Comma? {$args.add($ag.val);})?  ')' )?
       {$val = DynaTerm.create_arr($a.t, $args); }
     | '*' {$val = "*";}
     | '**' {$val = "**";}

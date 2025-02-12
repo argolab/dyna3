@@ -4,10 +4,11 @@
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.rexpr-builtins :refer [make-lessthan make-lessthan-eq
                                          make-add make-times make-min make-max make-lor make-land
-                                         make-not-equals make-colon-line-tracking-min upcast-big-int]])
+                                         make-not-equals make-colon-line-tracking-min upcast-big-int
+                                         maybe-cast-to-float]])
   (:require [dyna.context :as context])
   (:require [dyna.iterators :refer [run-iterator make-skip-variables-iterator]])
-  (:import (dyna UnificationFailure DynaTerm DynaUserError ParserUtils))
+  (:import (dyna UnificationFailure DynaTerm DynaUserError ParserUtils DynaMap))
   (:import [dyna.rexpr aggregator-rexpr])
 
   (:require [clojure.set :refer [subset?]]))
@@ -23,9 +24,16 @@
                        ^clojure.lang.IFn add-to-in-rexpr
                        ^clojure.lang.IFn add-to-out-rexpr
                        ^clojure.lang.IFn saturate
+                       ^clojure.lang.IFn combine-ignore-nil
                        ])
 
 (def aggregators (atom {}))
+
+;; (defmethod print-dup Aggregator [^Aggregator a]
+;;   (with-meta (symbol "dyna.rexpr-aggregators" (str "defined-aggregator-" (:name a))) {:tag Aggregator}))
+
+(defmethod print-dup Aggregator [^Aggregator a ^java.io.Writer w]
+  (.write w (str "#=(var-get #'dyna.rexpr-aggregators/defined-aggregator-" (:name a) ")")))
 
 (defn is-aggregator-defined? [^String name]
   ;; this method is called by dyna.ParserUtils
@@ -50,14 +58,18 @@
                   (assoc args3 :many-items (fn [val mult]
                                              (cmb ident val mult))))
                 args3)
-        args5 (assoc args4 :name name)]
-    ;(assert (subset? (keys kw-args) #{:combine :identity :}))
-
+        args5 (assoc args4 :name name)
+        combine-fn (:combine args5)
+        agg (map->Aggregator (merge {:allows-with-key false
+                                     :lower-value identity
+                                     :combine-ignore-nil (fn [a b]
+                                                           (if (nil? a) b
+                                                               (combine-fn a b)))}
+                                    args5))]
     ;; this should construct the other functions if they don't already exist, so that could mean that there are some defaults for everything
     ;; when the aggregator is created, it can have whatever oeprations are
-    (swap! aggregators assoc name (map->Aggregator (merge {:allows-with-key false
-                                                           :lower-value identity}
-                                                          args5)))))
+    (swap! aggregators assoc name agg)
+    (intern 'dyna.rexpr-aggregators (symbol (str "defined-aggregator-" name)) agg)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -130,7 +142,7 @@
   (if (and (instance? DynaTerm v)
            (= (.name ^DynaTerm v) "$with_key"))
     ;; the value will be first, and the key associated with the value is second
-    (get (.arguments ^DynaTerm v) 0)
+    (get v 0)
     v))
 
 
@@ -145,7 +157,8 @@
 
 (def-aggregator "max="
   :combine (fn [a b] (if (> (get-aggregated-value a) (get-aggregated-value b)) a b))
-  :combine-mult (fn [a b mult] (if (> (get-aggregated-value a) (get-aggregated-value b)) a b))
+  :combine-mult (fn [a b mult]
+                  (if (> (get-aggregated-value a) (get-aggregated-value b)) a b))
   :identity ##-Inf
   :allows-with-key true
   ;; this will let us add expressions to the R-expr so that this can eleminate branches which are not useful
@@ -261,7 +274,13 @@
                                                          ;; if we only allow for 1 value per line, then this could be lessthan rather than lessthan-eq
                                                          (make-lessthan-eq (make-constant line) linevar (make-constant true))])))))
   :add-to-out-rexpr (fn [current-value result-variable]
-                      (make-not-equals result-variable (make-constant colon-identity-elem) (make-constant true)))
+                      ;; the := aggregator can _never_ return the value `$null` as that is used as the value which indicates that nothing should be returned
+                      ;; so if someone does `$null = (:= f).` then we can shortcut this and stop evaluation of the expression
+                      (if (and (is-constant? result-variable) (= (get-value result-variable) colon-identity-elem))
+                        (make-multiplicity 0)
+                        (make-multiplicity 1))
+                      ;(make-not-equals result-variable (make-constant colon-identity-elem) (make-constant true))
+                      )
   :lower-value (fn [x]
                  (assert (= "$colon_line_tracking" (.name ^DynaTerm x)))
                  (let [[la va] (.arguments ^DynaTerm x)]
@@ -289,6 +308,38 @@
     :many-items (fn [val mult] val)))
 
 
+
+(def-aggregator "concat_list="
+  ;; concat lists together.
+  :identity DynaTerm/null_term
+  :combine (fn [a b] (let [av (.list_to_vec ^DynaTerm a)
+                           bv (.list_to_vec ^DynaTerm b)]
+                       (assert (and (not (nil? av)) (not (nil? bv))))
+                       (DynaTerm/make_list (concat av bv)))))
+
+(def-aggregator "merge_map="
+  ;; merge maps together.  should allow for multiple keys to get combined, but the order / overrides is non-deterministic
+  :identity (DynaMap. {})
+  :combine (fn [a b]
+             (DynaMap. (merge (.map-elements ^DynaMap a) (.map-elements ^DynaMap b)))))
+
+(defrecord mean-equals-aggregator-count [val count])
+(defn- mean-equals-make [v]
+  (if (instance? mean-equals-aggregator-count v)
+    v
+    (mean-equals-aggregator-count. v 1)))
+(def-aggregator "mean="
+  :identity (mean-equals-aggregator-count. 0 0)
+  :combine (fn [a b]
+             (let [a (mean-equals-make a)
+                   b (mean-equals-make b)]
+               (mean-equals-aggregator-count. (+ (:val a) (:val b))
+                                              (+ (:count a) (:count b)))))
+  :lower-value (fn [x]
+                 (let [x (mean-equals-make x)]
+                   (when (= 0 (:count x))
+                     (throw (UnificationFailure. "no aggregands for mean=")))
+                   (/ (:val x) (maybe-cast-to-float (:count x))))))
 
 
 (def-rewrite
@@ -394,7 +445,7 @@
       (if (is-bound-in-context? incoming-variable ctx)
         (if (is-multiplicity? nR)
           ;; then we need to multiply in the result
-          (case (:mult nR)
+          (case (long (:mult nR))
             0 (if body-is-conjunctive
                 (do
                   ;(debug-repl "agg 0")
@@ -520,6 +571,14 @@
                                                   (make-conjunct [(make-no-simp-unify incoming-variable (make-constant val))
                                                                   (remap-variables R {incoming-variable (make-constant val)})]))))))))))
 
+(defn- ^{:dyna-jit-external true} aggregator-iterator-filter [incoming-variable iters]
+  (remove nil? (map (fn [i]
+                          (let [b (iter-what-variables-bound i)]
+                            (if (not (some #{incoming-variable} b))
+                              i
+                              (if (>= (count b) 2)
+                                (make-skip-variables-iterator i #{incoming-variable})))))
+                        iters)))
 
 (def-iterator
   ;; the iterator can only work for conjunctive aggregators, as we are trying to
@@ -529,15 +588,9 @@
   :match (aggregator (:unchecked operator) (:any result-variable) (:any incoming-variable) (true? is-conjunctive) (:rexpr R))
   (let [iters (find-iterators R)]
     (if (is-bound? incoming-variable) ;; I suppose that the iterator could still
-                                      ;; show up in the case that it would be
-                                      ;; bound, but then it would still need to
-                                      ;; get filtered out in all cases??
+      ;; show up in the case that it would be
+      ;; bound, but then it would still need to
+      ;; get filtered out in all cases??
       iters
       ;; for iterators which contain the incoming variable, this should get filtered out
-      (remove nil? (map (fn [i]
-                          (let [b (iter-what-variables-bound i)]
-                            (if (not (some #{incoming-variable} b))
-                              i
-                              (if (>= (count b) 2)
-                                (make-skip-variables-iterator i #{incoming-variable})))))
-                        iters)))))
+      (aggregator-iterator-filter incoming-variable iters))))

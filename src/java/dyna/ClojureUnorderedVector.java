@@ -27,7 +27,7 @@ public final class ClojureUnorderedVector extends AFn implements IPersistentVect
                                                            IObj
 {
 
-    private int _hash = 0;  // a cache for the has, as things get added/removed, then we will attempt to
+    private int _hash = 0;  // a cache for the hash of the objects
     public final Object[] vals;
 
     public static final ClojureUnorderedVector EMPTY = new ClojureUnorderedVector(new Object[]{}, 0);
@@ -166,8 +166,8 @@ public final class ClojureUnorderedVector extends AFn implements IPersistentVect
         Object a[] = new Object[vals.length+1];
         System.arraycopy(vals,0,a,0,vals.length);
         a[a.length-1] = val;
-        int h = 0;
-        if(_hash != 0) { h ^= hash(vals); }
+        int h = _hash;
+        if(h != 0) { h ^= hash(vals); }
         return new ClojureUnorderedVector(a, h);
     }
 
@@ -209,7 +209,8 @@ public final class ClojureUnorderedVector extends AFn implements IPersistentVect
     public ClojureUnorderedVector empty() { return EMPTY; }
 
     public ISeq seq() {
-        return RT.seq(vals);
+        return ArraySeq.create(vals);
+        //return RT.seq(vals);
     }
 
     public Object valAt(Object key) {

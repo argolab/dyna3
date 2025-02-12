@@ -23,7 +23,8 @@ public class DynaAgenda {
     public void process_agenda() throws InterruptedException {
         if(queue.isEmpty())
             return;
-        System.err.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Running agenda~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+        if(print_agenda_running)
+            System.err.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Running agenda~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
         long local_processed = 0;
         long agenda_start_processing = System.currentTimeMillis();
         try {
@@ -47,9 +48,61 @@ public class DynaAgenda {
             work_processed += local_processed;
             long time = System.currentTimeMillis() - agenda_start_processing;
             StatusCounters.agenda_processing_time(local_processed, time);
-            System.err.println("~~~~~~~~~~~~~~~~Done running agenda, " + local_processed + " work processed in " + time/1000.0 + " seconds~~~~~~~~~~~~~");
+            if(print_agenda_running)
+                System.err.println("~~~~~~~~~~~~~~~~Done running agenda, " + local_processed + " work processed in " + time/1000.0 + " seconds~~~~~~~~~~~~~");
         }
     }
+
+    /*
+      // This is theory code about how a concurrent system could be implement
+
+      public final int num_threads = System.getProperty("dyna.num_threads") != null ? Integer.parseInt(System.getProperty("dyna.num_threads")) :  Runtime.getRuntime().availableProcessors();
+
+      private final ReentrantReadWriteLock concurrent_work_lock = new ReentrantReadWriteLock();
+      private final rwlExecutorService thread_pool = Executors.newCachedThreadPool();
+      private void process_agenda_concurrently() throws InterruptedException {
+          for(int i = 0; i < num_threads; i++)
+              // submit the work into the
+      }
+
+      private void run_agenda_from_thread() {
+          // this would have to manage the clojure variable dynamic values.  Maybe do something like get the dynamic values from the initial thread
+          // and then push those values on all of the worker threads
+
+          while(!is_interrupted) {
+              IDynaAgendaWork work;
+              synchronized (this) {
+                  work = queue.poll();
+                  if(work == null) break;
+                  queued_work.remove(work);
+              }
+              // the main idea is that the work could tell us if it is safe to run concurrently.  The memoization values should be able to do that
+              // without too much trouble as long as it checks that the relevant values are not modified inbetween the start and finishing of processing
+              // other work (such as making new memo tables or other management tasks) would just run single threaded as they would be required to grab
+              // the write lock which would block until everything else is taken out
+              Lock lock = work.can_run_concurrently() ? concurrent_work_lock.readLock() : concurrent_work_lock.writeLock();
+              lock.lock();
+              try {
+                  work.run();
+              } catch (DynaRetryWork err) {
+                  // this would put the work back on the agenda
+              } finally {
+                  lock.unlock();
+              }
+              local_processed++; // this could be replaced with an atomic counter
+              if(print_progress && local_processed % 5173 == 0) {
+                System.err.print("\rAgenda status, work processed: "+local_processed);
+              }
+          }
+      }
+
+
+      void interrupt() {
+          is_interrupted = true;  // something which stops it from processing, rather than using thread.interrupted
+      }
+
+     */
+
 
     public boolean is_done() {
         return queue.isEmpty();
@@ -61,5 +114,8 @@ public class DynaAgenda {
         queued_work.clear();
     }
 
-    public final boolean print_progress = Boolean.parseBoolean(System.getProperty("dyna.print_agenda_progress", "false"));
+    public static final boolean print_progress = Boolean.parseBoolean(System.getProperty("dyna.print_agenda_progress", "false"));
+    public static final boolean print_agenda_running = Boolean.parseBoolean(System.getProperty("dyna.print_agenda_running", "false"));
+    public static final boolean print_agenda_work = Boolean.parseBoolean(System.getProperty("dyna.print_agenda_work", "false"));
+
 }

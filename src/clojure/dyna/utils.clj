@@ -3,7 +3,9 @@
   (:require [clojure.main :refer [demunge]])
   (:require [clojure.reflect :refer [reflect]])
   (:require [clojure.set :refer [union]])
-  (:import [dyna DynaTerm]))
+  (:require [clojure.string])
+  (:import [dyna DynaTerm ThreadVar])
+  (:import [java.lang.reflect Method]))
 
 (def ^:dynamic debug-on-assert-fail true)
 
@@ -35,7 +37,7 @@
 ;;              func (make-function-depth i)]
 ;;          (eval (make-cr-function func))))
 
-(eval `(do ~@(for [i (range 1 10)
+(eval `(do ~@(for [i (range 1 5)
                    func (make-function-depth i)]
                (make-cr-function func))))
 
@@ -54,21 +56,15 @@
   (let [symbols (map key @clojure.lang.Compiler/LOCAL_ENV)]
     (into {} (for [s symbols]
                ;; this removes type tag info which causes the compiler to choke on the information
-               [`(quote ~s) (vary-meta s dissoc :tag)]))
-    ;;res (zipmap (map (fn [sym] `(quote ~sym)) symbols) (map symbol symbols))
-    ;;(aprint res)
-    ;;res
-    ;;     res `{}~@(apply concat (for [s symbols]
-    ;;                              `((quote ~(symbol s)) ~(symbol s))))]
-    ;; (print res)
-    ;; res
-        ))
+               [`(quote ~s) (vary-meta s dissoc :tag)]))))
 
-(defn eval-with-locals
+(defn- eval-with-locals
   "Evals a form with given locals.  The locals should be a map of symbols to
   values."
-  [locals form]
-  (binding [*locals* locals]
+  [locals namespace form]
+  (binding [*locals* locals
+            *ns* namespace]
+    (println form)
     (eval
      `(let ~(vec (mapcat #(list % `(*locals* '~%)) (keys locals)))
         ~form))))
@@ -78,7 +74,7 @@
 (def debug-useful-variables (atom {'aprint (constantly aprint)
                                    'reflect (constantly reflect)}))
 
-(defn- debug-repl-fn [prompt local-bindings ^Throwable traceback print-bindings]
+(defn- debug-repl-fn [prompt local-bindings ^Throwable traceback print-bindings current-namespace]
   (let [all-bindings  (merge (into {} (for [[k v] @debug-useful-variables]
                                         [k (v)]))
                              (into {} (for [[k v] (ns-publics 'dyna.rexpr-constructors)]
@@ -106,17 +102,22 @@
                      ;; TODO: this should attempt to lookup names in some context
                      :else res)))
      :prompt #(print prompt "=> ")
-     :eval (partial eval-with-locals all-bindings))))
+     :eval (partial eval-with-locals all-bindings current-namespace))))
+
+(defmacro debug-repl-force [prompt]
+  `(~debug-repl-fn ~prompt (debugger-get-local-bindings) (Throwable. "Entering Debugger") false ~*ns*))
 
 (if (= (System/getProperty "dyna.debug_repl" "true") "false")
-  (defn- debug-repl-fn [prompt local-bindings ^Throwable traceback print-bindings]))
-
-
-(defmacro debug-repl
-  "Starts a REPL with the local bindings available."
-  ([] `(debug-repl "dr"))
-  ([prompt] `(debug-repl ~prompt true))
-  ([prompt print-bindings] `(~debug-repl-fn ~prompt (debugger-get-local-bindings) (Throwable. "Entering Debugger") ~print-bindings)))
+  (do (defn- debug-repl-fn [prompt local-bindings ^Throwable traceback print-bindings current-namespace])
+      (defmacro debug-repl ([]) ([prompt]) ([prompt print-bindings]))
+      (defmacro debug-print [x]))
+  (do
+    (defn debug-print [x] (println x))
+    (defmacro debug-repl
+      "Starts a REPL with the local bindings available."
+      ([] `(debug-repl "dr"))
+      ([prompt] `(debug-repl ~prompt true))
+      ([prompt print-bindings] `(~debug-repl-fn ~prompt (debugger-get-local-bindings) (Throwable. "Entering Debugger") ~print-bindings ~*ns*)))))
 
 (defmacro debug-delay-ntimes [ntimes & body]
   (let [sym (gensym 'debug-delay)
@@ -206,21 +207,6 @@
         (debug-repl "failed override")))
     ret))
 
-
-;; (defmacro deftype-with-overrides
-;;   [name args overrides & bodies]
-;;   )
-
-;; (defn overrideable-function
-;;   "Allows for a function in a macro to be overriden via the optional arguments"
-;;   [opts name body]
-;;   (let [ret (atom body)]
-;;     (doseq [o opts]
-;;       (if (= (car o) name)
-;;         (reset! ret o)))
-;;     @ret))
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
@@ -280,7 +266,11 @@
 (defmacro debug-binding [b & body]
   (if debug-statements;(= "true" (System/getProperty "dyna.debug" "true"))
     `(binding ~b ~@body)
-    `(do ~@body)))
+    `(try (do ~@body) (finally nil)) ;; for some reason this try-finally is required
+                                     ;; otherwise it will deadlock during the tests
+                                     ;; sometimes.  I assume this is somehow
+                                     ;; preventing some kind of miss compilation somehow....????
+    ))
 
 (def ^{:private true} warnings-shown-so-far (atom {}))
 
@@ -288,9 +278,12 @@
   (let [shown-count (get @warnings-shown-so-far msg 0)]
     (when (< shown-count 3)
       (swap! warnings-shown-so-far update msg (fnil inc 0))
-      (println "=============================================")
-      (println "WARNING" msg)
-      (println "============================================="))))
+      (let [line-length (apply max (map count (.split (str msg) "\n")))
+            pre (apply str (repeat line-length "="))]
+        (println pre)
+        (print (str "\033[0;31m" (apply str (repeat (quot line-length 8) "Warning ")) "\033[0m\n"))
+        (println msg)
+        (println pre)))))
 
 
 ;; the clojure protocols are a bit more heavy weight than Java interfaces, as
@@ -339,7 +332,7 @@
                         (:members refl))
         super-members (into #{} (map (fn [x] [(name (:name x)) (count (:parameter-types x))]) (apply union (map #(get-superclass-methods (resolve %)) (:bases refl)))))
         this-var (gensym)
-        methods-to-create (into #{} (for [mth (.getDeclaredMethods cls)
+        methods-to-create (into #{} (for [^Method mth (.getDeclaredMethods cls)
                                           :when (not (contains? super-members [(.getName mth) (.getParameterCount mth)]))]
                                       [(.getName mth) (.getParameterCount mth)]))]
     `(let []  ;; we can do this as a single compile unit
@@ -368,7 +361,7 @@
 ;; create macros which are local.  this is modeled after
 ;; clojure.tools.macro/macrolet but this version is simpler and does not do
 ;; recursive expansion of the macros.
-(defn- macrolet-expand [mm form]
+(defn macrolet-expand [mm form]
   (cond (and (seq? form) (contains? mm (first form))) (apply (mm (first form)) (rest form))
         (symbol? form) form
         (seq? form) (reverse (into () (map #(macrolet-expand mm %) form)))
@@ -395,29 +388,24 @@
                                                             mat (re-matches #"%([0-9]+)" n)]
                                                         (if (= n "%")
                                                           (nth args 0)
-                                                          (if mat (nth args (Integer/valueOf (second mat)))
+                                                          (if mat (nth args (Integer/valueOf ^String (second mat)))
                                                               a)))
                                                       a))]
                                             r))]))]
     (macrolet-expand m `(do ~@body))))
 
-;; this would have to make some interface for the methods or this could just
-;; define methods which cast the type to the class, and then invoke
-
-(comment
-  (defmacro deflcass [name & methods+parent]
-    nil))
-
 
 (defn ensure-simple-symbol [s]
   (symbol (name s)))
 
-(defn ensure-set [s]
+;(def ensure-set set)
+#_(defn ensure-set [s]
   (if (set? s)
     s
     (into #{} s)))
 
 
+;; zipseq could just be (apply map list seqs)  Not sure if that is better or worse than this....
 (defn zipseq [& seqs]
   (if (or (empty? seqs) (some empty? seqs))
     ()
@@ -439,7 +427,8 @@
   (let [r (get map key :not-found-value)]
     (if (= :not-found-value r)
       (do
-        (debug-repl "key not found")
+        (println "Did not find key " key " in map " map)
+        (debug-repl "key not found" false)
         (throw (RuntimeException. (str "Key " key " not found in map"))))
       r)))
 
@@ -449,10 +438,80 @@
     (= n 0) (rest coll)
     :else (cons (first coll) (lazy-seq (drop-nth (rest coll) (- n 1))))))
 
+(defn subselect-list [coll]
+  (for [[i v] (zipseq (range) coll)]
+    [v (drop-nth coll i)]))
+
 (defn only [x] {:pre [(nil? (next x))]} (first x))
 
 
 (defmacro dyna-slow-check [& args]
   ;; extra debugging checks which are slow
-  nil;`(do ~@args)
+  ;(when (= "true" (System/getProperty "dyna.debug_slow_checks" "true")))
+  ;`(do ~@args)
   )
+
+(def ^:private tlocal-vars (set
+                            (map :name
+                                 (filter #(and (instance? clojure.reflect.Field %) ((:flags %) :public))
+                                         (:members (reflect ThreadVar))))))
+
+(defmacro def-tlocal [v]
+  (let [v (symbol (munge (name v)))]
+    (assert (tlocal-vars v))
+    nil))
+
+(defmacro tlocal [v]
+  (let [v (symbol (clojure.string/replace (munge (name v)) "_STAR_" ""))]
+    (assert (tlocal-vars v))
+    `(. ^ThreadVar (ThreadVar/get) ~v)))
+
+
+(defmacro tbinding-with-var [thread-var bnds & body]
+  (assert (even? (count bnds)))
+  (let [stash-names (into {} (for [[k _] (partition 2 bnds)
+                                   :let [k2 (symbol (munge (name k)))]]
+                               (do
+                                 (when-not (contains? tlocal-vars k2)
+                                   (println "variable " k2 " not found")
+                                   (println tlocal-vars)
+                                   (throw (IllegalArgumentException. (str "not a valid tlocal variable: " k2))))
+                                 [k2 (gensym (str "stash-" k2))])))]
+    `(let* [~@(apply concat (for [[k s] stash-names] ;; cache all of the old values
+                              [s `(. ^ThreadVar ~thread-var ~k)]))
+            ret#
+            (try
+              (do
+                ~@(for [[k v] (partition 2 bnds)] ;; set all of the values
+                    `(set! (. ^ThreadVar ~thread-var ~(symbol (munge (name k)))) ~v))
+                ~@body ;; evaluate the body
+                )
+              (finally
+                (do
+                  ~@(for [[k s] stash-names] ;; unset all of the bindings
+                      `(set! (. ^ThreadVar ~thread-var ~k) ~s)))))]
+       ret#)))
+
+(defmacro tbinding [bnds & body]
+  `(let* [^ThreadVar thread-var# (ThreadVar/get)]
+     (tbinding-with-var thread-var# ~bnds ~@body)))
+
+(comment
+
+  (defmacro tlocal-def [v]
+    `(def ^{:dynamic true} ~v))
+
+  (defmacro tlocal [v]
+    v)
+
+  (defmacro tbinding [bnds & body]
+    `(binding ~bnds ~@body)))
+
+(defmacro debug-tbinding [b & body]
+  (if debug-statements;(= "true" (System/getProperty "dyna.debug" "true"))
+    `(tbinding ~b ~@body)
+    `(try (do ~@body) (finally nil)) ;; for some reason this try-finally is required
+                                     ;; otherwise it will deadlock during the tests
+                                     ;; sometimes.  I assume this is somehow
+                                     ;; preventing some kind of miss compilation somehow....????
+    ))

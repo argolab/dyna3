@@ -1,0 +1,94 @@
+* bugs
+1. run-iterator is calling simplify after it binds each variable.  This is
+   causing the R-exprs to perform a lot of rewriting, hence be slow.  This needs
+   a "fast fail" flag which will attempt to just to simplification operations
+   which can quickly get done without causing too much rewriting.  Even if we
+   keep going with an R-expr which is equivalent to 0 (without known) it will
+   still be correct, but we will just waste time on additional inner loops
+   - this is now setting a fast fail flag, which blocks some operations such as
+     expanding user calls.  This should at least prevent those from running and
+     getting the result which corresponds with an error
+
+2. I think that variable renaming is causing the quicksort program to fail atm
+   - when one of the disjuncts causes it to unify with an expression, it will
+     result in it finding that there is some result which handle that value.
+
+3. factorial program is not terminating atm, but somehow pressing Ctrl-C is able
+   to cause it to stop and return the right answer?  Now sure why it would get
+   interrupted and then somehow get the right answer.  Though I suppose this
+   could be something with backchaining going on for too long?  It would have
+   that there is something that might cause it to run for too long.
+   - pressing Ctrl-C will set the thread interrupted flag, which stops
+     simplification from continuing to run in a loop.
+   - now this is just not stopping anymore, so seems like it is doing too many
+     steps of simplification.
+
+** bugs fixed
+1. Iterator when a variable is already bound to a constant, need to skip ahread in the iterator sequence
+2. ~$free~ when there is some value used in ~$memo~, the value will be passed.
+   This should really just behave more like a no-op in this case.
+2. disjunct-op needs to allow for taking inner disjuncts which are returned and
+   merging it into its internal representation.
+   - this issue can be provoked by setting the simplify method of run-iterator
+     to the identity (disabling simplify during each step of the iteration)
+2. Macros are not subsuiting the variables in correctly it seems
+
+** bugs deferred
+1. make-memoization-controller-function is supposed to generate efficient
+   memoization controller functions which do not have to call into R-exprs every
+   time to evaluate the policy.  This seems to currently be buggy.
+   - going to just use the R-expr representation every time.  Will eventually
+     tie in the JIT such that it should get a good generated version of the
+     code, so it hopefully will not be too bad.
+
+* enhancements
+1. disjunct-op should know information about what is being stored.  There are
+   currently a lot of calls to perform rewriting/simplification, and if we knew
+   that there was nothing but multiplicies inside of the trie (meaning it only
+   contains ground values), then it would be able to short cut a lot of the operations.
+2. disjunct-op is being called with simplify many times where the variable
+   bindings are unlikely to change that much.  We should save the current
+   bindings into the variable-slots and then will avoid redoing a simplification
+   of the trie in the case that there are no additional variables which are
+   ground.
+
+3. the clojure ^:dynamic is very slower, as it indirects the reads through a
+   clojure hash map.  Ideally convert those to a java ThreadLocal which should
+   be able to use an array access and be efficient.  However, this will not play
+   nicely with the
+
+
+* further out enhancements
+1. JIT compiler
+   - integrate into the looping such that it will use it to perform the
+     simplification for a given value of an expression.
+
+2. memoization point wise update when a user-definition is changed.  This needs
+   to not rebuild the memo tables from scratch, as that is going to be slow.
+
+
+3. should track what the user call stack is for different operations.  Currently
+   it is too hard to figure out where something is going wrong.  if it tracked
+   the call stack, then it would be able to figure out which of the operations
+   will correspond to it getting some result.  But the call stack is going to
+   become more complicated when it has different things like memoization
+   involved, as those call stack sequence will not really correspond with
+   anything.
+   - I suppose that debugging the program could also be done by adding
+     additional rules to track stuff, but not sure if that will work out
+     correctly either?  I think that debugging the programs is just going to
+     difficult in general given the number of things which are getting combined
+     together to make a final result.  If everything is "simple" meaning that it
+     is all ground values, then there is not that much of an issue, but once
+     there are complex delayed constraints, those constraints are going to cause
+     it to get some result which can only happen in the exact case where all of
+     those delayed constraints combine together to make some inference.
+
+
+* working on a large relational system
+https://news.ycombinator.com/item?id=18442941
+- oracle database where new flags are added to handle the different use cases
+https://www.postgresql.org/message-id/flat/31cc6df9-53fe-3cd9-af5b-ac0d801163f4%40iki.fi
+- postgres has around 1666 variables which are "global" to a connection to tack
+  various aspects of the session state.  Conceptually similar to the case we
+  have here

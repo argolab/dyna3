@@ -1,4 +1,4 @@
-(ns dyna.rexpr-jit
+(ns dyna.rexpr-jit-v1
   (:require [dyna.utils :refer :all])
   (:require [dyna.rexpr :refer :all])
   (:require [dyna.base-protocols :refer :all])
@@ -6,6 +6,8 @@
   (:require [dyna.rexpr-aggregators-optimized])
   (:require [dyna.rexpr-constructors :refer [is-disjunct-op?]])
   (:import [dyna.rexpr proj-rexpr]))
+
+(assert false) ;; not used
 
 ;; this is going to want to cache the R-expr when there are no arguments which are "variables"
 ;; so something like multiplicy can be just a constant value
@@ -713,3 +715,14 @@
             ;(debug-repl "projqq")
             nr)
           (make-proj A ret))))))
+
+
+(defn simplify-jit-create-rewrites [rexpr]
+  ;; this is called from the main rewrite function which will create new rewrites inside of the R-expr
+  (if-not *generate-new-jit-rewrites*
+    rexpr
+    (let []
+      (assert (context/has-context))
+      rexpr)))
+
+(intern 'dyna.rexpr 'simplify-jit-create-rewrites simplify-jit-create-rewrites)
