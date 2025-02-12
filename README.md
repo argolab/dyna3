@@ -9,6 +9,8 @@ language.
 ```
 This will compile the dyna runtime and start the dyna REPL.
 
+Alternatively, an online demo can be found at https://dyna.org/dyna3-demo/
+
 # Building
 ```
 make
