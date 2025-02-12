@@ -83,7 +83,7 @@ public final class ThreadVar {
     public boolean auto_run_agenda_before_query = Boolean.parseBoolean(System.getProperty("dyna.auto_run_agenda", "true"));
     //public boolean use_optimized_rexprs = Boolean.parseBoolean(System.getProperty("dyna.optimized_rexprs", "true"));
 
-    public static boolean jit_default_state = true;//Boolean.parseBoolean(System.getProperty("dyna.enable_jit", "false"));
+    public static boolean jit_default_state = Boolean.parseBoolean(System.getProperty("dyna.enable_jit", "false"));
 
     public boolean use_optimized_disjunct = true;
     public boolean generate_new_jit_rewrites = jit_default_state;
