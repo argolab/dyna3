@@ -212,8 +212,9 @@
                                   (if (is-disjunct-op? new-child-rexpr)
                                     (let [child-trie ^PrefixTrie (:rexprs new-child-rexpr)
                                           child-vars (:disjunction-variables new-child-rexpr)
+                                          known-values (vec (map #(get-value-in-context % child-context) child-vars))
                                           new-order (vec (map (zipmap child-vars (range)) dj-vars))
-                                          t-reordered (trie-reorder-keys child-trie new-order)]
+                                          t-reordered (trie-reorder-keys-subselect child-trie new-order known-values)]
                                       (vswap! ret-children trie-merge t-reordered)
                                       (vswap! num-children #(+ 2 %)) ;; there should be at least 2 children getting added, so we will still return a trie in the end
                                       )
