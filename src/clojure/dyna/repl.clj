@@ -128,7 +128,7 @@ print fib(100).
           (let [all-1 (every? #(= (make-multiplicity 1) (second %)) @to-print)
                 print-r (fn [[vars rexpr]]
                           (let [var-str (str (:tuple-left print-symbols) " "
-                                             (let [aa (join ", " (map #(var-print vars %) vars))
+                                             (let [aa (join ", " (remove nil? (map #(var-print vars %) vars)))
                                                    bb (join ", " (map #(:varname %) (remove #(or (contains? vars %)
                                                                                                  (= (:varname %) "$query_result_var"))
                                                                                             (exposed-variables rexpr))))]
